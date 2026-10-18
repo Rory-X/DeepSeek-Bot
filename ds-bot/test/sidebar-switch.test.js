@@ -103,6 +103,7 @@ test('an open sidebar has a button that collapses it; the rail leaves that to th
     useRoster: pick => pick(roster), useUi: pick => pick({ unread: {} }), useRegistry: pick => pick({}),
     useSessions: pick => pick({ ids: [], byId: {} }), useUpdate: () => ({}),
     useMobileNav: pick => pick(false), useSurface: pick => pick({ plain: false }),
+    useNavLevel: pick => pick('list'),
     actions: { toggleSidebar: () => calls.push('toggle') },
   })
   const find = (node, match) => {
@@ -121,13 +122,14 @@ test('an open sidebar has a button that collapses it; the rail leaves that to th
 // A phone shows the list as a page of its own. The sidebar hands over to it rather than
 // showing the rail, so the DOM never carries two copies of the list for the test bench to
 // count, and the page's root carries the hook the bench reads.
-test('a phone renders the list page in place of the sidebar', () => {
+test('a phone renders the list page in place of the sidebar, and only at the list level', () => {
   const roster = { bots: [], rooms: [], agents: [], byId: {}, ready: true }
-  const props = mobile => ({
+  const props = (mobile, level = 'list') => ({
     wide: false,
     useRoster: pick => pick(roster), useUi: pick => pick({ unread: {} }), useRegistry: pick => pick({}),
     useSessions: pick => pick({ ids: [], byId: {} }), useUpdate: () => ({}),
     useMobileNav: pick => pick(mobile), useSurface: pick => pick({ plain: false }),
+    useNavLevel: pick => pick(level),
     actions: {},
   })
   const classes = node => (node?.props?.className ?? '').split(' ')
@@ -143,6 +145,11 @@ test('a phone renders the list page in place of the sidebar', () => {
   const page = collect(render(TeamSidebar(props(true))))
   assert.deepEqual(page.filter(node => classes(node).includes('bt-nav-page')).map(node => node.props['data-bt-nav']), ['list'])
   assert.equal(page.some(node => classes(node).includes('bt-side')), false)
+  // Left mounted over the conversation, the page would still intercept the taps meant for
+  // the back control, so the chat level keeps it out of the DOM altogether.
+  const chat = collect(render(TeamSidebar(props(true, 'chat'))))
+  assert.equal(chat.some(node => classes(node).includes('bt-nav-page')), false)
+  assert.equal(chat.some(node => classes(node).includes('bt-side')), false)
   const sidebar = collect(render(TeamSidebar(props(false))))
   assert.equal(sidebar.some(node => classes(node).includes('bt-side')), true)
   assert.equal(sidebar.some(node => node.props['data-bt-nav'] !== undefined), false)

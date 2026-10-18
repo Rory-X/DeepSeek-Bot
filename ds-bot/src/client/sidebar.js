@@ -276,14 +276,18 @@ export function TeamSidebar(props) {
     actions.openPalette(event.key)
   }
   // On a phone the list is a page of its own: the sidebar hands over to it instead of
-  // showing the rail, so only one copy of the list is ever mounted.
-  const onListPage = props.useMobileNav(value => value) && !props.useSurface(value => value.plain)
-  if (onListPage) {
+  // showing the rail, so only one copy of the list is ever mounted. It is mounted at the
+  // list level only: over the conversation it would still take the taps meant for the back
+  // control, and the shell hides the sidebar column at both levels anyway.
+  const onPhone = props.useMobileNav(value => value) && !props.useSurface(value => value.plain)
+  const atList = props.useNavLevel(value => value === 'list')
+  if (onPhone && atList) {
     return createPortal(h(MobileNavList, {
       roster, actions, listRef, main, order, markedUnread, typeToSearch,
       rowProps: { ...rowProps, wide: true }, useUpdate: props.useUpdate,
     }), document.body)
   }
+  if (onPhone) return null
   return h('div', { className: wide ? 'bt-side' : 'bt-side bt-rail', onKeyDown: typeToSearch },
     wide ? h('div', { className: 'bt-side-top' },
       h('span', { className: 'bt-brand' }, h(BrandMark, { size: 22 }), h(BrandName)),

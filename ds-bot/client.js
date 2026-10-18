@@ -2645,14 +2645,20 @@ ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:n
 [class*="_widthHandle"]{display:none!important}
 /* On a phone the Bot list is a page of its own, so the shell's sidebar goes away for the
    whole surface. Below 1024px the shell keeps a 56px rail for a collapsed sidebar and
-   offers no way to set that track to zero, so the frame's grid is closed here — the
-   sidebar track only; the conversation and the shell's right panel keep their tracks.
+   offers no way to set that track to zero, so the frame's grid is closed here: the sidebar
+   track, and the shell's right panel, which its own column math cannot keep open this
+   narrow (a panel track needs 300px beside a 400px conversation, so it is always collapsed
+   under this width). Hiding a column takes it out of the grid flow, so the conversation is
+   pinned to its track; without that it lands in the 0px track and the right panel's
+   still-mounted slot sits over it, swallowing the taps meant for the conversation's own
+   controls.
    The media query is the device test (the same string the navigation state reads, from
    media.js); the body attribute narrows it to the Bot surface, which a media query cannot
    see — an Agent Session keeps the shell's own sidebar. */
 @media ${MOBILE_NAV}{
-${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) minmax(0,70vw)!important}
-${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"]{display:none!important}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) 0!important}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"],${NOT_DESKTOP} body[data-bt-nav] [data-rightbar-col]{display:none!important}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
 }
 
 .bt-voice-pane{flex-direction:column;align-items:center;justify-content:center;animation:bt-fade .2s ease-out}
@@ -5567,8 +5573,9 @@ function TeamSidebar(props) {
     event.preventDefault();
     actions.openPalette(event.key);
   };
-  const onListPage = props.useMobileNav((value) => value) && !props.useSurface((value) => value.plain);
-  if (onListPage) {
+  const onPhone = props.useMobileNav((value) => value) && !props.useSurface((value) => value.plain);
+  const atList = props.useNavLevel((value) => value === "list");
+  if (onPhone && atList) {
     return (0, import_react_dom3.createPortal)((0, import_react9.createElement)(MobileNavList, {
       roster,
       actions,
@@ -5581,6 +5588,7 @@ function TeamSidebar(props) {
       useUpdate: props.useUpdate
     }), document.body);
   }
+  if (onPhone) return null;
   return (0, import_react9.createElement)(
     "div",
     { className: wide ? "bt-side" : "bt-side bt-rail", onKeyDown: typeToSearch },
