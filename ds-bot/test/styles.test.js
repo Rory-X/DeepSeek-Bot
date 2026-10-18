@@ -189,13 +189,21 @@ test('the phone pins the page against bounce, refresh and zoom', () => {
   assert.match(field, /select/, 'a select zooms it too')
 })
 
-// The shell's sidebar comes back on a phone as an overlay, not a column: it leaves the grid
-// so the conversation keeps its width, and a scrim is what closes it.
-test('the phone sidebar overlay is out of the grid and has a scrim', () => {
+// The shell's right panel goes fullscreen below 768px, and its column is the box it
+// positions itself against: hiding that column is what left the header's button doing
+// nothing. It comes back, out of the grid, while the panel is fullscreen.
+test('the phone lets the shell\'s fullscreen right panel through', () => {
   const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
-  const column = css.split('\n').find(line => line.includes('body[data-bt-shell-side]'))
-  assert.ok(column, 'the overlay rule is there')
-  assert.match(column, /position:fixed!important/)
-  assert.match(column, /width:min\(320px,86%\)/)
-  assert.ok(css.includes('.bt-shell-scrim{position:fixed'), 'the scrim is there')
+  const shown = css.split('\n').find(line => line.includes('data-rightbar-fullscreen] [data-rightbar-col]'))
+  assert.ok(shown, 'the fullscreen rule is there')
+  assert.match(shown, /display:block!important/)
+  assert.match(shown, /position:fixed!important/)
+  const hidden = css.split('\n').find(line => line.includes('body[data-bt-nav] [data-rightbar-col]'))
+  assert.match(hidden, /display:none!important/, 'it stays hidden while collapsed')
+  // A strip of the conversation stays visible, and the scrim over it is the way out.
+  assert.match(shown, /width:min\(360px,88%\)!important/, 'the strip beside the panel is left to the scrim')
+  const panel = css.split('\n').find(line => line.includes('[data-sidebar-right-panel=fullscreen]'))
+  assert.match(panel, /width:100%!important/)
+  assert.match(panel, /--dsh-sidebar-width:100%!important/)
+  assert.ok(css.includes('.bt-right-scrim{display:none}'), 'the scrim is inert until the panel is open')
 })

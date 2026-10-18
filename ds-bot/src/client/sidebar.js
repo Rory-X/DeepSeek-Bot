@@ -268,16 +268,12 @@ export function TeamSidebar(props) {
   // On a phone the list is a page of its own: the sidebar hands over to it instead of
   // showing the rail, so only one copy of the list is ever mounted. It is mounted at the
   // list level only: over the conversation it would still take the taps meant for the back
-  // control. The one exception is the shell's own sidebar, opened as an overlay: then the
-  // list lives in that column and the page stands down, never both at once.
+  // control, and the shell hides the sidebar column at both levels anyway.
   const onPhone = props.useMobileNav(value => value) && !props.useSurface(value => value.plain)
   const atList = props.useNavLevel(value => value === 'list')
-  const shellSide = props.useUi(value => value.shellSide === true)
-  const asOverlay = onPhone && shellSide
-  const sidebarWide = wide || asOverlay
-  useListGlide(listRef, sidebarWide, order.map(entry => entry.item.id).join(','))
+  useListGlide(listRef, wide, order.map(entry => entry.item.id).join(','))
   useLandOnMainBot(roster, useSessions, actions)
-  const rowProps = { roster, actions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, wide: sidebarWide }
+  const rowProps = { roster, actions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, wide }
   // Typing while the sidebar has focus starts a search.
   const typeToSearch = (event) => {
     if (event.defaultPrevented || event.key.length !== 1 || event.key === ' ' || event.metaKey || event.ctrlKey || event.altKey || event.nativeEvent.isComposing) return
@@ -285,27 +281,25 @@ export function TeamSidebar(props) {
     event.preventDefault()
     actions.openPalette(event.key)
   }
-  if (onPhone && !asOverlay && atList) {
+  if (onPhone && atList) {
     return createPortal(h(MobileNavList, {
       roster, actions, listRef, main, order, markedUnread, typeToSearch,
       // The page is the full-width list: its rows carry names, previews and the unread dot.
       rowProps: { ...rowProps, wide: true }, useUpdate: props.useUpdate,
     }), document.body)
   }
-  if (onPhone && !asOverlay) return null
-  return h('div', { className: sidebarWide ? 'bt-side' : 'bt-side bt-rail', onKeyDown: typeToSearch },
-    sidebarWide ? h('div', { className: 'bt-side-top' },
+  if (onPhone) return null
+  return h('div', { className: wide ? 'bt-side' : 'bt-side bt-rail', onKeyDown: typeToSearch },
+    wide ? h('div', { className: 'bt-side-top' },
       h('span', { className: 'bt-brand' }, h(BrandMark, { size: 22 }), h(BrandName)),
       h(UpdateButton, { useUpdate: props.useUpdate, actions }),
       h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Search'), title: t('Search'), onClick: () => actions.openPalette() }, h(SearchIcon)),
       h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon)),
-      // The shell's collapse switch is the shell's own column; in the phone overlay the
-      // scrim, Escape and the header button are the way out.
-      asOverlay ? null : h('button', { type: 'button', className: 'bt-round bt-side-collapse', 'aria-label': t('Collapse sidebar'), title: t('Collapse sidebar'), onClick: () => actions.toggleSidebar() }, h(SidebarIcon)))
+      h('button', { type: 'button', className: 'bt-round bt-side-collapse', 'aria-label': t('Collapse sidebar'), title: t('Collapse sidebar'), onClick: () => actions.toggleSidebar() }, h(SidebarIcon)))
       : h(Fragment, null,
           h(UpdateButton, { useUpdate: props.useUpdate, actions }),
           h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
-    sidebarWide && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
+    wide && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
     h(BotList, { listRef, main, order, roster, markedUnread, rowProps }))
 }
 

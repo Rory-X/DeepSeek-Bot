@@ -51,7 +51,7 @@ export function apply(ctx) {
   let seenAt = seenStore.read()
   // `details` is the panel's subject (a Session id); `view` picks details or the
   // subject Bot's browser inside it.
-  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {}, shellSide: false })
+  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} })
   // Bot mode paints the whole team surface; Agent mode withdraws every slot and
   // style so the shell's own interface returns. `plain` stays false until a Bot-mode
   // view hosts a plain session, which drops only the conversation replacements.
@@ -82,7 +82,7 @@ export function apply(ctx) {
   const setPlain = (plain) => surface.set(state => (state.plain === plain ? state : { ...state, plain }))
   // A DSH Agent Session shows the plain conversation: the Bot details and browser
   // panels would follow it and report it is not on the team, so they close.
-  const dropPanels = () => ui.set(state => (state.details || state.renaming || state.shellSide ? { ...state, details: null, view: 'details', renaming: false, tab: null, shellSide: false } : state))
+  const dropPanels = () => ui.set(state => (state.details || state.renaming ? { ...state, details: null, view: 'details', renaming: false, tab: null } : state))
   // A Bot's chat spans several parts, so when it was last left is kept per Bot.
   const seenKey = id => roster.getSnapshot().byId?.[id]?.id ?? id
   const leaveVisits = (ids) => {
@@ -384,7 +384,6 @@ export function apply(ctx) {
       if (isAgentSessionId(id)) return actions.openAgentSession(id)
       // Opening a conversation is what leaves the phone's list page.
       navLevel.set('chat')
-      actions.closeShellSide()
       ui.set(state => (state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state))
       setPlain(false)
       const target = partFor(id)
@@ -395,7 +394,6 @@ export function apply(ctx) {
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
       navLevel.set('chat')
-      actions.closeShellSide()
       ui.set(state => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: 'details', renaming: false, tab: null }))
       setPlain(true)
       expected = sessionId
@@ -462,11 +460,6 @@ export function apply(ctx) {
     },
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
     toggleSidebar: () => { ctx.layout.toggleSidebar() },
-    // The shell's own sidebar — the team list and whatever other plugins put beside it
-    // (files, terminals). On a phone it is an overlay over the conversation, opened from
-    // the conversation header, closed by the scrim, Escape, or leaving the conversation.
-    toggleShellSide: () => ui.set(state => ({ ...state, shellSide: !state.shellSide })),
-    closeShellSide: () => ui.set(state => (state.shellSide ? { ...state, shellSide: false } : state)),
     // Back to the phone's list page, from the conversation's back control. Leaving the
     // conversation closes the details pane with it.
     showBotList: () => {
@@ -479,7 +472,7 @@ export function apply(ctx) {
       if (mode !== 'bot' && mode !== 'agent') return
       if (surface.getSnapshot().mode === mode) return
       if (mode === 'agent') {
-        ui.set(state => ({ ...state, details: null, view: 'details', settings: null, palette: null, newChat: null, menu: null, voice: null, exchange: null, memory: null, toast: null, shellSide: false }))
+        ui.set(state => ({ ...state, details: null, view: 'details', settings: null, palette: null, newChat: null, menu: null, voice: null, exchange: null, memory: null, toast: null }))
       }
       writeMode(mode)
       surface.set(state => ({ ...state, mode }))
@@ -616,29 +609,20 @@ export function apply(ctx) {
   const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel } })
   // The level is published on <body> so the styles, the test bench and a screen reader all
   // read the same fact; it is absent whenever the navigation is not in effect (a desktop,
-  // or the plain surface an Agent Session gets). The shell's sidebar is an overlay only
-  // while that navigation is in charge: anywhere else the shell owns that column.
+  // or the plain surface an Agent Session gets).
   const syncNav = () => {
-    const nav = mobileNav.getSnapshot() && !surface.getSnapshot().plain
-    if (nav) document.body.dataset.btNav = navLevel.getSnapshot()
+    if (mobileNav.getSnapshot() && !surface.getSnapshot().plain) document.body.dataset.btNav = navLevel.getSnapshot()
     else delete document.body.dataset.btNav
-    if (nav && ui.getSnapshot().shellSide) document.body.dataset.btShellSide = ''
-    else delete document.body.dataset.btShellSide
   }
   ctx.effect(() => {
-    const watch = watchMobileNav(value => {
-      mobileNav.set(value)
-      navLevel.set('list')
-      if (!value) actions.closeShellSide()
-    })
+    const watch = watchMobileNav((value) => { mobileNav.set(value); navLevel.set('list') })
     mobileNav.set(watch.read())
-    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav), ui.subscribe(syncNav)]
+    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav)]
     syncNav()
     return () => {
       watch.dispose()
       for (const off of offs) off()
       delete document.body.dataset.btNav
-      delete document.body.dataset.btShellSide
     }
   }, 'ds-bot: mobile navigation')
   ctx.effect(() => noticeApprovals({

@@ -166,8 +166,6 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 /* The phone's conversation is the second level; this leaves it for the list page. It sits
    where the shell's own leading control does, opposite the right-sidebar button. */
 .bt-back{position:absolute;left:12px;top:4px;pointer-events:auto}
-/* The shell's sidebar, reachable on a phone: beside the back control, out of the pill's way. */
-.bt-shell-side{position:absolute;left:46px;top:4px;pointer-events:auto}
 .bt-pill:active{transform:scale(.965)}
 .bt-pill-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .bt-pill-mem{flex:none;display:inline-flex;width:0;margin-left:-8px;overflow:hidden;transition:${spring(SPRING_SHAPE, 'width', 'margin-left')}}
@@ -571,6 +569,11 @@ ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:n
    pinned to its track; without that it lands in the 0px track and the right panel's
    still-mounted slot sits over it, swallowing the taps meant for the conversation's own
    controls.
+   The right panel is the exception: the sidebar-right package makes it fullscreen below
+   768px, and its column is the box that panel positions itself against, so hiding the
+   column is what left the conversation header's button doing nothing. While the panel is
+   fullscreen the column comes back out of the grid and covers the viewport, and the
+   conversation keeps its width either way.
    The media query is the device test (the same string the navigation state reads, from
    media.js); the body attribute narrows it to the Bot surface, which a media query cannot
    see — an Agent Session keeps the shell's own sidebar. */
@@ -578,13 +581,15 @@ ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:n
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) 0!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"],${NOT_DESKTOP} body[data-bt-nav] [data-rightbar-col]{display:none!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
-/* The shell's own sidebar (the team list, and the file, terminal and other plugin entries
-   beside it) stays reachable on a phone: opened from the conversation header it comes back
-   as an overlay over the conversation, out of the grid so the chat keeps its full width.
-   The scrim sits in the shell's overlay layer, under this column, and closes it. */
-${NOT_DESKTOP} body[data-bt-shell-side] [class*="_sidebarCol"]{display:block!important;position:fixed!important;inset:0 auto 0 0;width:min(320px,86%);z-index:38;overflow-y:auto;overscroll-behavior:contain;border-right:0;padding-left:env(safe-area-inset-left);box-shadow:0 16px 44px rgba(0,0,0,.28)}
-.bt-shell-scrim{position:fixed;inset:0;background:rgba(0,0,0,.32);animation:bt-fade .16s ease-out}
-body[data-ds-dark-theme] .bt-shell-scrim{background:rgba(0,0,0,.5)}
+/* The panel spans the viewport by its own rule; on a phone it keeps a strip of the
+   conversation visible, so the scrim below is a way out that is not the panel's own chrome.
+   The column is the panel's containing block and shrinks with it, which is what leaves that
+   strip to the scrim; the panel's width and its collapsed translate are the same value. */
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;top:0;bottom:0;right:0;left:auto;width:min(360px,88%)!important;z-index:39;padding-right:env(safe-area-inset-right)}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col] [data-sidebar-right-panel=fullscreen]{width:100%!important;--dsh-sidebar-width:100%!important}
+.bt-right-scrim{display:none}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] .bt-right-scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,.32);animation:bt-fade .16s ease-out}
+body[data-ds-dark-theme] .bt-right-scrim{background:rgba(0,0,0,.5)}
 /* The page itself must not move under a finger: no rubber-band, no pull-to-refresh, and no
    pinch or double-tap zoom. Panning stays in the allowed set, so the chat and every inner
    list keep scrolling; the page has nothing to pan, its frame is the viewport. */

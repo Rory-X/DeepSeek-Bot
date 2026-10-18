@@ -124,9 +124,9 @@ test('an open sidebar has a button that collapses it; the rail leaves that to th
 // count, and the page's root carries the hook the bench reads.
 test('a phone renders the list page in place of the sidebar, and only at the list level', () => {
   const roster = { bots: [], rooms: [], agents: [], byId: {}, ready: true }
-  const props = (mobile, level = 'list', shellSide = false) => ({
+  const props = (mobile, level = 'list') => ({
     wide: false,
-    useRoster: pick => pick(roster), useUi: pick => pick({ unread: {}, shellSide }), useRegistry: pick => pick({}),
+    useRoster: pick => pick(roster), useUi: pick => pick({ unread: {} }), useRegistry: pick => pick({}),
     useSessions: pick => pick({ ids: [], byId: {} }), useUpdate: () => ({}),
     useMobileNav: pick => pick(mobile), useSurface: pick => pick({ plain: false }),
     useNavLevel: pick => pick(level),
@@ -152,16 +152,6 @@ test('a phone renders the list page in place of the sidebar, and only at the lis
   const chat = collect(render(TeamSidebar(props(true, 'chat'))))
   assert.equal(chat.some(node => classes(node).includes('bt-nav-page')), false)
   assert.equal(chat.some(node => classes(node).includes('bt-side')), false)
-  // The shell's sidebar, opened as an overlay, takes the list: the page stands down, so the
-  // DOM never carries two copies of it. The shell's own collapse switch would move the
-  // shell's column rather than this overlay, so it is left out.
-  for (const level of ['list', 'chat']) {
-    const overlay = collect(render(TeamSidebar(props(true, level, true))))
-    assert.equal(overlay.some(node => classes(node).includes('bt-nav-page')), false, `no list page at ${level}`)
-    assert.equal(overlay.some(node => classes(node).includes('bt-side')), true, `the sidebar renders at ${level}`)
-    assert.equal(overlay.some(node => classes(node).includes('bt-rail')), false)
-    assert.equal(overlay.some(node => classes(node).includes('bt-side-collapse')), false)
-  }
   const sidebar = collect(render(TeamSidebar(props(false))))
   assert.equal(sidebar.some(node => classes(node).includes('bt-side')), true)
   assert.equal(sidebar.some(node => node.props['data-bt-nav'] !== undefined), false)
