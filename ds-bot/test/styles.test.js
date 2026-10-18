@@ -189,20 +189,18 @@ test('the phone pins the page against bounce, refresh and zoom', () => {
   assert.match(field, /select/, 'a select zooms it too')
 })
 
-// The phone's conversation header gives way to a thin bar: the state is published on the
-// body, the bar names the conversation and holds a 44px way back, and reduced motion keeps
-// the whole thing still.
-test('the phone header collapses to a thin bar', () => {
+// The Main Bot's card, once it has scrolled away on a phone, is a small centred pill
+// under the top row: a full-width bar would be a different design, and a pill that is not
+// centred is not what the phone asks for.
+test('the phone stands in for the Main Bot card with a centred pill', () => {
   const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
-  const collapsed = css.split('\n').find(line => line.includes('body[data-bt-head=collapsed]'))
-  assert.ok(collapsed, 'the collapsed state moves the shell header')
-  assert.match(collapsed, /translateY\(-100%\)/)
-  const bar = css.split('\n').find(line => line.includes('.bt-head-bar{'))
-  assert.ok(bar, 'the bar is there')
-  assert.match(bar, /env\(safe-area-inset-top\)/)
-  const go = css.split('\n').find(line => line.includes('.bt-head-bar-go{'))
-  assert.match(go, /width:44px;height:44px/)
-  assert.ok(css.includes('prefers-reduced-motion:reduce') && /header\[class\*="_header"\]:has\(\.bt-head\)\{transition:none\}/.test(css), 'reduced motion keeps it still')
+  const pill = css.split('\n').find(line => line.includes('.bt-chief-bar{'))
+  assert.ok(pill, 'the pill is there')
+  assert.match(pill, /left:50%;transform:translateX\(-50%\)/)
+  assert.match(pill, /border-radius:999px/)
+  assert.equal(/left:0;right:0/.test(pill), false, 'not a full-width bar')
+  const arrow = css.split('\n').find(line => line.includes('.bt-chief-go{'))
+  assert.match(arrow, /width:44px;height:44px/)
 })
 
 // The shell's right panel goes fullscreen below 768px, and its column is the box it

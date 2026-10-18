@@ -585,23 +585,20 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
    positions itself against: the column covers the viewport with it, so the panel is the
    whole screen and the shell's own chrome inside it is the way out. */
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
-/* The phone's conversation header follows the conversation: scrolling down gives it up to
-   a thin bar that names the conversation and holds the way back, and scrolling up or
-   reaching the top brings it back. The shell renders that header as an absolute overlay
-   with a gradient of its own, so the whole element moves — nothing is left behind. */
-${NOT_DESKTOP} header[class*="_header"]:has(.bt-head){transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},opacity .16s ease-out}
-${NOT_DESKTOP} body[data-bt-head=collapsed] header[class*="_header"]:has(.bt-head){transform:translateY(-100%);opacity:0}
-.bt-head-bar{position:fixed;top:0;left:0;right:0;z-index:12;display:flex;align-items:center;gap:6px;height:calc(44px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 4px 0 8px;box-sizing:border-box;background:var(--bt-main);border-bottom:.5px solid var(--bt-line);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;animation:bt-veil-in .16s ease-out}
-.bt-head-bar-go{flex:none;width:44px;height:44px;border-radius:12px}
-/* The header's own controls move into the bar, so they keep their place on screen: the
-   corners stop being absolute and the pill becomes the bar's name, not a pill on top of it. */
-body[data-bt-head=collapsed] .bt-head-bar .bt-back,body[data-bt-head=collapsed] .bt-head-bar .bt-head-side{position:static}
-body[data-bt-head=collapsed] .bt-head-bar .bt-pill{flex:1 1 auto;min-width:0;max-width:none;height:34px;gap:6px;padding:3px 8px 3px 3px;border:0;background:none;box-shadow:none}
-body[data-bt-head=collapsed] .bt-head-bar .bt-pill-go{display:none}
-@media (prefers-reduced-motion:reduce){
-${NOT_DESKTOP} header[class*="_header"]:has(.bt-head){transition:none}
-.bt-head-bar{animation:none}
-}
+/* The Main Bot's card is the list's first item; once it has scrolled out of view a small
+   pill under the top row stands in for it, centred, holding the mark, the name and the way
+   back to the full card. It overlays the list instead of taking a row: the list's scroll
+   geometry must not change when the pill comes and goes, or the content under the reader's
+   finger would move and the card could slide back into view by itself. */
+.bt-nav-body{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:4px;height:44px;padding:0 4px 0 6px;border:0;border-radius:999px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;cursor:pointer;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
+.bt-chief-bar[data-open]{gap:8px;height:auto;min-height:44px;padding:6px 6px 6px 8px;border-radius:20px}
+.bt-chief-text{display:flex;flex-direction:column;min-width:0;max-width:56%;text-align:left}
+.bt-chief-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:20px;font-weight:600}
+.bt-chief-role{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+.bt-chief-go{flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:999px;color:var(--bt-ink-2);transition:transform .16s ease-out}
+.bt-chief-bar[data-open] .bt-chief-go{transform:rotate(180deg)}
+@media (prefers-reduced-motion:reduce){.bt-chief-bar,.bt-chief-go{animation:none;transition:none}}
 /* The phone's list page opens the account menu from its own brand: the entries take a
    touch height, the menu scrolls where it is long, and it stays clear of the home bar. */
 ${NOT_DESKTOP} .bt-nav-account{cursor:pointer;min-height:44px;padding:6px 10px}

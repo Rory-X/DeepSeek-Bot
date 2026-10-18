@@ -604,7 +604,7 @@ const ZH = {
   'Checking memory': '正在查看记忆',
   'Memory updated': '记忆已更新',
   'Show or hide the right sidebar': '显示或隐藏右侧栏',
-  'Show the conversation header': '展开会话头部',
+  'Expand the Main Bot card': '展开主 Bot 卡片',
   'Right sidebar': '右侧栏',
   'Team memory updated': '团队记忆已更新',
   "Updated {name}'s memory": '已更新 {name} 的记忆',

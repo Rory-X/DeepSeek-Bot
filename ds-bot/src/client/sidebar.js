@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { FishLogo } from './dsh-primitives.js'
 import { isMainOf } from './sources.js'
 import { currentPart, previewOf, relativeShort } from './text.js'
-import { PlusIcon, SearchIcon, SidebarIcon, GaugeIcon, PlugIcon, ClockIcon, GearIcon, PinMarkIcon, ConnectorIcon, SwitchIcon, CloudDownloadIcon } from './icons.js'
+import { PlusIcon, SearchIcon, SidebarIcon, GaugeIcon, PlugIcon, ClockIcon, GearIcon, PinMarkIcon, ConnectorIcon, SwitchIcon, CloudDownloadIcon, ArrowDownIcon } from './icons.js'
 import { MAIN_LOOK } from './characters.js'
 import { botState, BotMark, BotAvatar, RoomAvatar } from './mark.js'
 import { reducedMotion } from './activity-row.js'
@@ -316,11 +316,79 @@ function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTim
         : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))))
 }
 
+// The Main Bot's card is the list's first item, and on a phone it stands in for the whole
+// Bot while it is out of view: a thin bar with its mark, its name and the way back to the
+// full card. The bar overlays the list rather than taking a row of its own — the list's
+// scroll geometry must not change when the bar comes and goes, or the content under the
+// reader's finger would move and the card could slide back into view by itself.
+const CHIEF_COLLAPSE_AT = 24
+
+function useChiefBar(listRef) {
+  const [chief, setChief] = useState({ out: false, open: false })
+  const state = useRef(chief)
+  state.current = chief
+  useEffect(() => {
+    const list = listRef.current
+    if (list === null) return undefined
+    let last = list.scrollTop
+    const read = () => {
+      const card = list.querySelector('.bt-tile-wrap')
+      const top = list.scrollTop
+      const down = top > last
+      last = top
+      const box = list.getBoundingClientRect()
+      // The card is out of the way once the list has moved at all and all but a sliver of
+      // it is past the top edge: a short list cannot scroll the whole card away, and a pill
+      // that waits for that would never come.
+      const out = card !== null && top > CHIEF_COLLAPSE_AT && card.getBoundingClientRect().bottom <= box.top + 28
+      const now = state.current
+      // Opening the bar holds until the reader scrolls on; the natural card coming back
+      // into view always wins.
+      const open = out && now.open && !down
+      if (out === now.out && open === now.open) return
+      setChief({ out, open })
+    }
+    list.addEventListener('scroll', read, { passive: true })
+    read()
+    return () => list.removeEventListener('scroll', read)
+  }, [listRef])
+  return [chief, () => setChief(current => (current.open ? current : { ...current, open: true }))]
+}
+
+// The bar itself: a small pill under the top row while the card is out of view, holding
+// the mark, the name and the way back to the full card. The whole pill is the button; the
+// arrow is a mark inside it, so the pill is one target and the arrow still answers a hit
+// test on its own.
+function ChiefBar({ chief, main, onExpand }) {
+  if (!chief.out) return null
+  const name = main?.name ?? t('Main Bot')
+  const mark = size => main
+    ? h(BotAvatar, { bot: main, size, state: 'idle', main: true, badge: true, live: false })
+    : h(BotMark, { look: MAIN_LOOK, size })
+  return h('button', {
+    type: 'button', className: 'bt-chief-bar', 'data-bt-chief-bar': '', 'data-open': chief.open ? '' : undefined,
+    'aria-label': t('Expand the Main Bot card'), 'aria-expanded': chief.open,
+    onClick: onExpand,
+  },
+  mark(chief.open ? 40 : 24),
+  h('span', { className: 'bt-chief-text' },
+    h('span', { className: 'bt-chief-name' }, name),
+    chief.open && main?.role ? h('span', { className: 'bt-chief-role' }, main.role) : null),
+  h('span', { className: 'bt-chief-go', 'data-bt-chief-expand': '' }, h(ArrowDownIcon)))
+}
+
 // The phone's list page: the same list as the sidebar, on a page of its own. Its root
 // carries the hook the styles and the test bench read, and its brand opens the same
 // account menu the footer avatar does — the shell's settings seat is not on this page.
 function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, 'down')
+  const [chief, expand] = useChiefBar(listRef)
+  // The state is published for the styles and the test bench; it only exists while this
+  // page does, which is only where the judgment holds.
+  useEffect(() => {
+    document.body.dataset.btChief = chief.out && !chief.open ? 'collapsed' : 'expanded'
+    return () => { delete document.body.dataset.btChief }
+  }, [chief.out, chief.open])
   return h('div', { className: 'bt-nav-page', 'data-bt-nav': 'list', onKeyDown: typeToSearch },
     h('div', { className: 'bt-nav-top' },
       h('button', {
@@ -331,7 +399,9 @@ function MobileNavList({ roster, actions, listRef, main, order, markedUnread, ro
       h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Search'), title: t('Search'), onClick: () => actions.openPalette() }, h(SearchIcon)),
       h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
     roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
-    h(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true }),
+    h('div', { className: 'bt-nav-body' },
+      h(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true }),
+      h(ChiefBar, { chief, main, onExpand: expand })),
     menu.menu)
 }
 
