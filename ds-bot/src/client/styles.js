@@ -166,6 +166,8 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 /* The phone's conversation is the second level; this leaves it for the list page. It sits
    where the shell's own leading control does, opposite the right-sidebar button. */
 .bt-back{position:absolute;left:12px;top:4px;pointer-events:auto}
+/* The shell's sidebar, reachable on a phone: beside the back control, out of the pill's way. */
+.bt-shell-side{position:absolute;left:46px;top:4px;pointer-events:auto}
 .bt-pill:active{transform:scale(.965)}
 .bt-pill-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .bt-pill-mem{flex:none;display:inline-flex;width:0;margin-left:-8px;overflow:hidden;transition:${spring(SPRING_SHAPE, 'width', 'margin-left')}}
@@ -576,7 +578,33 @@ ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:n
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) 0!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"],${NOT_DESKTOP} body[data-bt-nav] [data-rightbar-col]{display:none!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
+/* The shell's own sidebar (the team list, and the file, terminal and other plugin entries
+   beside it) stays reachable on a phone: opened from the conversation header it comes back
+   as an overlay over the conversation, out of the grid so the chat keeps its full width.
+   The scrim sits in the shell's overlay layer, under this column, and closes it. */
+${NOT_DESKTOP} body[data-bt-shell-side] [class*="_sidebarCol"]{display:block!important;position:fixed!important;inset:0 auto 0 0;width:min(320px,86%);z-index:38;overflow-y:auto;overscroll-behavior:contain;border-right:0;padding-left:env(safe-area-inset-left);box-shadow:0 16px 44px rgba(0,0,0,.28)}
+.bt-shell-scrim{position:fixed;inset:0;background:rgba(0,0,0,.32);animation:bt-fade .16s ease-out}
+body[data-ds-dark-theme] .bt-shell-scrim{background:rgba(0,0,0,.5)}
+/* The page itself must not move under a finger: no rubber-band, no pull-to-refresh, and no
+   pinch or double-tap zoom. Panning stays in the allowed set, so the chat and every inner
+   list keep scrolling; the page has nothing to pan, its frame is the viewport. */
+${NOT_DESKTOP}{overscroll-behavior:none;overscroll-behavior-y:none;touch-action:pan-x pan-y}
+${NOT_DESKTOP} body{overscroll-behavior:none;overscroll-behavior-y:none;touch-action:pan-x pan-y;-webkit-tap-highlight-color:transparent}
+/* Safari zooms the page when a field under 16px takes focus, and that zoom outlives the
+   field: it is the one page movement the user cannot undo. */
+${NOT_DESKTOP} :is(input:not([type=checkbox]):not([type=radio]),select,textarea,[contenteditable=true]){font-size:max(16px,1em)!important}
 }
+/* A touch pointer never hovers, but Safari keeps the :hover style after a tap: a tapped row
+   or button stays tinted and reads as selected. The tint moves to :active, the real press. */
+@media (hover:none){
+.bt-row:hover,.bt-tile:hover,.bt-settings-item:hover,.bt-icon-btn:hover,.bt-round:hover,.bt-soft:hover,.bt-brand:hover{background:none}
+.bt-row:active,.bt-tile:active,.bt-settings-item:active,.bt-icon-btn:active,.bt-round:active,.bt-soft:active,.bt-brand:active{background:var(--bt-hover)}
+}
+/* An installed app has no browser chrome to fall back on: the safe areas are the whole
+   frame, and the interface is the only thing on screen. */
+body[data-bt-standalone] .bt-nav-page{padding-top:max(env(safe-area-inset-top),6px);padding-bottom:env(safe-area-inset-bottom)}
+body[data-bt-standalone] .bt-nav-top{padding-top:2px}
+body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:none}
 
 .bt-voice-pane{flex-direction:column;align-items:center;justify-content:center;animation:bt-fade .2s ease-out}
 .bt-voice-stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;max-width:560px;text-align:center}
@@ -617,7 +645,11 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
 .bt-msg:hover>.bt-msg-line>.bt-tools,.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open]{opacity:1;visibility:visible}
 /* A touch pointer never hovers, and the :focus-within fallback cannot fire either: a
    visibility:hidden child cannot take focus. Show the toolbar outright. */
-@media (hover:none){.bt-tools{opacity:1;visibility:visible}}
+@media (hover:none){.bt-tools{opacity:1;visibility:visible}
+/* The toolbar's invisible hover bridge reaches 128px left of it to catch a pointer on its
+   way from the bubble; a finger has no such path, and the strip swallows taps meant for
+   whatever sits under it, the conversation header included. */
+.bt-tools::after{display:none}}
 .bt-tool{width:24px;height:24px;border:0;padding:0;border-radius:6px;background:none;color:var(--bt-ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s ease,color .12s ease}
 .bt-tool:hover,.bt-tool[aria-expanded=true]{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-tool:active{background:var(--bt-active)}

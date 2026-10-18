@@ -658,6 +658,7 @@ var ZH = {
   "Memory updated": "记忆已更新",
   "Show or hide the right sidebar": "显示或隐藏右侧栏",
   "Right sidebar": "右侧栏",
+  "Show or hide the sidebar": "显示或隐藏侧边栏",
   "Team memory updated": "团队记忆已更新",
   "Updated {name}'s memory": "已更新 {name} 的记忆",
   "Memory updated. Open {name}'s memory": "记忆已更新，打开 {name} 的记忆",
@@ -1336,6 +1337,44 @@ function watchMobileNav(onChange) {
   const update = () => onChange(read());
   query.addEventListener("change", update);
   return { read, dispose: () => query.removeEventListener("change", update) };
+}
+
+// src/client/platform.js
+var STANDALONE = "(display-mode: standalone)";
+function watchStandalone(onChange) {
+  const query = window.matchMedia(STANDALONE);
+  const read = () => query.matches || window.navigator.standalone === true;
+  const update = () => onChange(read());
+  query.addEventListener("change", update);
+  return { read, dispose: () => query.removeEventListener("change", update) };
+}
+function installViewport() {
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (meta !== null) {
+    const content = meta.getAttribute("content") ?? "";
+    if (!/viewport-fit/.test(content)) meta.setAttribute("content", content === "" ? "viewport-fit=cover" : `${content},viewport-fit=cover`);
+  }
+  let theme = document.querySelector('meta[name="theme-color"]');
+  if (theme === null) {
+    theme = document.createElement("meta");
+    theme.setAttribute("name", "theme-color");
+    document.head.appendChild(theme);
+  }
+  let colors = { light: "", dark: "" };
+  const apply2 = () => {
+    const content = document.body?.hasAttribute("data-ds-dark-theme") ? colors.dark : colors.light;
+    if (content !== "") theme.setAttribute("content", content);
+  };
+  const observer = new MutationObserver(apply2);
+  if (document.body) observer.observe(document.body, { attributes: true, attributeFilter: ["data-ds-dark-theme"] });
+  apply2();
+  return {
+    theme: (next) => {
+      colors = next;
+      apply2();
+    },
+    dispose: () => observer.disconnect()
+  };
 }
 
 // src/client/team-actions.js
@@ -2250,6 +2289,8 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 /* The phone's conversation is the second level; this leaves it for the list page. It sits
    where the shell's own leading control does, opposite the right-sidebar button. */
 .bt-back{position:absolute;left:12px;top:4px;pointer-events:auto}
+/* The shell's sidebar, reachable on a phone: beside the back control, out of the pill's way. */
+.bt-shell-side{position:absolute;left:46px;top:4px;pointer-events:auto}
 .bt-pill:active{transform:scale(.965)}
 .bt-pill-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .bt-pill-mem{flex:none;display:inline-flex;width:0;margin-left:-8px;overflow:hidden;transition:${spring(SPRING_SHAPE, "width", "margin-left")}}
@@ -2660,7 +2701,33 @@ ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:n
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) 0!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"],${NOT_DESKTOP} body[data-bt-nav] [data-rightbar-col]{display:none!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
+/* The shell's own sidebar (the team list, and the file, terminal and other plugin entries
+   beside it) stays reachable on a phone: opened from the conversation header it comes back
+   as an overlay over the conversation, out of the grid so the chat keeps its full width.
+   The scrim sits in the shell's overlay layer, under this column, and closes it. */
+${NOT_DESKTOP} body[data-bt-shell-side] [class*="_sidebarCol"]{display:block!important;position:fixed!important;inset:0 auto 0 0;width:min(320px,86%);z-index:38;overflow-y:auto;overscroll-behavior:contain;border-right:0;padding-left:env(safe-area-inset-left);box-shadow:0 16px 44px rgba(0,0,0,.28)}
+.bt-shell-scrim{position:fixed;inset:0;background:rgba(0,0,0,.32);animation:bt-fade .16s ease-out}
+body[data-ds-dark-theme] .bt-shell-scrim{background:rgba(0,0,0,.5)}
+/* The page itself must not move under a finger: no rubber-band, no pull-to-refresh, and no
+   pinch or double-tap zoom. Panning stays in the allowed set, so the chat and every inner
+   list keep scrolling; the page has nothing to pan, its frame is the viewport. */
+${NOT_DESKTOP}{overscroll-behavior:none;overscroll-behavior-y:none;touch-action:pan-x pan-y}
+${NOT_DESKTOP} body{overscroll-behavior:none;overscroll-behavior-y:none;touch-action:pan-x pan-y;-webkit-tap-highlight-color:transparent}
+/* Safari zooms the page when a field under 16px takes focus, and that zoom outlives the
+   field: it is the one page movement the user cannot undo. */
+${NOT_DESKTOP} :is(input:not([type=checkbox]):not([type=radio]),select,textarea,[contenteditable=true]){font-size:max(16px,1em)!important}
 }
+/* A touch pointer never hovers, but Safari keeps the :hover style after a tap: a tapped row
+   or button stays tinted and reads as selected. The tint moves to :active, the real press. */
+@media (hover:none){
+.bt-row:hover,.bt-tile:hover,.bt-settings-item:hover,.bt-icon-btn:hover,.bt-round:hover,.bt-soft:hover,.bt-brand:hover{background:none}
+.bt-row:active,.bt-tile:active,.bt-settings-item:active,.bt-icon-btn:active,.bt-round:active,.bt-soft:active,.bt-brand:active{background:var(--bt-hover)}
+}
+/* An installed app has no browser chrome to fall back on: the safe areas are the whole
+   frame, and the interface is the only thing on screen. */
+body[data-bt-standalone] .bt-nav-page{padding-top:max(env(safe-area-inset-top),6px);padding-bottom:env(safe-area-inset-bottom)}
+body[data-bt-standalone] .bt-nav-top{padding-top:2px}
+body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:none}
 
 .bt-voice-pane{flex-direction:column;align-items:center;justify-content:center;animation:bt-fade .2s ease-out}
 .bt-voice-stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;max-width:560px;text-align:center}
@@ -2701,7 +2768,11 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
 .bt-msg:hover>.bt-msg-line>.bt-tools,.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open]{opacity:1;visibility:visible}
 /* A touch pointer never hovers, and the :focus-within fallback cannot fire either: a
    visibility:hidden child cannot take focus. Show the toolbar outright. */
-@media (hover:none){.bt-tools{opacity:1;visibility:visible}}
+@media (hover:none){.bt-tools{opacity:1;visibility:visible}
+/* The toolbar's invisible hover bridge reaches 128px left of it to catch a pointer on its
+   way from the bubble; a finger has no such path, and the strip swallows taps meant for
+   whatever sits under it, the conversation header included. */
+.bt-tools::after{display:none}}
 .bt-tool{width:24px;height:24px;border:0;padding:0;border-radius:6px;background:none;color:var(--bt-ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s ease,color .12s ease}
 .bt-tool:hover,.bt-tool[aria-expanded=true]{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-tool:active{background:var(--bt-active)}
@@ -5565,18 +5636,21 @@ function TeamSidebar(props) {
     return entries2.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at);
   }, [roster, updated]);
   const main = roster.byId[roster.mainBotId];
-  useListGlide(listRef, wide, order.map((entry) => entry.item.id).join(","));
+  const onPhone = props.useMobileNav((value) => value) && !props.useSurface((value) => value.plain);
+  const atList = props.useNavLevel((value) => value === "list");
+  const shellSide = props.useUi((value) => value.shellSide === true);
+  const asOverlay = onPhone && shellSide;
+  const sidebarWide = wide || asOverlay;
+  useListGlide(listRef, sidebarWide, order.map((entry) => entry.item.id).join(","));
   useLandOnMainBot(roster, useSessions, actions);
-  const rowProps = { roster, actions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, wide };
+  const rowProps = { roster, actions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, wide: sidebarWide };
   const typeToSearch = (event) => {
     if (event.defaultPrevented || event.key.length !== 1 || event.key === " " || event.metaKey || event.ctrlKey || event.altKey || event.nativeEvent.isComposing) return;
     if (event.target instanceof Element && event.target.closest("input,textarea,[contenteditable]")) return;
     event.preventDefault();
     actions.openPalette(event.key);
   };
-  const onPhone = props.useMobileNav((value) => value) && !props.useSurface((value) => value.plain);
-  const atList = props.useNavLevel((value) => value === "list");
-  if (onPhone && atList) {
+  if (onPhone && !asOverlay && atList) {
     return (0, import_react_dom3.createPortal)((0, import_react9.createElement)(MobileNavList, {
       roster,
       actions,
@@ -5585,29 +5659,32 @@ function TeamSidebar(props) {
       order,
       markedUnread,
       typeToSearch,
+      // The page is the full-width list: its rows carry names, previews and the unread dot.
       rowProps: { ...rowProps, wide: true },
       useUpdate: props.useUpdate
     }), document.body);
   }
-  if (onPhone) return null;
+  if (onPhone && !asOverlay) return null;
   return (0, import_react9.createElement)(
     "div",
-    { className: wide ? "bt-side" : "bt-side bt-rail", onKeyDown: typeToSearch },
-    wide ? (0, import_react9.createElement)(
+    { className: sidebarWide ? "bt-side" : "bt-side bt-rail", onKeyDown: typeToSearch },
+    sidebarWide ? (0, import_react9.createElement)(
       "div",
       { className: "bt-side-top" },
       (0, import_react9.createElement)("span", { className: "bt-brand" }, (0, import_react9.createElement)(BrandMark, { size: 22 }), (0, import_react9.createElement)(BrandName)),
       (0, import_react9.createElement)(UpdateButton, { useUpdate: props.useUpdate, actions }),
       (0, import_react9.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Search"), title: t("Search"), onClick: () => actions.openPalette() }, (0, import_react9.createElement)(SearchIcon)),
       (0, import_react9.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react9.createElement)(PlusIcon)),
-      (0, import_react9.createElement)("button", { type: "button", className: "bt-round bt-side-collapse", "aria-label": t("Collapse sidebar"), title: t("Collapse sidebar"), onClick: () => actions.toggleSidebar() }, (0, import_react9.createElement)(SidebarIcon))
+      // The shell's collapse switch is the shell's own column; in the phone overlay the
+      // scrim, Escape and the header button are the way out.
+      asOverlay ? null : (0, import_react9.createElement)("button", { type: "button", className: "bt-round bt-side-collapse", "aria-label": t("Collapse sidebar"), title: t("Collapse sidebar"), onClick: () => actions.toggleSidebar() }, (0, import_react9.createElement)(SidebarIcon))
     ) : (0, import_react9.createElement)(
       import_react9.Fragment,
       null,
       (0, import_react9.createElement)(UpdateButton, { useUpdate: props.useUpdate, actions }),
       (0, import_react9.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react9.createElement)(PlusIcon))
     ),
-    wide && roster.readOnly ? (0, import_react9.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
+    sidebarWide && roster.readOnly ? (0, import_react9.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
     (0, import_react9.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps })
   );
 }
@@ -6143,10 +6220,15 @@ function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSe
   }, [Boolean(room2)]);
   const memoryNotice = notice && changed !== null && roster.memory !== false;
   const onNavChat = useMobileNav((value) => value) && useNavLevel((value) => value === "chat");
+  const onPhone = useMobileNav((value) => value);
+  const shellSide = useUi((state) => state.shellSide === true);
   return (0, import_react10.createElement)(
     "div",
     { className: "bt-head" },
     onNavChat ? (0, import_react10.createElement)("button", { type: "button", className: "bt-icon-btn bt-back", "data-bt-nav-back": "", "aria-label": t("Back to Bot list"), title: t("Back to Bot list"), onClick: () => actions.showBotList() }, (0, import_react10.createElement)(ChevronLeftIcon)) : null,
+    // The shell's sidebar holds the file, terminal and other plugin entries the Bot
+    // surface covers; on a phone it opens over the conversation from here.
+    onPhone ? (0, import_react10.createElement)("button", { type: "button", className: "bt-icon-btn bt-shell-side", "data-bt-shell-side": "", "aria-expanded": shellSide, "aria-label": t("Show or hide the sidebar"), title: t("Sidebar"), onClick: () => actions.toggleShellSide() }, (0, import_react10.createElement)(SidebarIcon)) : null,
     (0, import_react10.createElement)(
       "button",
       {
@@ -12961,10 +13043,19 @@ var import_react35 = require("react");
 var import_react_dom9 = require("react-dom");
 var DIALOG_EXIT_MS = 160;
 var MENU_EXIT_MS3 = 120;
-function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity, useWork, useRegistry, useBrowserPages, useBrowserTabs, useUpdate, actions }) {
+function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity, useWork, useRegistry, useBrowserPages, useBrowserTabs, useUpdate, useMobileNav, actions }) {
   const roster = useRoster((value) => value);
   const ui2 = useUi((value) => value);
   useRegistry((value) => value);
+  const shellSide = useMobileNav?.((value) => value) === true && ui2.shellSide === true;
+  (0, import_react35.useEffect)(() => {
+    if (!shellSide) return void 0;
+    const onKey = (event) => {
+      if (event.key === "Escape") actions.closeShellSide();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [shellSide]);
   const current = useSessions((list) => Object.values(list.byId).find((session) => (session?.retainedBy?.mainView ?? 0) > 0)?.id ?? null);
   const previous = (0, import_react35.useRef)(current);
   (0, import_react35.useEffect)(() => {
@@ -12989,6 +13080,7 @@ function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity
   return (0, import_react35.createElement)(
     import_react35.Fragment,
     null,
+    shellSide ? (0, import_react35.createElement)("div", { className: "bt-shell-scrim", "data-bt-shell-scrim": "", onMouseDown: () => actions.closeShellSide() }) : null,
     pane ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(BotPanel, { pane, leaving: open === null, roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages }), document.body) : null,
     ui2.newChat ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(NewChat, { key: ui2.newChat, mode: ui2.newChat, roster, actions }), document.body) : null,
     ui2.palette ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(CommandPalette, { key: ui2.palette.token, start: ui2.palette.query, token: ui2.palette.token, roster, actions, useSessions }), document.body) : null,
@@ -14045,10 +14137,11 @@ function apply(ctx) {
   const reactionStore = sharedMap(STORAGE.reactions);
   const seenStore = sharedMap(STORAGE.seen);
   let seenAt = seenStore.read();
-  const ui2 = createSource({ details: null, view: "details", renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} });
+  const ui2 = createSource({ details: null, view: "details", renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {}, shellSide: false });
   const surface = createSource({ mode: readMode(), plain: false });
   const mobileNav = createSource(false);
   const navLevel = createSource("list");
+  const standalone = createSource(false);
   let agentSessionCache = /* @__PURE__ */ new Set();
   try {
     agentSessionCache = new Set(JSON.parse(localStorage.getItem(STORAGE.agentSessions) ?? "[]"));
@@ -14065,7 +14158,7 @@ function apply(ctx) {
   };
   let expected = null;
   const setPlain = (plain) => surface.set((state) => state.plain === plain ? state : { ...state, plain });
-  const dropPanels = () => ui2.set((state) => state.details || state.renaming ? { ...state, details: null, view: "details", renaming: false, tab: null } : state);
+  const dropPanels = () => ui2.set((state) => state.details || state.renaming || state.shellSide ? { ...state, details: null, view: "details", renaming: false, tab: null, shellSide: false } : state);
   const seenKey = (id) => roster.getSnapshot().byId?.[id]?.id ?? id;
   const leaveVisits = (ids) => {
     seenAt = seenStore.update((seen) => noteLeft(seen, ids.map(seenKey), Date.now()), seenAt);
@@ -14279,6 +14372,23 @@ function apply(ctx) {
       style.remove();
     };
   };
+  const viewport = installViewport();
+  ctx.effect(() => () => viewport.dispose(), "ds-bot: viewport meta");
+  ctx.effect(() => {
+    const watch = watchStandalone((value) => standalone.set(value));
+    standalone.set(watch.read());
+    const sync = () => {
+      if (standalone.getSnapshot()) document.body.dataset.btStandalone = "";
+      else delete document.body.dataset.btStandalone;
+    };
+    const off = standalone.subscribe(sync);
+    sync();
+    return () => {
+      watch.dispose();
+      off();
+      delete document.body.dataset.btStandalone;
+    };
+  }, "ds-bot: installed app");
   const installTheme = () => {
     const style = installStyles("", "theme");
     let key = "";
@@ -14289,12 +14399,13 @@ function apply(ctx) {
       const themes = allThemes();
       const id = themes[prefs.theme] ? prefs.theme : "deepseek";
       const accent = isHex(prefs.accent) ? prefs.accent : void 0;
-      const motion = prefs.motion === "quiet" || prefs.motion === "lively" ? prefs.motion : "normal";
+      const motion = prefs.motion === "quiet" || prefs.motion === "lively" ? prefs.motion : standalone.getSnapshot() ? "quiet" : "normal";
       document.body.dataset.btMotion = motion;
       const next = `${id}|${accent ?? ""}|${motion}|${registry.getSnapshot()}`;
       if (next === key) return;
       key = next;
       style.textContent = themeCss(themes[id], accent);
+      viewport.theme({ light: themes[id].light.bg, dark: themes[id].dark.bg });
       const release = releaseTokens;
       releaseTokens = ctx.theme.overrideTokens("ds-bot", shellTokens(themes[id]));
       if (typeof release === "function") release();
@@ -14308,9 +14419,11 @@ function apply(ctx) {
     render();
     const offRoster = roster.subscribe(render);
     const offRegistry = registry.subscribe(render);
+    const offStandalone = standalone.subscribe(render);
     return () => {
       offRoster();
       offRegistry();
+      offStandalone();
       try {
         if (typeof releaseTokens === "function") releaseTokens();
       } finally {
@@ -14362,6 +14475,7 @@ function apply(ctx) {
     openSession: (id) => {
       if (isAgentSessionId(id)) return actions.openAgentSession(id);
       navLevel.set("chat");
+      actions.closeShellSide();
       ui2.set((state) => state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state);
       setPlain(false);
       const target = partFor(id);
@@ -14372,6 +14486,7 @@ function apply(ctx) {
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
       navLevel.set("chat");
+      actions.closeShellSide();
       ui2.set((state) => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: "details", renaming: false, tab: null }));
       setPlain(true);
       expected = sessionId;
@@ -14442,6 +14557,11 @@ function apply(ctx) {
     toggleSidebar: () => {
       ctx.layout.toggleSidebar();
     },
+    // The shell's own sidebar — the team list and whatever other plugins put beside it
+    // (files, terminals). On a phone it is an overlay over the conversation, opened from
+    // the conversation header, closed by the scrim, Escape, or leaving the conversation.
+    toggleShellSide: () => ui2.set((state) => ({ ...state, shellSide: !state.shellSide })),
+    closeShellSide: () => ui2.set((state) => state.shellSide ? { ...state, shellSide: false } : state),
     // Back to the phone's list page, from the conversation's back control. Leaving the
     // conversation closes the details pane with it.
     showBotList: () => {
@@ -14454,7 +14574,7 @@ function apply(ctx) {
       if (mode !== "bot" && mode !== "agent") return;
       if (surface.getSnapshot().mode === mode) return;
       if (mode === "agent") {
-        ui2.set((state) => ({ ...state, details: null, view: "details", settings: null, palette: null, newChat: null, menu: null, voice: null, exchange: null, memory: null, toast: null }));
+        ui2.set((state) => ({ ...state, details: null, view: "details", settings: null, palette: null, newChat: null, menu: null, voice: null, exchange: null, memory: null, toast: null, shellSide: false }));
       }
       writeMode(mode);
       surface.set((state) => ({ ...state, mode }));
@@ -14579,21 +14699,26 @@ function apply(ctx) {
   const browserTabs = browsers?.tabs ?? createSource({});
   const face = () => ({ actions, hooks: { roster, ui: ui2, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel } });
   const syncNav = () => {
-    if (mobileNav.getSnapshot() && !surface.getSnapshot().plain) document.body.dataset.btNav = navLevel.getSnapshot();
+    const nav = mobileNav.getSnapshot() && !surface.getSnapshot().plain;
+    if (nav) document.body.dataset.btNav = navLevel.getSnapshot();
     else delete document.body.dataset.btNav;
+    if (nav && ui2.getSnapshot().shellSide) document.body.dataset.btShellSide = "";
+    else delete document.body.dataset.btShellSide;
   };
   ctx.effect(() => {
     const watch = watchMobileNav((value) => {
       mobileNav.set(value);
       navLevel.set("list");
+      if (!value) actions.closeShellSide();
     });
     mobileNav.set(watch.read());
-    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav)];
+    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav), ui2.subscribe(syncNav)];
     syncNav();
     return () => {
       watch.dispose();
       for (const off of offs) off();
       delete document.body.dataset.btNav;
+      delete document.body.dataset.btShellSide;
     };
   }, "ds-bot: mobile navigation");
   ctx.effect(() => noticeApprovals({

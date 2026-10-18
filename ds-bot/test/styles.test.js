@@ -176,3 +176,26 @@ test('the phone settings strip leaves the close button room outside its scroll b
   assert.match(strip, /margin-right:calc\(12px \+ 32px\)/)
   assert.equal(/padding:[^;]*48px/.test(strip), false)
 })
+
+// A phone must not move the page itself. The shell's frame is the viewport, so a drag that
+// reaches the page would rubber-band, refresh, or zoom the whole interface.
+test('the phone pins the page against bounce, refresh and zoom', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const root = css.split('\n').find(line => line.includes('overscroll-behavior:none'))
+  assert.ok(root, 'the root carries the overscroll rule')
+  assert.match(root, /touch-action:pan-x pan-y/)
+  const field = css.split('\n').find(line => line.includes('max(16px,1em)'))
+  assert.ok(field, 'a field under 16px would zoom the page when it takes focus')
+  assert.match(field, /select/, 'a select zooms it too')
+})
+
+// The shell's sidebar comes back on a phone as an overlay, not a column: it leaves the grid
+// so the conversation keeps its width, and a scrim is what closes it.
+test('the phone sidebar overlay is out of the grid and has a scrim', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const column = css.split('\n').find(line => line.includes('body[data-bt-shell-side]'))
+  assert.ok(column, 'the overlay rule is there')
+  assert.match(column, /position:fixed!important/)
+  assert.match(column, /width:min\(320px,86%\)/)
+  assert.ok(css.includes('.bt-shell-scrim{position:fixed'), 'the scrim is there')
+})

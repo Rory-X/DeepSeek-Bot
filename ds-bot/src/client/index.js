@@ -3,6 +3,7 @@ import { isHex, inkText, paintCss } from './inks.js'
 import { DEFAULT_MASK, SHAPES, markupCache, maskOf } from './characters.js'
 import { createSource, EMPTY_ROSTER, indexRoster, isAgentSession } from './sources.js'
 import { watchMobileNav } from './media.js'
+import { installViewport, watchStandalone } from './platform.js'
 import { teamActions } from './team-actions.js'
 import { themeCss, shellTokens, registry, registerShape, registerTheme, allThemes } from './themes.js'
 import { MENTION_ORIGIN, currentPart } from './text.js'
@@ -50,7 +51,7 @@ export function apply(ctx) {
   let seenAt = seenStore.read()
   // `details` is the panel's subject (a Session id); `view` picks details or the
   // subject Bot's browser inside it.
-  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} })
+  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {}, shellSide: false })
   // Bot mode paints the whole team surface; Agent mode withdraws every slot and
   // style so the shell's own interface returns. `plain` stays false until a Bot-mode
   // view hosts a plain session, which drops only the conversation replacements.
@@ -59,6 +60,9 @@ export function apply(ctx) {
   // `navLevel` says which of the two levels the Bot surface shows.
   const mobileNav = createSource(false)
   const navLevel = createSource('list')
+  // An installed app: no browser chrome, so the styles and the motion default treat it as
+  // the most app-like case there is.
+  const standalone = createSource(false)
   // DSH Agent Session ids from the last pull, so a reload already knows the main
   // view is a plain Session before the team answers.
   let agentSessionCache = new Set()
@@ -78,7 +82,7 @@ export function apply(ctx) {
   const setPlain = (plain) => surface.set(state => (state.plain === plain ? state : { ...state, plain }))
   // A DSH Agent Session shows the plain conversation: the Bot details and browser
   // panels would follow it and report it is not on the team, so they close.
-  const dropPanels = () => ui.set(state => (state.details || state.renaming ? { ...state, details: null, view: 'details', renaming: false, tab: null } : state))
+  const dropPanels = () => ui.set(state => (state.details || state.renaming || state.shellSide ? { ...state, details: null, view: 'details', renaming: false, tab: null, shellSide: false } : state))
   // A Bot's chat spans several parts, so when it was last left is kept per Bot.
   const seenKey = id => roster.getSnapshot().byId?.[id]?.id ?? id
   const leaveVisits = (ids) => {
@@ -279,6 +283,26 @@ export function apply(ctx) {
     return () => { offRoster(); offRegistry(); style.remove() }
   }
 
+  // The shell's viewport and theme-colour metas: the plugin adds what a phone needs (the
+  // safe areas behind viewport-fit=cover, the browser's own colour) and keeps the rest.
+  const viewport = installViewport()
+  ctx.effect(() => () => viewport.dispose(), 'ds-bot: viewport meta')
+  ctx.effect(() => {
+    const watch = watchStandalone(value => standalone.set(value))
+    standalone.set(watch.read())
+    const sync = () => {
+      if (standalone.getSnapshot()) document.body.dataset.btStandalone = ''
+      else delete document.body.dataset.btStandalone
+    }
+    const off = standalone.subscribe(sync)
+    sync()
+    return () => {
+      watch.dispose()
+      off()
+      delete document.body.dataset.btStandalone
+    }
+  }, 'ds-bot: installed app')
+
   // The chosen theme lives in the team state so every device shares it; the local
   // copy only avoids a flash of the default theme before the first state pull.
   const installTheme = () => {
@@ -291,12 +315,15 @@ export function apply(ctx) {
       const themes = allThemes()
       const id = themes[prefs.theme] ? prefs.theme : 'deepseek'
       const accent = isHex(prefs.accent) ? prefs.accent : undefined
-      const motion = prefs.motion === 'quiet' || prefs.motion === 'lively' ? prefs.motion : 'normal'
+      // An installed app has no browser chrome and a shorter attention span for motion:
+      // an explicit choice still wins, otherwise it runs quiet.
+      const motion = prefs.motion === 'quiet' || prefs.motion === 'lively' ? prefs.motion : standalone.getSnapshot() ? 'quiet' : 'normal'
       document.body.dataset.btMotion = motion
       const next = `${id}|${accent ?? ''}|${motion}|${registry.getSnapshot()}`
       if (next === key) return
       key = next
       style.textContent = themeCss(themes[id], accent)
+      viewport.theme({ light: themes[id].light.bg, dark: themes[id].dark.bg })
       const release = releaseTokens
       releaseTokens = ctx.theme.overrideTokens('ds-bot', shellTokens(themes[id]))
       if (typeof release === 'function') release()
@@ -307,9 +334,11 @@ export function apply(ctx) {
     render()
     const offRoster = roster.subscribe(render)
     const offRegistry = registry.subscribe(render)
+    const offStandalone = standalone.subscribe(render)
     return () => {
       offRoster()
       offRegistry()
+      offStandalone()
       try {
         if (typeof releaseTokens === 'function') releaseTokens()
       } finally {
@@ -355,6 +384,7 @@ export function apply(ctx) {
       if (isAgentSessionId(id)) return actions.openAgentSession(id)
       // Opening a conversation is what leaves the phone's list page.
       navLevel.set('chat')
+      actions.closeShellSide()
       ui.set(state => (state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state))
       setPlain(false)
       const target = partFor(id)
@@ -365,6 +395,7 @@ export function apply(ctx) {
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
       navLevel.set('chat')
+      actions.closeShellSide()
       ui.set(state => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: 'details', renaming: false, tab: null }))
       setPlain(true)
       expected = sessionId
@@ -431,6 +462,11 @@ export function apply(ctx) {
     },
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
     toggleSidebar: () => { ctx.layout.toggleSidebar() },
+    // The shell's own sidebar — the team list and whatever other plugins put beside it
+    // (files, terminals). On a phone it is an overlay over the conversation, opened from
+    // the conversation header, closed by the scrim, Escape, or leaving the conversation.
+    toggleShellSide: () => ui.set(state => ({ ...state, shellSide: !state.shellSide })),
+    closeShellSide: () => ui.set(state => (state.shellSide ? { ...state, shellSide: false } : state)),
     // Back to the phone's list page, from the conversation's back control. Leaving the
     // conversation closes the details pane with it.
     showBotList: () => {
@@ -443,7 +479,7 @@ export function apply(ctx) {
       if (mode !== 'bot' && mode !== 'agent') return
       if (surface.getSnapshot().mode === mode) return
       if (mode === 'agent') {
-        ui.set(state => ({ ...state, details: null, view: 'details', settings: null, palette: null, newChat: null, menu: null, voice: null, exchange: null, memory: null, toast: null }))
+        ui.set(state => ({ ...state, details: null, view: 'details', settings: null, palette: null, newChat: null, menu: null, voice: null, exchange: null, memory: null, toast: null, shellSide: false }))
       }
       writeMode(mode)
       surface.set(state => ({ ...state, mode }))
@@ -580,20 +616,29 @@ export function apply(ctx) {
   const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel } })
   // The level is published on <body> so the styles, the test bench and a screen reader all
   // read the same fact; it is absent whenever the navigation is not in effect (a desktop,
-  // or the plain surface an Agent Session gets).
+  // or the plain surface an Agent Session gets). The shell's sidebar is an overlay only
+  // while that navigation is in charge: anywhere else the shell owns that column.
   const syncNav = () => {
-    if (mobileNav.getSnapshot() && !surface.getSnapshot().plain) document.body.dataset.btNav = navLevel.getSnapshot()
+    const nav = mobileNav.getSnapshot() && !surface.getSnapshot().plain
+    if (nav) document.body.dataset.btNav = navLevel.getSnapshot()
     else delete document.body.dataset.btNav
+    if (nav && ui.getSnapshot().shellSide) document.body.dataset.btShellSide = ''
+    else delete document.body.dataset.btShellSide
   }
   ctx.effect(() => {
-    const watch = watchMobileNav((value) => { mobileNav.set(value); navLevel.set('list') })
+    const watch = watchMobileNav(value => {
+      mobileNav.set(value)
+      navLevel.set('list')
+      if (!value) actions.closeShellSide()
+    })
     mobileNav.set(watch.read())
-    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav)]
+    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav), ui.subscribe(syncNav)]
     syncNav()
     return () => {
       watch.dispose()
       for (const off of offs) off()
       delete document.body.dataset.btNav
+      delete document.body.dataset.btShellSide
     }
   }, 'ds-bot: mobile navigation')
   ctx.effect(() => noticeApprovals({

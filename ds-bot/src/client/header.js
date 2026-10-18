@@ -1,7 +1,7 @@
 import { createElement as h, Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { currentPart, latestMemoryChange } from './text.js'
-import { ArrowUpIcon, ChevronLeftIcon, CloseIcon, ArrowDownIcon, MemoryIcon, SidePanelIcon } from './icons.js'
+import { ArrowUpIcon, ChevronLeftIcon, CloseIcon, ArrowDownIcon, MemoryIcon, SidePanelIcon, SidebarIcon } from './icons.js'
 import { botState, BotAvatar, RoomAvatar } from './mark.js'
 import { ActivityIndicator } from './activity-row.js'
 import { clockLabel, openingTurn, unseenSince } from './cells.js'
@@ -92,9 +92,16 @@ export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus
   // On a phone the conversation is the second level: the back control leaves it for the
   // list page. Its hook is what the test bench reads.
   const onNavChat = useMobileNav(value => value) && useNavLevel(value => value === 'chat')
+  const onPhone = useMobileNav(value => value)
+  const shellSide = useUi(state => state.shellSide === true)
   return h('div', { className: 'bt-head' },
     onNavChat
       ? h('button', { type: 'button', className: 'bt-icon-btn bt-back', 'data-bt-nav-back': '', 'aria-label': t('Back to Bot list'), title: t('Back to Bot list'), onClick: () => actions.showBotList() }, h(ChevronLeftIcon))
+      : null,
+    // The shell's sidebar holds the file, terminal and other plugin entries the Bot
+    // surface covers; on a phone it opens over the conversation from here.
+    onPhone
+      ? h('button', { type: 'button', className: 'bt-icon-btn bt-shell-side', 'data-bt-shell-side': '', 'aria-expanded': shellSide, 'aria-label': t('Show or hide the sidebar'), title: t('Sidebar'), onClick: () => actions.toggleShellSide() }, h(SidebarIcon))
       : null,
     h('button', {
       type: 'button', className: 'bt-pill', 'aria-expanded': detailsOpen, 'data-memory': memoryNotice ? 'updated' : undefined,

@@ -605,6 +605,7 @@ const ZH = {
   'Memory updated': '记忆已更新',
   'Show or hide the right sidebar': '显示或隐藏右侧栏',
   'Right sidebar': '右侧栏',
+  'Show or hide the sidebar': '显示或隐藏侧边栏',
   'Team memory updated': '团队记忆已更新',
   "Updated {name}'s memory": '已更新 {name} 的记忆',
   "Memory updated. Open {name}'s memory": '记忆已更新，打开 {name} 的记忆',
