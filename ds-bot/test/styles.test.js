@@ -201,9 +201,8 @@ test('the phone lets the shell\'s fullscreen right panel through', () => {
   const hidden = css.split('\n').find(line => line.includes('body[data-bt-nav] [data-rightbar-col]'))
   assert.match(hidden, /display:none!important/, 'it stays hidden while collapsed')
   // A strip of the conversation stays visible, and the scrim over it is the way out.
-  assert.match(shown, /width:min\(360px,88%\)!important/, 'the strip beside the panel is left to the scrim')
-  const panel = css.split('\n').find(line => line.includes('[data-sidebar-right-panel=fullscreen]'))
-  assert.match(panel, /width:100%!important/)
-  assert.match(panel, /--dsh-sidebar-width:100%!important/)
-  assert.ok(css.includes('.bt-right-scrim{display:none}'), 'the scrim is inert until the panel is open')
+  // Fullscreen: the panel is the whole screen, so nothing is left beside it to tap.
+  assert.match(shown, /inset:0/)
+  assert.match(shown, /width:100%!important/)
+  assert.equal(css.includes('bt-right-scrim'), false, 'no strip means no scrim')
 })

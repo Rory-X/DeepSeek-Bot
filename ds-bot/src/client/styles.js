@@ -581,15 +581,10 @@ ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:n
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) 0!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"],${NOT_DESKTOP} body[data-bt-nav] [data-rightbar-col]{display:none!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
-/* The panel spans the viewport by its own rule; on a phone it keeps a strip of the
-   conversation visible, so the scrim below is a way out that is not the panel's own chrome.
-   The column is the panel's containing block and shrinks with it, which is what leaves that
-   strip to the scrim; the panel's width and its collapsed translate are the same value. */
-${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;top:0;bottom:0;right:0;left:auto;width:min(360px,88%)!important;z-index:39;padding-right:env(safe-area-inset-right)}
-${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col] [data-sidebar-right-panel=fullscreen]{width:100%!important;--dsh-sidebar-width:100%!important}
-.bt-right-scrim{display:none}
-${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] .bt-right-scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,.32);animation:bt-fade .16s ease-out}
-body[data-ds-dark-theme] .bt-right-scrim{background:rgba(0,0,0,.5)}
+/* The panel is fullscreen on a phone by its own rule, and this column is the box it
+   positions itself against: the column covers the viewport with it, so the panel is the
+   whole screen and the shell's own chrome inside it is the way out. */
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
 /* The page itself must not move under a finger: no rubber-band, no pull-to-refresh, and no
    pinch or double-tap zoom. Panning stays in the allowed set, so the chat and every inner
    list keep scrolling; the page has nothing to pan, its frame is the viewport. */

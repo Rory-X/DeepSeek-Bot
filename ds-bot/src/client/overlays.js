@@ -39,10 +39,6 @@ export function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useA
   const [memory, memoryLeaving] = useLinger(ui.memory && roster.byId[ui.memory] ? ui.memory : null, DIALOG_EXIT_MS)
   const [menu, menuLeaving] = useLinger(ui.menu, MENU_EXIT_MS)
   return h(Fragment, null,
-    // The shell's right panel takes over the phone screen; this is the strip it leaves
-    // beside itself, and tapping it closes the panel. The styles only show it while that
-    // panel is fullscreen, so it costs nothing anywhere else.
-    actions.hasRightSidebar?.() ? h('div', { className: 'bt-right-scrim', 'data-bt-right-scrim': '', onMouseDown: () => actions.toggleRightSidebar() }) : null,
     pane ? createPortal(h(BotPanel, { pane, leaving: open === null, roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages }), document.body) : null,
     ui.newChat ? createPortal(h(NewChat, { key: ui.newChat, mode: ui.newChat, roster, actions }), document.body) : null,
     ui.palette ? createPortal(h(CommandPalette, { key: ui.palette.token, start: ui.palette.query, token: ui.palette.token, roster, actions, useSessions }), document.body) : null,
