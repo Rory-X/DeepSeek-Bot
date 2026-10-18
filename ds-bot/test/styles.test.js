@@ -165,3 +165,14 @@ test('the chat-room rule is installed through installStyles, so it is owned too'
   assert.match(pane, /installStyles\(.*'chat-room'/)
   assert.equal(pane.includes("dataset.dshBot = 'chat-room'"), false)
 })
+
+// The phone's settings strip scrolls sideways, so room for the close button has to sit
+// outside its box: padding-right leaves the items running under the button at scroll 0,
+// where they take the taps meant for it.
+test('the phone settings strip leaves the close button room outside its scroll box', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const strip = css.split('\n').find(line => line.includes('.bt-settings-nav{') && line.includes('overflow-x:auto'))
+  assert.ok(strip, 'the phone settings strip rule is there')
+  assert.match(strip, /margin-right:calc\(12px \+ 32px\)/)
+  assert.equal(/padding:[^;]*48px/.test(strip), false)
+})

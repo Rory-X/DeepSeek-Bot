@@ -2589,10 +2589,11 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 /* A phone has no room for a 198px page list beside the page, so the list becomes a strip
    above it. The glide thumb is a bar that only glides vertically, and a row gives it
    nothing to glide along: it steps aside and the current item keeps the highlight. The
-   strip keeps room on the right for the close button, which stays where it is. */
+   strip itself stops short of the close button — padding inside a scroll container is not
+   room, since at scroll 0 the items still run under the button and take its taps. */
 @media (max-width:640px){
 .bt-settings{--bt-set-w:calc(100vw - 16px);flex-direction:column}
-.bt-settings-nav{width:auto;flex-direction:row;align-items:center;gap:2px;overflow-x:auto;padding:8px 48px 8px 8px;border-right:0;border-bottom:.5px solid var(--bt-line);scrollbar-width:none}
+.bt-settings-nav{width:auto;flex-direction:row;align-items:center;gap:2px;overflow-x:auto;margin-right:calc(12px + 32px);padding:8px;border-right:0;border-bottom:.5px solid var(--bt-line);scrollbar-width:none}
 .bt-settings-nav>.bt-thumb{display:none}
 .bt-settings-nav[data-glide] .bt-settings-item[aria-current=page]{background:var(--bt-active)}
 .bt-settings-item{flex:none;white-space:nowrap}
