@@ -2,6 +2,7 @@
 // in, see the latest errors, and download the log. Also the toast for actions that
 // fail away from any form (menus, the palette).
 import { createElement as h, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { clearClientErrors, clientErrors, clientFacts, failureLabel, issueUrl, WHAT_MAX } from './diagnostics.js'
 import { dateLocale, t } from './i18n.js'
 import { CloseIcon } from './icons.js'
@@ -136,6 +137,10 @@ export function FeedbackPage({ actions, run, Section, Row }) {
 const TOAST_MS = 6000
 
 // One failure at a time, bottom center; a newer one replaces it.
+// The toast is the one overlay that used to render inside the shell's own overlay layer.
+// That layer is a stacking context of its own, so the phone's list page — a later, higher
+// layer — covered the toast and its z-index could not lift it out. Portalled to the body,
+// like every other overlay here, it is the top layer it was always meant to be.
 export function ErrorToast({ useUi, actions }) {
   const toast = useUi(state => state.toast)
   const [leaving, setLeaving] = useState(false)
@@ -147,10 +152,10 @@ export function ErrorToast({ useUi, actions }) {
     return () => { clearTimeout(fade); clearTimeout(gone) }
   }, [toast?.token])
   if (!toast) return null
-  return h('div', { className: 'bt-toast', role: 'alert', 'data-leaving': leaving || undefined },
+  return createPortal(h('div', { className: 'bt-toast', role: 'alert', 'data-leaving': leaving || undefined },
     h('span', { className: 'bt-toast-text' }, toast.text),
     h('button', { type: 'button', className: 'bt-toast-link', onClick: () => { actions.dismissToast(toast.token); actions.openSettings('feedback') } }, t('Details')),
-    h('button', { type: 'button', className: 'bt-icon-btn bt-toast-close', 'aria-label': t('Dismiss'), onClick: () => actions.dismissToast(toast.token) }, h(CloseIcon)))
+    h('button', { type: 'button', className: 'bt-icon-btn bt-toast-close', 'aria-label': t('Dismiss'), onClick: () => actions.dismissToast(toast.token) }, h(CloseIcon))), document.body)
 }
 
 export const FEEDBACK_CSS = `

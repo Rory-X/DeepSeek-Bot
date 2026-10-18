@@ -11223,6 +11223,7 @@ function ConnectorsPage({ roster, actions }) {
 
 // src/client/feedback.js
 var import_react28 = require("react");
+var import_react_dom8 = require("react-dom");
 var FeedbackIcon = () => (0, import_react28.createElement)(
   "svg",
   { width: 15, height: 15, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
@@ -11380,7 +11381,7 @@ function ErrorToast({ useUi, actions }) {
     };
   }, [toast?.token]);
   if (!toast) return null;
-  return (0, import_react28.createElement)(
+  return (0, import_react_dom8.createPortal)((0, import_react28.createElement)(
     "div",
     { className: "bt-toast", role: "alert", "data-leaving": leaving || void 0 },
     (0, import_react28.createElement)("span", { className: "bt-toast-text" }, toast.text),
@@ -11389,7 +11390,7 @@ function ErrorToast({ useUi, actions }) {
       actions.openSettings("feedback");
     } }, t("Details")),
     (0, import_react28.createElement)("button", { type: "button", className: "bt-icon-btn bt-toast-close", "aria-label": t("Dismiss"), onClick: () => actions.dismissToast(toast.token) }, (0, import_react28.createElement)(CloseIcon))
-  );
+  ), document.body);
 }
 var FEEDBACK_CSS = `
 .bt-fb-what{cursor:default}
@@ -12609,7 +12610,7 @@ function DetailsDrawer({ sessionId, startRenaming, startTab, hasStrip, roster, a
 
 // src/client/browser-pane.js
 var import_react34 = require("react");
-var import_react_dom8 = require("react-dom");
+var import_react_dom9 = require("react-dom");
 var PANEL_LINGER_MS = 300;
 var WIDTH_KEY = STORAGE.browserWidth;
 var DEFAULT_WIDTH = 520;
@@ -13142,7 +13143,7 @@ function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatu
     leaving || overlay ? null : (0, import_react34.createElement)("div", { className: "bt-panel-grip", role: "separator", "aria-orientation": "vertical", "aria-label": t("Resize panel"), onPointerDown: startResize }),
     // Over the whole window while dragging: the cursor stays a resize cursor and the
     // pages underneath (the chat, the guest) see no pointer.
-    dragging ? (0, import_react_dom8.createPortal)((0, import_react34.createElement)("div", { className: "bt-drag-shield", "aria-hidden": true }), document.body) : null,
+    dragging ? (0, import_react_dom9.createPortal)((0, import_react34.createElement)("div", { className: "bt-drag-shield", "aria-hidden": true }), document.body) : null,
     hasStrip ? (0, import_react34.createElement)(PanelStrip, { bot, subject: pane.id, view, ids: tabState.ids, active, reading, onView: switchView, actions: panelActions, useBrowserPages }) : null,
     view === "browser" && bot ? (0, import_react34.createElement)(BrowserView, { key: `browser:${active}`, bot, tabId: active, leaving, landed: landed && !settling, actions, useBrowserPages }) : (0, import_react34.createElement)(
       "div",
@@ -13248,7 +13249,7 @@ var BROWSER_CSS = `
 
 // src/client/overlays.js
 var import_react35 = require("react");
-var import_react_dom9 = require("react-dom");
+var import_react_dom10 = require("react-dom");
 var DIALOG_EXIT_MS = 160;
 var MENU_EXIT_MS3 = 120;
 var HINT_MS = 2600;
@@ -13326,15 +13327,15 @@ function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity
   return (0, import_react35.createElement)(
     import_react35.Fragment,
     null,
-    pane ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(BotPanel, { pane, leaving: open === null, roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages }), document.body) : null,
-    ui2.newChat ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(NewChat, { key: ui2.newChat, mode: ui2.newChat, roster, actions }), document.body) : null,
-    ui2.palette ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(CommandPalette, { key: ui2.palette.token, start: ui2.palette.query, token: ui2.palette.token, roster, actions, useSessions }), document.body) : null,
-    ui2.exchange ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(ExchangeDialog, { pair: ui2.exchange, roster, actions }), document.body) : null,
-    ui2.voice ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(VoiceMode, { key: ui2.voice, sessionId: ui2.voice, roster, actions, useSessions, useSessionStatus }), document.body) : null,
-    menu ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(ContextMenu, { key: `${menu.kind ?? ""}:${menu.id}:${menu.x}:${menu.y}`, menu, roster, actions, leaving: menuLeaving }), document.body) : null,
-    settings ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(SettingsDialog, { page: settings.page, id: settings.id, roster, actions, useUpdate, leaving: settingsLeaving }), document.body) : null,
-    memory && roster.byId[memory] ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(MemoryDialog, { key: memory, bot: roster.byId[memory], actions, leaving: memoryLeaving }), document.body) : null,
-    ui2.hint ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(SettingHint, { key: ui2.hint.token, hint: ui2.hint, actions }), document.body) : null
+    pane ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(BotPanel, { pane, leaving: open === null, roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages }), document.body) : null,
+    ui2.newChat ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(NewChat, { key: ui2.newChat, mode: ui2.newChat, roster, actions }), document.body) : null,
+    ui2.palette ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(CommandPalette, { key: ui2.palette.token, start: ui2.palette.query, token: ui2.palette.token, roster, actions, useSessions }), document.body) : null,
+    ui2.exchange ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(ExchangeDialog, { pair: ui2.exchange, roster, actions }), document.body) : null,
+    ui2.voice ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(VoiceMode, { key: ui2.voice, sessionId: ui2.voice, roster, actions, useSessions, useSessionStatus }), document.body) : null,
+    menu ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(ContextMenu, { key: `${menu.kind ?? ""}:${menu.id}:${menu.x}:${menu.y}`, menu, roster, actions, leaving: menuLeaving }), document.body) : null,
+    settings ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(SettingsDialog, { page: settings.page, id: settings.id, roster, actions, useUpdate, leaving: settingsLeaving }), document.body) : null,
+    memory && roster.byId[memory] ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(MemoryDialog, { key: memory, bot: roster.byId[memory], actions, leaving: memoryLeaving }), document.body) : null,
+    ui2.hint ? (0, import_react_dom10.createPortal)((0, import_react35.createElement)(SettingHint, { key: ui2.hint.token, hint: ui2.hint, actions }), document.body) : null
   );
 }
 
