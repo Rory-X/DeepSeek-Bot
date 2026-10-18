@@ -118,4 +118,7 @@ export const USER_MESSAGE_CSS = `
 .bt-urefs{font-size:13px;line-height:18px;color:var(--bt-ink-3)}
 .bt-utools{display:flex;flex:none;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
 .bt-umsg:hover .bt-utools,.bt-umsg:focus-within .bt-utools{opacity:1;visibility:visible}
+/* A touch pointer never hovers, and a visibility:hidden child cannot take focus, so the
+   copy button has no way to appear. Show it outright. */
+@media (hover:none){.bt-utools{opacity:1;visibility:visible}}
 `
