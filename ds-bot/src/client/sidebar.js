@@ -329,7 +329,7 @@ const CHIEF_COLLAPSE_AT = 24
 
 // The Main Bot's card is the list's first item, and on a phone a small pill stands in for
 // it once the list has moved and all but a sliver of the card is past the top edge. The
-// pill is a mark, not a control: it says who the team's Main Bot is while its card is away.
+// pill opens the Main Bot's conversation, the same move the card makes.
 function useChiefBar(listRef) {
   const [out, setOut] = useState(false)
   useEffect(() => {
@@ -351,11 +351,15 @@ function useChiefBar(listRef) {
 }
 
 // The card's stand-in: the mark with its Main Bot star, the name and the role, on a small
-// rounded card under the top row. It is not a control — the card is one scroll away.
-function ChiefBar({ main }) {
+// rounded card under the top row. It is a button, and it goes where the card goes.
+function ChiefBar({ main, actions }) {
   if (main === undefined) return null
   const name = main.name
-  return h('div', { className: 'bt-chief-bar', 'data-bt-chief-bar': '', role: 'status', 'aria-label': t('{name}, Main Bot', { name }) },
+  return h('button', {
+    type: 'button', className: 'bt-chief-bar', 'data-bt-chief-bar': '',
+    'aria-label': t("Open {name}'s chat", { name }), title: name,
+    onClick: () => actions.openSession(main.id),
+  },
     h(BotAvatar, { bot: main, size: 30, state: 'idle', main: true, badge: true, live: false }),
     h('span', { className: 'bt-chief-text' },
       h('span', { className: 'bt-chief-name' }, name),
@@ -387,7 +391,7 @@ function MobileNavList({ roster, actions, listRef, main, order, markedUnread, ro
     roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
     h('div', { className: 'bt-nav-body' },
       // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
-      chiefOut ? h(ChiefBar, { main }) : null,
+      chiefOut ? h(ChiefBar, { main, actions }) : null,
       h(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true })),
     menu.menu)
 }

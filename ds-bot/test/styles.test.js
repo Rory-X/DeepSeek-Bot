@@ -199,7 +199,9 @@ test('the phone stands in for the Main Bot card with a centred pill', () => {
   assert.match(pill, /left:50%;transform:translateX\(-50%\)/)
   assert.match(pill, /border-radius:16px/)
   assert.equal(/left:0;right:0/.test(pill), false, 'not a full-width bar')
-  assert.equal(/bt-chief-go/.test(css), false, 'the pill is not a control')
+  // The pill opens the Main Bot's conversation, so it is a control and takes a touch height.
+  assert.match(pill, /min-height:44px/)
+  assert.match(pill, /cursor:pointer/)
   const role = css.split('\n').find(line => line.includes('.bt-chief-role{'))
   assert.match(role, /color:var\(--bt-ink-3\)/, 'the role rides under the name')
 })

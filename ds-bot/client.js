@@ -1393,6 +1393,7 @@ function swipeBack(x, width, velocity) {
 var OWN_GESTURE = '[data-rightbar-col], .bt-panel, .bt-settings-layer, .bt-mem-layer, .bt-palette-layer, [role="dialog"]';
 function scrollsSideways(el) {
   for (let node = el; node !== null && node !== document.body; node = node.parentElement) {
+    if (node.hasAttribute("data-conversation-scroll")) continue;
     const style = getComputedStyle(node);
     if (!/auto|scroll/.test(style.overflowX)) continue;
     if (node.scrollWidth > node.clientWidth + 1) return true;
@@ -2806,7 +2807,8 @@ ${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"],${NOT_DESKTOP} bod
    list's scroll geometry must not change when it comes and goes, or the content under the
    reader's finger would move and the card could slide back into view by itself. */
 .bt-nav-body{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
-.bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:8px;max-width:min(300px,88%);padding:6px 12px 6px 6px;border-radius:16px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
+.bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:8px;max-width:min(300px,88%);min-height:44px;box-sizing:border-box;padding:6px 12px 6px 6px;border:0;border-radius:16px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font:inherit;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
+.bt-chief-bar:active{background:color-mix(in srgb,var(--bt-card),var(--bt-ink) 8%)}
 .bt-chief-text{display:flex;flex-direction:column;min-width:0;text-align:left}
 .bt-chief-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:20px;font-weight:600}
 .bt-chief-role{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
@@ -5823,12 +5825,19 @@ function useChiefBar(listRef) {
   }, [listRef]);
   return out;
 }
-function ChiefBar({ main }) {
+function ChiefBar({ main, actions }) {
   if (main === void 0) return null;
   const name = main.name;
   return (0, import_react9.createElement)(
-    "div",
-    { className: "bt-chief-bar", "data-bt-chief-bar": "", role: "status", "aria-label": t("{name}, Main Bot", { name }) },
+    "button",
+    {
+      type: "button",
+      className: "bt-chief-bar",
+      "data-bt-chief-bar": "",
+      "aria-label": t("Open {name}'s chat", { name }),
+      title: name,
+      onClick: () => actions.openSession(main.id)
+    },
     (0, import_react9.createElement)(BotAvatar, { bot: main, size: 30, state: "idle", main: true, badge: true, live: false }),
     (0, import_react9.createElement)(
       "span",
@@ -5872,7 +5881,7 @@ function MobileNavList({ roster, actions, listRef, main, order, markedUnread, ro
       "div",
       { className: "bt-nav-body" },
       // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
-      chiefOut ? (0, import_react9.createElement)(ChiefBar, { main }) : null,
+      chiefOut ? (0, import_react9.createElement)(ChiefBar, { main, actions }) : null,
       (0, import_react9.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true })
     ),
     menu.menu
@@ -14639,6 +14648,13 @@ function apply(ctx) {
     for (const [id, owner] of pendingAdopt) if (owner === agentId && !ids.includes(id)) ids.push(id);
     return ids;
   };
+  const COMPOSER_TAP_MS = 900;
+  let composerTappedAt = 0;
+  const composerField = (node) => {
+    if (!(node instanceof HTMLElement)) return null;
+    const field = node.closest("[role=textbox],input,textarea,[contenteditable=true]");
+    return field !== null && field.closest('[class*="_centerCol"]') !== null ? field : null;
+  };
   const actions = {
     ...teamActions({ call, after, partFor, roster, ui: ui2, live, cards, turnClock }),
     // The full-pane overlays sit above the conversation, so opening one must dismiss them
@@ -14962,6 +14978,25 @@ function apply(ctx) {
       listTo: "-18px"
     })
   }), "ds-bot: edge swipe back");
+  ctx.effect(() => {
+    const onFocusIn = (event) => {
+      if (!mobileNav.getSnapshot()) return;
+      const field = composerField(event.target);
+      if (field === null) return;
+      if (Date.now() - composerTappedAt < COMPOSER_TAP_MS) return;
+      field.blur();
+    };
+    const onPointerDown = (event) => {
+      if (!mobileNav.getSnapshot()) return;
+      if (composerField(event.target) !== null) composerTappedAt = Date.now();
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, "ds-bot: the phone keeps its keyboard down");
   ctx.effect(() => noticeApprovals({
     work,
     roster,

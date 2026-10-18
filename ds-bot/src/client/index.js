@@ -380,6 +380,17 @@ export function apply(ctx) {
     for (const [id, owner] of pendingAdopt) if (owner === agentId && !ids.includes(id)) ids.push(id)
     return ids
   }
+  // The shell focuses the resident composer whenever a Session opens and again when a turn
+  // ends. On a phone that raises the keyboard over the conversation the reader is looking at,
+  // and the shell has no way to ask for no focus, so the focus is handed straight back —
+  // unless the reader's own finger is on the box, which is the only focus a phone wants.
+  const COMPOSER_TAP_MS = 900
+  let composerTappedAt = 0
+  const composerField = (node) => {
+    if (!(node instanceof HTMLElement)) return null
+    const field = node.closest('[role=textbox],input,textarea,[contenteditable=true]')
+    return field !== null && field.closest('[class*="_centerCol"]') !== null ? field : null
+  }
   const actions = {
     ...teamActions({ call, after, partFor, roster, ui, live, cards, turnClock }),
     // The full-pane overlays sit above the conversation, so opening one must dismiss them
@@ -727,6 +738,25 @@ export function apply(ctx) {
       listTo: '-18px',
     }),
   }), 'ds-bot: edge swipe back')
+  ctx.effect(() => {
+    const onFocusIn = (event) => {
+      if (!mobileNav.getSnapshot()) return
+      const field = composerField(event.target)
+      if (field === null) return
+      if (Date.now() - composerTappedAt < COMPOSER_TAP_MS) return
+      field.blur()
+    }
+    const onPointerDown = (event) => {
+      if (!mobileNav.getSnapshot()) return
+      if (composerField(event.target) !== null) composerTappedAt = Date.now()
+    }
+    document.addEventListener('focusin', onFocusIn, true)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      document.removeEventListener('focusin', onFocusIn, true)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+    }
+  }, 'ds-bot: the phone keeps its keyboard down')
   ctx.effect(() => noticeApprovals({
     work,
     roster,

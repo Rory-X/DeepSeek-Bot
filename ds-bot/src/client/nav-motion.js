@@ -32,6 +32,11 @@ const OWN_GESTURE = '[data-rightbar-col], .bt-panel, .bt-settings-layer, .bt-mem
 
 function scrollsSideways(el) {
   for (let node = el; node !== null && node !== document.body; node = node.parentElement) {
+    // The conversation's own scrollport is the vertical transcript, and the CSS that makes
+    // it scroll vertically forces its `overflow-x` to `auto`. Its content being a few pixels
+    // wider than its box — a message's toolbar sits past its bubble — is not a sideways
+    // scroller, and it must not veto the gesture that leaves the conversation.
+    if (node.hasAttribute('data-conversation-scroll')) continue
     const style = getComputedStyle(node)
     if (!/auto|scroll/.test(style.overflowX)) continue
     if (node.scrollWidth > node.clientWidth + 1) return true
