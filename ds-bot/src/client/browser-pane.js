@@ -560,6 +560,9 @@ export const BROWSER_CSS = `
 .bt-bcard-host{flex:none;font-size:11px;line-height:15px;color:var(--bt-ink-3);max-width:38%;overflow:hidden;text-overflow:ellipsis}
 .bt-bcard-x{position:absolute;top:6px;right:6px;width:22px;height:22px;border:0;border-radius:7px;background:color-mix(in srgb,var(--bt-main) 88%,transparent);color:var(--bt-ink-2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;opacity:0;transition:opacity .12s ease;backdrop-filter:blur(4px)}
 .bt-bcard:hover .bt-bcard-x{opacity:1}
+/* A touch pointer never hovers, so these close buttons stay invisible yet keep their hit
+   area: a tap near the corner closes a tab or a page by accident. Show them instead. */
+@media (hover:none){.bt-ptab-x,.bt-bcard-x{opacity:1}}
 .bt-bcard-new{display:flex;align-items:center;justify-content:center;gap:6px;height:40px;border:.5px dashed var(--bt-line-2);border-radius:12px;background:none;color:var(--bt-ink-3);font:inherit;font-size:12.5px;cursor:pointer}
 .bt-bcard-new:hover{color:var(--bt-ink);border-color:var(--bt-ink-3)}
 .bt-bcard-new svg{width:14px;height:14px}
