@@ -369,9 +369,23 @@ function ChiefBar({ main, actions }) {
 // The phone's list page: the same list as the sidebar, on a page of its own. Its root
 // carries the hook the styles and the test bench read, and its brand opens the same
 // account menu the footer avatar does — the shell's settings seat is not on this page.
+// The page is unmounted whenever a conversation holds the screen, and how far the reader
+// had scrolled is part of the way back: the return hands them the list they left rather
+// than its top, so the position is kept here, outside the page that comes and goes.
+let listScrollTop = 0
+
 function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, 'down')
   const chiefOut = useChiefBar(listRef)
+  // Restored before the first paint, so the list is never shown at its top first.
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (list === null) return undefined
+    list.scrollTop = listScrollTop
+    const save = () => { listScrollTop = list.scrollTop }
+    list.addEventListener('scroll', save, { passive: true })
+    return () => { save(); list.removeEventListener('scroll', save) }
+  }, [listRef])
   // The state is published for the styles and the test bench: `collapsed` while the pill
   // stands in, `expanded` while the card is in place. It exists only while this page does,
   // which is only where the judgment holds.

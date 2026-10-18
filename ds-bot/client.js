@@ -5851,9 +5851,23 @@ function ChiefBar({ main, actions }) {
     )
   );
 }
+var listScrollTop = 0;
 function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, "down");
   const chiefOut = useChiefBar(listRef);
+  (0, import_react9.useLayoutEffect)(() => {
+    const list = listRef.current;
+    if (list === null) return void 0;
+    list.scrollTop = listScrollTop;
+    const save = () => {
+      listScrollTop = list.scrollTop;
+    };
+    list.addEventListener("scroll", save, { passive: true });
+    return () => {
+      save();
+      list.removeEventListener("scroll", save);
+    };
+  }, [listRef]);
   (0, import_react9.useEffect)(() => {
     document.body.dataset.btChief = chiefOut ? "collapsed" : "expanded";
     return () => {
