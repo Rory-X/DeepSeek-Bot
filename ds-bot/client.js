@@ -14670,9 +14670,17 @@ function apply(ctx) {
   const browserPages = browsers?.pages ?? createSource({});
   const browserTabs = browsers?.tabs ?? createSource({});
   const face = () => ({ actions, hooks: { roster, ui: ui2, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel } });
+  const coverConversation = (covered) => {
+    for (const column of document.querySelectorAll('[class*="_centerCol"]')) {
+      if (covered) column.setAttribute("inert", "");
+      else column.removeAttribute("inert");
+    }
+  };
   const syncNav = () => {
-    if (mobileNav.getSnapshot() && !surface.getSnapshot().plain) document.body.dataset.btNav = navLevel.getSnapshot();
+    const nav = mobileNav.getSnapshot() && !surface.getSnapshot().plain;
+    if (nav) document.body.dataset.btNav = navLevel.getSnapshot();
     else delete document.body.dataset.btNav;
+    coverConversation(nav && navLevel.getSnapshot() === "list");
   };
   ctx.effect(() => {
     const watch = watchMobileNav((value) => {
@@ -14680,12 +14688,13 @@ function apply(ctx) {
       navLevel.set("list");
     });
     mobileNav.set(watch.read());
-    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav)];
+    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav), roster.subscribe(syncNav), ctx.sessions.list.subscribe(syncNav)];
     syncNav();
     return () => {
       watch.dispose();
       for (const off of offs) off();
       delete document.body.dataset.btNav;
+      coverConversation(false);
     };
   }, "ds-bot: mobile navigation");
   ctx.effect(() => noticeApprovals({

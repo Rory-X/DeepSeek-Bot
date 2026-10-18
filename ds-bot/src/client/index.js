@@ -610,19 +610,34 @@ export function apply(ctx) {
   // The level is published on <body> so the styles, the test bench and a screen reader all
   // read the same fact; it is absent whenever the navigation is not in effect (a desktop,
   // or the plain surface an Agent Session gets).
+  // The list page is a layer of its own over the conversation, so while it is up the
+  // covered column is marked inert: its header and messages are neither announced nor
+  // reachable by a tab or a stray click. The list page itself is portalled to the body,
+  // and the shell's overlay layer (the toast, a sign-in) stays outside the column.
+  const coverConversation = (covered) => {
+    for (const column of document.querySelectorAll('[class*="_centerCol"]')) {
+      if (covered) column.setAttribute('inert', '')
+      else column.removeAttribute('inert')
+    }
+  }
   const syncNav = () => {
-    if (mobileNav.getSnapshot() && !surface.getSnapshot().plain) document.body.dataset.btNav = navLevel.getSnapshot()
+    const nav = mobileNav.getSnapshot() && !surface.getSnapshot().plain
+    if (nav) document.body.dataset.btNav = navLevel.getSnapshot()
     else delete document.body.dataset.btNav
+    coverConversation(nav && navLevel.getSnapshot() === 'list')
   }
   ctx.effect(() => {
     const watch = watchMobileNav((value) => { mobileNav.set(value); navLevel.set('list') })
     mobileNav.set(watch.read())
-    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav)]
+    // The shell's frame is not up yet when the plugin boots, so the level is re-synced on
+    // the state that arrives after it is: the roster and the session list.
+    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav), roster.subscribe(syncNav), ctx.sessions.list.subscribe(syncNav)]
     syncNav()
     return () => {
       watch.dispose()
       for (const off of offs) off()
       delete document.body.dataset.btNav
+      coverConversation(false)
     }
   }, 'ds-bot: mobile navigation')
   ctx.effect(() => noticeApprovals({
