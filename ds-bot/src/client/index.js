@@ -393,7 +393,7 @@ export function apply(ctx) {
       const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === 'list'
       if (fromList) {
         navOrigin.set('list')
-        runMotion('push', { from: '100%', to: '0' })
+        runMotion('push', { from: '100%', to: '0px', listFrom: '0px', listTo: '-18px' })
       }
       // Opening a conversation is what leaves the phone's list page.
       navLevel.set('chat')
@@ -409,7 +409,7 @@ export function apply(ctx) {
       const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === 'list'
       if (fromList) {
         navOrigin.set('list')
-        runMotion('push', { from: '100%', to: '0' })
+        runMotion('push', { from: '100%', to: '0px', listFrom: '0px', listTo: '-18px' })
       }
       navLevel.set('chat')
       ui.set(state => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: 'details', renaming: false, tab: null }))
@@ -490,7 +490,8 @@ export function apply(ctx) {
       }
       const origin = navOrigin.getSnapshot() ?? 'list'
       const from = document.body.style.getPropertyValue('--bt-nav-x') || '0px'
-      runMotion('pop', { from, to: '100%', done: () => { navOrigin.set(null); navLevel.set(origin) } })
+      const listFrom = document.body.style.getPropertyValue('--bt-nav-list-x') || '-18px'
+      runMotion('pop', { from, to: '100%', listFrom, listTo: '0px', done: () => { navOrigin.set(null); navLevel.set(origin) } })
     },
     showBotList: () => actions.goBack(),
     // Agent mode hands the surface back to the shell; everything open on the Bot
@@ -659,17 +660,20 @@ export function apply(ctx) {
   // state the reader sees, and the timers are what end it. `hold` seats the start position
   // without a transition, so the movement runs from there.
   let motionTimer = 0
-  const setMotion = (phase, x) => {
+  const setMotion = (phase, x, listX) => {
     if (navMotion.getSnapshot() !== phase) navMotion.set(phase)
     if (phase === 'idle') delete document.body.dataset.btNavMotion
     else document.body.dataset.btNavMotion = phase
     if (x === undefined) document.body.style.removeProperty('--bt-nav-x')
     else document.body.style.setProperty('--bt-nav-x', x)
+    // The page that is being left yields a little, so the two move as one gesture.
+    if (listX === undefined) document.body.style.removeProperty('--bt-nav-list-x')
+    else document.body.style.setProperty('--bt-nav-list-x', listX)
   }
-  const runMotion = (phase, { from, to, done, ms = NAV_MOTION_MS }) => {
+  const runMotion = (phase, { from, to, listFrom, listTo, done, ms = NAV_MOTION_MS }) => {
     clearTimeout(motionTimer)
     const start = () => {
-      setMotion(phase, to)
+      setMotion(phase, to, listTo)
       motionTimer = setTimeout(() => {
         setMotion('idle')
         done?.()
@@ -681,7 +685,7 @@ export function apply(ctx) {
     const now = document.body.style.getPropertyValue('--bt-nav-x') || '0px'
     if (now === from) start()
     else {
-      setMotion('hold', from)
+      setMotion('hold', from, listFrom)
       requestAnimationFrame(start)
     }
   }
@@ -711,9 +715,17 @@ export function apply(ctx) {
     canStart: () => mobileNav.getSnapshot() && !surface.getSnapshot().plain && navLevel.getSnapshot() === 'chat'
       && ui.getSnapshot().details === null && ui.getSnapshot().settings === null && ui.getSnapshot().newChat === null,
     onStart: () => setMotion('drag', '0px'),
-    onMove: (x) => document.body.style.setProperty('--bt-nav-x', `${x}px`),
+    onMove: (x, width) => {
+      document.body.style.setProperty('--bt-nav-x', `${x}px`)
+      document.body.style.setProperty('--bt-nav-list-x', `${(-18 * (1 - x / width)).toFixed(1)}px`)
+    },
     onCommit: () => actions.goBack(),
-    onCancel: () => runMotion('cancel', { from: document.body.style.getPropertyValue('--bt-nav-x') || '0px', to: '0px' }),
+    onCancel: () => runMotion('cancel', {
+      from: document.body.style.getPropertyValue('--bt-nav-x') || '0px',
+      to: '0px',
+      listFrom: document.body.style.getPropertyValue('--bt-nav-list-x') || '-18px',
+      listTo: '-18px',
+    }),
   }), 'ds-bot: edge swipe back')
   ctx.effect(() => noticeApprovals({
     work,

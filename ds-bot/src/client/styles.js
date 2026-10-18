@@ -593,13 +593,10 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [da
    swipe sets the same offset by hand, which is why one variable drives both. */
 ${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{position:relative;z-index:36;transform:translateX(var(--bt-nav-x,0px))}
 ${NOT_DESKTOP} body[data-bt-nav-motion=push] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=pop] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=cancel] [class*="_centerCol"]{transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
-${NOT_DESKTOP} body[data-bt-nav-motion=pop] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=drag] .bt-nav-page{animation:bt-nav-list-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
-${NOT_DESKTOP} body[data-bt-nav-motion=push] .bt-nav-page{animation:bt-nav-list-out ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing} forwards}
-@keyframes bt-nav-list-in{from{transform:translateX(-14%);opacity:.55}to{transform:none;opacity:1}}
-@keyframes bt-nav-list-out{from{transform:none;opacity:1}to{transform:translateX(-14%);opacity:.55}}
+${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{transform:translateX(var(--bt-nav-list-x,0px))}
+${NOT_DESKTOP} body[data-bt-nav-motion=push] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=pop] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=cancel] .bt-nav-page{transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
 @media (prefers-reduced-motion:reduce){
-${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{transition:none}
-${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{animation:none}
+${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{transition:none}
 }
 /* The Main Bot's card is the list's first item; once it has scrolled away a small rounded
    card under the top row says who it is — the mark with its Main Bot star, the name and the

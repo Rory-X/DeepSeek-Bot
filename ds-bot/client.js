@@ -2795,13 +2795,10 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [da
    swipe sets the same offset by hand, which is why one variable drives both. */
 ${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{position:relative;z-index:36;transform:translateX(var(--bt-nav-x,0px))}
 ${NOT_DESKTOP} body[data-bt-nav-motion=push] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=pop] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=cancel] [class*="_centerCol"]{transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
-${NOT_DESKTOP} body[data-bt-nav-motion=pop] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=drag] .bt-nav-page{animation:bt-nav-list-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
-${NOT_DESKTOP} body[data-bt-nav-motion=push] .bt-nav-page{animation:bt-nav-list-out ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing} forwards}
-@keyframes bt-nav-list-in{from{transform:translateX(-14%);opacity:.55}to{transform:none;opacity:1}}
-@keyframes bt-nav-list-out{from{transform:none;opacity:1}to{transform:translateX(-14%);opacity:.55}}
+${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{transform:translateX(var(--bt-nav-list-x,0px))}
+${NOT_DESKTOP} body[data-bt-nav-motion=push] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=pop] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=cancel] .bt-nav-page{transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
 @media (prefers-reduced-motion:reduce){
-${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{transition:none}
-${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{animation:none}
+${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{transition:none}
 }
 /* The Main Bot's card is the list's first item; once it has scrolled away a small rounded
    card under the top row says who it is — the mark with its Main Bot star, the name and the
@@ -14652,7 +14649,7 @@ function apply(ctx) {
       const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === "list";
       if (fromList) {
         navOrigin.set("list");
-        runMotion("push", { from: "100%", to: "0" });
+        runMotion("push", { from: "100%", to: "0px", listFrom: "0px", listTo: "-18px" });
       }
       navLevel.set("chat");
       ui2.set((state) => state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state);
@@ -14667,7 +14664,7 @@ function apply(ctx) {
       const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === "list";
       if (fromList) {
         navOrigin.set("list");
-        runMotion("push", { from: "100%", to: "0" });
+        runMotion("push", { from: "100%", to: "0px", listFrom: "0px", listTo: "-18px" });
       }
       navLevel.set("chat");
       ui2.set((state) => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: "details", renaming: false, tab: null }));
@@ -14752,7 +14749,8 @@ function apply(ctx) {
       }
       const origin = navOrigin.getSnapshot() ?? "list";
       const from = document.body.style.getPropertyValue("--bt-nav-x") || "0px";
-      runMotion("pop", { from, to: "100%", done: () => {
+      const listFrom = document.body.style.getPropertyValue("--bt-nav-list-x") || "-18px";
+      runMotion("pop", { from, to: "100%", listFrom, listTo: "0px", done: () => {
         navOrigin.set(null);
         navLevel.set(origin);
       } });
@@ -14901,17 +14899,19 @@ function apply(ctx) {
     }
   };
   let motionTimer = 0;
-  const setMotion = (phase, x) => {
+  const setMotion = (phase, x, listX) => {
     if (navMotion.getSnapshot() !== phase) navMotion.set(phase);
     if (phase === "idle") delete document.body.dataset.btNavMotion;
     else document.body.dataset.btNavMotion = phase;
     if (x === void 0) document.body.style.removeProperty("--bt-nav-x");
     else document.body.style.setProperty("--bt-nav-x", x);
+    if (listX === void 0) document.body.style.removeProperty("--bt-nav-list-x");
+    else document.body.style.setProperty("--bt-nav-list-x", listX);
   };
-  const runMotion = (phase, { from, to, done, ms = NAV_MOTION_MS }) => {
+  const runMotion = (phase, { from, to, listFrom, listTo, done, ms = NAV_MOTION_MS }) => {
     clearTimeout(motionTimer);
     const start = () => {
-      setMotion(phase, to);
+      setMotion(phase, to, listTo);
       motionTimer = setTimeout(() => {
         setMotion("idle");
         done?.();
@@ -14920,7 +14920,7 @@ function apply(ctx) {
     const now = document.body.style.getPropertyValue("--bt-nav-x") || "0px";
     if (now === from) start();
     else {
-      setMotion("hold", from);
+      setMotion("hold", from, listFrom);
       requestAnimationFrame(start);
     }
   };
@@ -14950,9 +14950,17 @@ function apply(ctx) {
     // the plain surface an Agent Session gets.
     canStart: () => mobileNav.getSnapshot() && !surface.getSnapshot().plain && navLevel.getSnapshot() === "chat" && ui2.getSnapshot().details === null && ui2.getSnapshot().settings === null && ui2.getSnapshot().newChat === null,
     onStart: () => setMotion("drag", "0px"),
-    onMove: (x) => document.body.style.setProperty("--bt-nav-x", `${x}px`),
+    onMove: (x, width) => {
+      document.body.style.setProperty("--bt-nav-x", `${x}px`);
+      document.body.style.setProperty("--bt-nav-list-x", `${(-18 * (1 - x / width)).toFixed(1)}px`);
+    },
     onCommit: () => actions.goBack(),
-    onCancel: () => runMotion("cancel", { from: document.body.style.getPropertyValue("--bt-nav-x") || "0px", to: "0px" })
+    onCancel: () => runMotion("cancel", {
+      from: document.body.style.getPropertyValue("--bt-nav-x") || "0px",
+      to: "0px",
+      listFrom: document.body.style.getPropertyValue("--bt-nav-list-x") || "-18px",
+      listTo: "-18px"
+    })
   }), "ds-bot: edge swipe back");
   ctx.effect(() => noticeApprovals({
     work,
