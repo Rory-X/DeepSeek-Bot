@@ -317,16 +317,22 @@ function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTim
 }
 
 // The phone's list page: the same list as the sidebar, on a page of its own. Its root
-// carries the hook the styles and the test bench read.
+// carries the hook the styles and the test bench read, and its brand opens the same
+// account menu the footer avatar does — the shell's settings seat is not on this page.
 function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+  const menu = useAccountMenu(actions, 'down')
   return h('div', { className: 'bt-nav-page', 'data-bt-nav': 'list', onKeyDown: typeToSearch },
     h('div', { className: 'bt-nav-top' },
-      h('span', { className: 'bt-brand' }, h(BrandMark, { size: 22 }), h(BrandName)),
+      h('button', {
+        ref: menu.anchor, type: 'button', className: 'bt-brand bt-nav-account', 'aria-label': t('Account'),
+        'aria-haspopup': 'menu', 'aria-expanded': menu.open, 'data-bt-settings-entry': '', onClick: menu.toggle,
+      }, h(BrandMark, { size: 22 }), h(BrandName)),
       h(UpdateButton, { useUpdate, actions }),
       h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Search'), title: t('Search'), onClick: () => actions.openPalette() }, h(SearchIcon)),
       h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
     roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
-    h(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true }))
+    h(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true }),
+    menu.menu)
 }
 
 // The update button at the sidebar's top right: a cloud while a newer DS Bot —
@@ -509,21 +515,69 @@ function pressSettingsShortcut() {
   }))
 }
 
+// The account menu's entries. The footer avatar and the phone's list page open the same
+// menu, so it is built in one place.
+function accountGroups(actions) {
+  return [
+    [
+      [t('Usage'), GaugeIcon, () => actions.openSettings('usage')],
+      [t('Connectors'), ConnectorIcon, () => actions.openConnectors()],
+      [t('Automation tasks'), ClockIcon, () => actions.selectPanel('schedules')],
+      [t('Bot settings'), GearIcon, () => actions.openSettings('general')],
+    ],
+    [
+      [t('Switch to classic Agent mode'), SwitchIcon, () => actions.setSurface('agent')],
+    ],
+  ]
+}
+
+// One account menu: `up` opens above its trigger (the footer avatar), `down` below it (the
+// phone's list page, whose trigger is at the top of the screen). Outside a press or Escape
+// closes it, and the trigger keeps the focus.
+function useAccountMenu(actions, place = 'up') {
+  const [open, setOpen] = useState(false)
+  const [box, setBox] = useState(null)
+  const anchor = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (event) => {
+      if (event.target instanceof Element && (event.target.closest('.bt-account-menu') || anchor.current?.contains(event.target))) return
+      setOpen(false)
+    }
+    const onKey = (event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); anchor.current?.focus() } }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey, true)
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true) }
+  }, [open])
+  const toggle = () => {
+    const rect = anchor.current?.getBoundingClientRect()
+    if (rect) setBox(place === 'down' ? { left: rect.left, top: rect.bottom + 6 } : { left: rect.left, bottom: window.innerHeight - rect.top + 5 })
+    setOpen(value => !value)
+  }
+  const menu = open && box ? createPortal(h('div', {
+    className: `bt-menu bt-account-menu${place === 'up' ? ' bt-menu-up' : ''}`, role: 'menu', 'aria-label': t('Account'), style: box,
+  }, accountGroups(actions).map((group, index) => h(Fragment, { key: index },
+    index > 0 ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
+    group.map(([label, Icon, run]) => h('button', {
+      key: label, type: 'button', role: 'menuitem',
+      onClick: () => { setOpen(false); void Promise.resolve(run()).catch(error => actions.reportError(error, 'menu')) },
+    }, h(Icon), h('span', { className: 'bt-menu-label' }, label)))))), document.body) : null
+  return { open, anchor, toggle, menu, close: () => setOpen(false) }
+}
+
 // The footer avatar opens an account menu above itself, with Bot settings as one
 // entry. Shell panels hidden from the Bot sidebar (plugins, automation) live here too.
 // `seat` is the shell's settings.launcher seat: at priority -10 the whale wins it
 // over a shell account plugin's own launcher (the Desktop's "··· More"), which comes
 // back in Agent mode; FooterAccount stands in while no seat exists at all.
 export function AccountLauncher({ seat = true, settingsOpen, openSettings, openOnboarding, actions }) {
-  const [open, setOpen] = useState(false)
+  const menu = useAccountMenu(actions, 'up')
   useLayoutEffect(() => {
     if (!seat) return undefined
     actions.seatAccount(true)
     return () => actions.seatAccount(false)
   }, [seat])
-  const [box, setBox] = useState(null)
-  const button = useRef(null)
-  useEffect(() => { if (settingsOpen) setOpen(false) }, [settingsOpen])
+  useEffect(() => { if (settingsOpen) menu.close() }, [settingsOpen])
   // The settings dialog links back to the shell's own settings (models, providers).
   useEffect(() => {
     if (!openSettings) return undefined
@@ -535,43 +589,10 @@ export function AccountLauncher({ seat = true, settingsOpen, openSettings, openO
     openShellOnboarding = openOnboarding
     return () => { if (openShellOnboarding === openOnboarding) openShellOnboarding = null }
   }, [openOnboarding])
-  useEffect(() => {
-    if (!open) return undefined
-    const onDown = (event) => {
-      if (event.target instanceof Element && (event.target.closest('.bt-account-menu') || button.current?.contains(event.target))) return
-      setOpen(false)
-    }
-    const onKey = (event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); button.current?.focus() } }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey, true)
-    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true) }
-  }, [open])
-  const toggle = () => {
-    const rect = button.current?.getBoundingClientRect()
-    if (rect) setBox({ left: rect.left, bottom: window.innerHeight - rect.top + 5 })
-    setOpen(value => !value)
-  }
-  const groups = [
-    [
-      [t('Usage'), GaugeIcon, () => actions.openSettings('usage')],
-      [t('Connectors'), ConnectorIcon, () => actions.openConnectors()],
-      [t('Automation tasks'), ClockIcon, () => actions.selectPanel('schedules')],
-      [t('Bot settings'), GearIcon, () => actions.openSettings('general')],
-    ],
-    [
-      [t('Switch to classic Agent mode'), SwitchIcon, () => actions.setSurface('agent')],
-    ],
-  ]
   return h(Fragment, null,
-    h('button', { ref: button, type: 'button', className: 'bt-account', 'aria-label': t('Account'), 'aria-haspopup': 'menu', 'aria-expanded': open, onClick: toggle },
+    h('button', { ref: menu.anchor, type: 'button', className: 'bt-account', 'aria-label': t('Account'), 'aria-haspopup': 'menu', 'aria-expanded': menu.open, onClick: menu.toggle },
       h('span', { className: 'bt-you', 'aria-hidden': true }, h(BotMark, { look: MAIN_LOOK, size: 24 }))),
-    open && box ? createPortal(h('div', { className: 'bt-menu bt-menu-up bt-account-menu', role: 'menu', 'aria-label': t('Account'), style: box },
-      groups.map((group, index) => h(Fragment, { key: index },
-        index > 0 ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
-        group.map(([label, Icon, run, hint]) => h('button', {
-          key: label, type: 'button', role: 'menuitem',
-          onClick: () => { setOpen(false); void Promise.resolve(run()).catch(error => actions.reportError(error, 'menu')) },
-        }, h(Icon), h('span', { className: 'bt-menu-label' }, label), hint ? h('span', { className: 'bt-menu-hint' }, hint) : null))))), document.body) : null)
+    menu.menu)
 }
 
 // Opens the Main Bot whenever the main view holds no Bot conversation, the way

@@ -2707,6 +2707,12 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
    positions itself against: the column covers the viewport with it, so the panel is the
    whole screen and the shell's own chrome inside it is the way out. */
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+/* The phone's list page opens the account menu from its own brand: the entries take a
+   touch height, the menu scrolls where it is long, and it stays clear of the home bar. */
+${NOT_DESKTOP} .bt-nav-account{cursor:pointer;min-height:44px;padding:6px 10px}
+${NOT_DESKTOP} .bt-account-menu{width:min(300px,calc(100% - 20px));max-height:min(70vh,420px);overflow-y:auto;overscroll-behavior:contain;padding-bottom:calc(6px + env(safe-area-inset-bottom))}
+${NOT_DESKTOP} .bt-account-menu button{min-height:44px;padding:10px 12px;font-size:15px;line-height:22px}
+${NOT_DESKTOP} .bt-account-menu button svg{width:18px;height:18px}
 /* The page itself must not move under a finger: no rubber-band, no pull-to-refresh, and no
    pinch or double-tap zoom. Panning stays in the allowed set, so the chat and every inner
    list keep scrolling; the page has nothing to pan, its frame is the viewport. */
@@ -5692,19 +5698,30 @@ function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTim
   );
 }
 function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+  const menu = useAccountMenu(actions, "down");
   return (0, import_react9.createElement)(
     "div",
     { className: "bt-nav-page", "data-bt-nav": "list", onKeyDown: typeToSearch },
     (0, import_react9.createElement)(
       "div",
       { className: "bt-nav-top" },
-      (0, import_react9.createElement)("span", { className: "bt-brand" }, (0, import_react9.createElement)(BrandMark, { size: 22 }), (0, import_react9.createElement)(BrandName)),
+      (0, import_react9.createElement)("button", {
+        ref: menu.anchor,
+        type: "button",
+        className: "bt-brand bt-nav-account",
+        "aria-label": t("Account"),
+        "aria-haspopup": "menu",
+        "aria-expanded": menu.open,
+        "data-bt-settings-entry": "",
+        onClick: menu.toggle
+      }, (0, import_react9.createElement)(BrandMark, { size: 22 }), (0, import_react9.createElement)(BrandName)),
       (0, import_react9.createElement)(UpdateButton, { useUpdate, actions }),
       (0, import_react9.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Search"), title: t("Search"), onClick: () => actions.openPalette() }, (0, import_react9.createElement)(SearchIcon)),
       (0, import_react9.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react9.createElement)(PlusIcon))
     ),
     roster.readOnly ? (0, import_react9.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
-    (0, import_react9.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true })
+    (0, import_react9.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true }),
+    menu.menu
   );
 }
 function UpdateButton({ useUpdate, actions }) {
@@ -5924,17 +5941,78 @@ function pressSettingsShortcut() {
     metaKey: held.has("meta")
   }));
 }
-function AccountLauncher({ seat = true, settingsOpen, openSettings, openOnboarding, actions }) {
+function accountGroups(actions) {
+  return [
+    [
+      [t("Usage"), GaugeIcon, () => actions.openSettings("usage")],
+      [t("Connectors"), ConnectorIcon, () => actions.openConnectors()],
+      [t("Automation tasks"), ClockIcon, () => actions.selectPanel("schedules")],
+      [t("Bot settings"), GearIcon, () => actions.openSettings("general")]
+    ],
+    [
+      [t("Switch to classic Agent mode"), SwitchIcon, () => actions.setSurface("agent")]
+    ]
+  ];
+}
+function useAccountMenu(actions, place = "up") {
   const [open, setOpen] = (0, import_react9.useState)(false);
+  const [box, setBox] = (0, import_react9.useState)(null);
+  const anchor = (0, import_react9.useRef)(null);
+  (0, import_react9.useEffect)(() => {
+    if (!open) return void 0;
+    const onDown = (event) => {
+      if (event.target instanceof Element && (event.target.closest(".bt-account-menu") || anchor.current?.contains(event.target))) return;
+      setOpen(false);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+        anchor.current?.focus();
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
+  const toggle = () => {
+    const rect = anchor.current?.getBoundingClientRect();
+    if (rect) setBox(place === "down" ? { left: rect.left, top: rect.bottom + 6 } : { left: rect.left, bottom: window.innerHeight - rect.top + 5 });
+    setOpen((value) => !value);
+  };
+  const menu = open && box ? (0, import_react_dom3.createPortal)((0, import_react9.createElement)("div", {
+    className: `bt-menu bt-account-menu${place === "up" ? " bt-menu-up" : ""}`,
+    role: "menu",
+    "aria-label": t("Account"),
+    style: box
+  }, accountGroups(actions).map((group, index) => (0, import_react9.createElement)(
+    import_react9.Fragment,
+    { key: index },
+    index > 0 ? (0, import_react9.createElement)("div", { className: "bt-menu-sep", role: "separator" }) : null,
+    group.map(([label, Icon, run]) => (0, import_react9.createElement)("button", {
+      key: label,
+      type: "button",
+      role: "menuitem",
+      onClick: () => {
+        setOpen(false);
+        void Promise.resolve(run()).catch((error) => actions.reportError(error, "menu"));
+      }
+    }, (0, import_react9.createElement)(Icon), (0, import_react9.createElement)("span", { className: "bt-menu-label" }, label)))
+  ))), document.body) : null;
+  return { open, anchor, toggle, menu, close: () => setOpen(false) };
+}
+function AccountLauncher({ seat = true, settingsOpen, openSettings, openOnboarding, actions }) {
+  const menu = useAccountMenu(actions, "up");
   (0, import_react9.useLayoutEffect)(() => {
     if (!seat) return void 0;
     actions.seatAccount(true);
     return () => actions.seatAccount(false);
   }, [seat]);
-  const [box, setBox] = (0, import_react9.useState)(null);
-  const button = (0, import_react9.useRef)(null);
   (0, import_react9.useEffect)(() => {
-    if (settingsOpen) setOpen(false);
+    if (settingsOpen) menu.close();
   }, [settingsOpen]);
   (0, import_react9.useEffect)(() => {
     if (!openSettings) return void 0;
@@ -5950,68 +6028,15 @@ function AccountLauncher({ seat = true, settingsOpen, openSettings, openOnboardi
       if (openShellOnboarding === openOnboarding) openShellOnboarding = null;
     };
   }, [openOnboarding]);
-  (0, import_react9.useEffect)(() => {
-    if (!open) return void 0;
-    const onDown = (event) => {
-      if (event.target instanceof Element && (event.target.closest(".bt-account-menu") || button.current?.contains(event.target))) return;
-      setOpen(false);
-    };
-    const onKey = (event) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setOpen(false);
-        button.current?.focus();
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
-  const toggle = () => {
-    const rect = button.current?.getBoundingClientRect();
-    if (rect) setBox({ left: rect.left, bottom: window.innerHeight - rect.top + 5 });
-    setOpen((value) => !value);
-  };
-  const groups = [
-    [
-      [t("Usage"), GaugeIcon, () => actions.openSettings("usage")],
-      [t("Connectors"), ConnectorIcon, () => actions.openConnectors()],
-      [t("Automation tasks"), ClockIcon, () => actions.selectPanel("schedules")],
-      [t("Bot settings"), GearIcon, () => actions.openSettings("general")]
-    ],
-    [
-      [t("Switch to classic Agent mode"), SwitchIcon, () => actions.setSurface("agent")]
-    ]
-  ];
   return (0, import_react9.createElement)(
     import_react9.Fragment,
     null,
     (0, import_react9.createElement)(
       "button",
-      { ref: button, type: "button", className: "bt-account", "aria-label": t("Account"), "aria-haspopup": "menu", "aria-expanded": open, onClick: toggle },
+      { ref: menu.anchor, type: "button", className: "bt-account", "aria-label": t("Account"), "aria-haspopup": "menu", "aria-expanded": menu.open, onClick: menu.toggle },
       (0, import_react9.createElement)("span", { className: "bt-you", "aria-hidden": true }, (0, import_react9.createElement)(BotMark, { look: MAIN_LOOK, size: 24 }))
     ),
-    open && box ? (0, import_react_dom3.createPortal)((0, import_react9.createElement)(
-      "div",
-      { className: "bt-menu bt-menu-up bt-account-menu", role: "menu", "aria-label": t("Account"), style: box },
-      groups.map((group, index) => (0, import_react9.createElement)(
-        import_react9.Fragment,
-        { key: index },
-        index > 0 ? (0, import_react9.createElement)("div", { className: "bt-menu-sep", role: "separator" }) : null,
-        group.map(([label, Icon, run, hint]) => (0, import_react9.createElement)("button", {
-          key: label,
-          type: "button",
-          role: "menuitem",
-          onClick: () => {
-            setOpen(false);
-            void Promise.resolve(run()).catch((error) => actions.reportError(error, "menu"));
-          }
-        }, (0, import_react9.createElement)(Icon), (0, import_react9.createElement)("span", { className: "bt-menu-label" }, label), hint ? (0, import_react9.createElement)("span", { className: "bt-menu-hint" }, hint) : null))
-      ))
-    ), document.body) : null
+    menu.menu
   );
 }
 function useLandOnMainBot(roster, useSessions, actions) {

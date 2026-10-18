@@ -585,6 +585,12 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
    positions itself against: the column covers the viewport with it, so the panel is the
    whole screen and the shell's own chrome inside it is the way out. */
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+/* The phone's list page opens the account menu from its own brand: the entries take a
+   touch height, the menu scrolls where it is long, and it stays clear of the home bar. */
+${NOT_DESKTOP} .bt-nav-account{cursor:pointer;min-height:44px;padding:6px 10px}
+${NOT_DESKTOP} .bt-account-menu{width:min(300px,calc(100% - 20px));max-height:min(70vh,420px);overflow-y:auto;overscroll-behavior:contain;padding-bottom:calc(6px + env(safe-area-inset-bottom))}
+${NOT_DESKTOP} .bt-account-menu button{min-height:44px;padding:10px 12px;font-size:15px;line-height:22px}
+${NOT_DESKTOP} .bt-account-menu button svg{width:18px;height:18px}
 /* The page itself must not move under a finger: no rubber-band, no pull-to-refresh, and no
    pinch or double-tap zoom. Panning stays in the allowed set, so the chat and every inner
    list keep scrolling; the page has nothing to pan, its frame is the viewport. */
