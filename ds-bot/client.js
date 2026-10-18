@@ -10644,7 +10644,7 @@ var USAGE_CSS = `
 button.bt-us-key{cursor:pointer;transition:background-color .12s ease,color .12s ease}
 button.bt-us-key:hover{background:var(--bt-active);color:var(--bt-ink)}
 .bt-us-dot{flex:none;width:8px;height:8px;border-radius:50%}
-.bt-us-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:4px}
+.bt-us-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:4px}
 .bt-us-rows{display:flex;flex-direction:column;margin:0 -8px}
 .bt-us-row{display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;padding:8px;border:0;border-radius:12px;background:none;color:var(--bt-ink);font:inherit;text-align:left;animation:bt-us-in .4s var(--bt-us-ease) backwards;animation-delay:calc(var(--i,0) * 35ms + 90ms)}
 button.bt-us-row{cursor:pointer;transition:background-color .12s ease}
@@ -10706,6 +10706,15 @@ button.bt-us-row:hover{background:var(--bt-hover)}
 @keyframes bt-us-ring{from{stroke-dasharray:0 ${Math.ceil(RING)}}}
 @keyframes bt-us-pulse{50%{opacity:.25}}
 @keyframes bt-us-shine{from{background-position:200% 0}to{background-position:-200% 0}}
+/* The calendar is a fixed 252px and the stat row is four columns wide. A phone's page
+   area is narrower than either, so both follow it instead of running past its edge. */
+@media (max-width:640px){
+.bt-us-month{width:100%}
+.bt-us-weekdays,.bt-us-days{grid-template-columns:repeat(7,1fr)}
+.bt-us-stats{grid-template-columns:repeat(2,1fr)}
+.bt-us-stat:nth-child(odd){border-left:0}
+.bt-us-stat:nth-child(n+3){border-top:1px solid var(--bt-line)}
+}
 @media (prefers-reduced-motion:reduce){.bt-us *,.bt-us *::before{animation:none!important;transition:none!important}}
 `;
 
