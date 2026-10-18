@@ -585,6 +585,23 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
    positions itself against: the column covers the viewport with it, so the panel is the
    whole screen and the shell's own chrome inside it is the way out. */
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+/* The phone's conversation header follows the conversation: scrolling down gives it up to
+   a thin bar that names the conversation and holds the way back, and scrolling up or
+   reaching the top brings it back. The shell renders that header as an absolute overlay
+   with a gradient of its own, so the whole element moves — nothing is left behind. */
+${NOT_DESKTOP} header[class*="_header"]:has(.bt-head){transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},opacity .16s ease-out}
+${NOT_DESKTOP} body[data-bt-head=collapsed] header[class*="_header"]:has(.bt-head){transform:translateY(-100%);opacity:0}
+.bt-head-bar{position:fixed;top:0;left:0;right:0;z-index:12;display:flex;align-items:center;gap:6px;height:calc(44px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 4px 0 8px;box-sizing:border-box;background:var(--bt-main);border-bottom:.5px solid var(--bt-line);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;animation:bt-veil-in .16s ease-out}
+.bt-head-bar-go{flex:none;width:44px;height:44px;border-radius:12px}
+/* The header's own controls move into the bar, so they keep their place on screen: the
+   corners stop being absolute and the pill becomes the bar's name, not a pill on top of it. */
+body[data-bt-head=collapsed] .bt-head-bar .bt-back,body[data-bt-head=collapsed] .bt-head-bar .bt-head-side{position:static}
+body[data-bt-head=collapsed] .bt-head-bar .bt-pill{flex:1 1 auto;min-width:0;max-width:none;height:34px;gap:6px;padding:3px 8px 3px 3px;border:0;background:none;box-shadow:none}
+body[data-bt-head=collapsed] .bt-head-bar .bt-pill-go{display:none}
+@media (prefers-reduced-motion:reduce){
+${NOT_DESKTOP} header[class*="_header"]:has(.bt-head){transition:none}
+.bt-head-bar{animation:none}
+}
 /* The phone's list page opens the account menu from its own brand: the entries take a
    touch height, the menu scrolls where it is long, and it stays clear of the home bar. */
 ${NOT_DESKTOP} .bt-nav-account{cursor:pointer;min-height:44px;padding:6px 10px}

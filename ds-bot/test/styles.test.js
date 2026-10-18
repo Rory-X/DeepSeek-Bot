@@ -189,6 +189,22 @@ test('the phone pins the page against bounce, refresh and zoom', () => {
   assert.match(field, /select/, 'a select zooms it too')
 })
 
+// The phone's conversation header gives way to a thin bar: the state is published on the
+// body, the bar names the conversation and holds a 44px way back, and reduced motion keeps
+// the whole thing still.
+test('the phone header collapses to a thin bar', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const collapsed = css.split('\n').find(line => line.includes('body[data-bt-head=collapsed]'))
+  assert.ok(collapsed, 'the collapsed state moves the shell header')
+  assert.match(collapsed, /translateY\(-100%\)/)
+  const bar = css.split('\n').find(line => line.includes('.bt-head-bar{'))
+  assert.ok(bar, 'the bar is there')
+  assert.match(bar, /env\(safe-area-inset-top\)/)
+  const go = css.split('\n').find(line => line.includes('.bt-head-bar-go{'))
+  assert.match(go, /width:44px;height:44px/)
+  assert.ok(css.includes('prefers-reduced-motion:reduce') && /header\[class\*="_header"\]:has\(\.bt-head\)\{transition:none\}/.test(css), 'reduced motion keeps it still')
+})
+
 // The shell's right panel goes fullscreen below 768px, and its column is the box it
 // positions itself against: hiding that column is what left the header's button doing
 // nothing. It comes back, out of the grid, while the panel is fullscreen.

@@ -657,6 +657,7 @@ var ZH = {
   "Checking memory": "正在查看记忆",
   "Memory updated": "记忆已更新",
   "Show or hide the right sidebar": "显示或隐藏右侧栏",
+  "Show the conversation header": "展开会话头部",
   "Right sidebar": "右侧栏",
   "Team memory updated": "团队记忆已更新",
   "Updated {name}'s memory": "已更新 {name} 的记忆",
@@ -2707,6 +2708,23 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
    positions itself against: the column covers the viewport with it, so the panel is the
    whole screen and the shell's own chrome inside it is the way out. */
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+/* The phone's conversation header follows the conversation: scrolling down gives it up to
+   a thin bar that names the conversation and holds the way back, and scrolling up or
+   reaching the top brings it back. The shell renders that header as an absolute overlay
+   with a gradient of its own, so the whole element moves — nothing is left behind. */
+${NOT_DESKTOP} header[class*="_header"]:has(.bt-head){transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},opacity .16s ease-out}
+${NOT_DESKTOP} body[data-bt-head=collapsed] header[class*="_header"]:has(.bt-head){transform:translateY(-100%);opacity:0}
+.bt-head-bar{position:fixed;top:0;left:0;right:0;z-index:12;display:flex;align-items:center;gap:6px;height:calc(44px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 4px 0 8px;box-sizing:border-box;background:var(--bt-main);border-bottom:.5px solid var(--bt-line);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;animation:bt-veil-in .16s ease-out}
+.bt-head-bar-go{flex:none;width:44px;height:44px;border-radius:12px}
+/* The header's own controls move into the bar, so they keep their place on screen: the
+   corners stop being absolute and the pill becomes the bar's name, not a pill on top of it. */
+body[data-bt-head=collapsed] .bt-head-bar .bt-back,body[data-bt-head=collapsed] .bt-head-bar .bt-head-side{position:static}
+body[data-bt-head=collapsed] .bt-head-bar .bt-pill{flex:1 1 auto;min-width:0;max-width:none;height:34px;gap:6px;padding:3px 8px 3px 3px;border:0;background:none;box-shadow:none}
+body[data-bt-head=collapsed] .bt-head-bar .bt-pill-go{display:none}
+@media (prefers-reduced-motion:reduce){
+${NOT_DESKTOP} header[class*="_header"]:has(.bt-head){transition:none}
+.bt-head-bar{animation:none}
+}
 /* The phone's list page opens the account menu from its own brand: the entries take a
    touch height, the menu scrolls where it is long, and it stays clear of the home bar. */
 ${NOT_DESKTOP} .bt-nav-account{cursor:pointer;min-height:44px;padding:6px 10px}
@@ -6169,6 +6187,62 @@ var import_react_dom4 = require("react-dom");
 var GoArrow = () => (0, import_react10.createElement)("svg", { width: 14, height: 14, viewBox: "-12 -12 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true }, (0, import_react10.createElement)("path", { d: "M-7 0H7M2 -5L7 0L2 5" }));
 var MEMORY_NOTICE_MS = 3200;
 var noNews = (select) => select({});
+var HEAD_COLLAPSE_AT = 24;
+var HEAD_JUMP = 200;
+function headCollapse(top, last, collapsed, kind = "gesture") {
+  if (top <= HEAD_COLLAPSE_AT) return false;
+  if (kind === "jump") return true;
+  if (top > last) return true;
+  if (top < last) return false;
+  return collapsed;
+}
+var HEAD_GESTURE_MS = 700;
+var HEAD_ARM_MS = 500;
+function useHeadCollapse(sessionId) {
+  const [collapsed, setCollapsed] = (0, import_react10.useState)(false);
+  const state = (0, import_react10.useRef)(collapsed);
+  state.current = collapsed;
+  (0, import_react10.useEffect)(() => {
+    let last = null;
+    let armed = false;
+    let gestureUntil = 0;
+    const arm = setTimeout(() => {
+      armed = true;
+    }, HEAD_ARM_MS);
+    const gesture = (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-conversation-scroll]") !== null) gestureUntil = Date.now() + HEAD_GESTURE_MS;
+    };
+    const read = () => {
+      const scroller = document.querySelector("[data-conversation-scroll]");
+      if (scroller === null) return;
+      const top = scroller.scrollTop;
+      if (!armed || last === null) {
+        last = top;
+        return;
+      }
+      const moving = Date.now() < gestureUntil;
+      if (moving) gestureUntil = Date.now() + HEAD_GESTURE_MS;
+      if (!moving && Math.abs(top - last) < HEAD_JUMP) {
+        last = top;
+        return;
+      }
+      const next = headCollapse(top, last, state.current, moving ? "gesture" : "jump");
+      last = top;
+      if (next !== state.current) setCollapsed(next);
+    };
+    document.addEventListener("scroll", read, true);
+    document.addEventListener("touchmove", gesture, true);
+    document.addEventListener("wheel", gesture, true);
+    read();
+    return () => {
+      clearTimeout(arm);
+      document.removeEventListener("scroll", read, true);
+      document.removeEventListener("touchmove", gesture, true);
+      document.removeEventListener("wheel", gesture, true);
+    };
+  }, [sessionId]);
+  return [collapsed, setCollapsed];
+}
 function useMemoryNotice(ids, useMemoryNews) {
   const seen = useMemoryNews((map) => Math.max(0, ...ids.map((id) => map?.[id]?.seen ?? 0)));
   const [shown, setShown] = (0, import_react10.useState)(false);
@@ -6239,30 +6313,72 @@ function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSe
   }, [Boolean(room2)]);
   const memoryNotice = notice && changed !== null && roster.memory !== false;
   const onNavChat = useMobileNav((value) => value) && useNavLevel((value) => value === "chat");
+  const onPhone = useMobileNav((value) => value);
+  const navLevel = useNavLevel((value) => value);
+  const [collapsed, setCollapsed] = useHeadCollapse(sessionId);
+  (0, import_react10.useEffect)(() => {
+    if (!onPhone) return void 0;
+    document.body.dataset.btHead = collapsed ? "collapsed" : "expanded";
+    const shellHeader = document.querySelector('header[class*="_header"]');
+    if (collapsed) shellHeader?.setAttribute("inert", "");
+    else shellHeader?.removeAttribute("inert");
+    return () => {
+      delete document.body.dataset.btHead;
+      document.querySelector('header[class*="_header"]')?.removeAttribute("inert");
+    };
+  }, [onPhone, collapsed]);
+  const backControl = onNavChat ? (0, import_react10.createElement)("button", { type: "button", className: "bt-icon-btn bt-back", "data-bt-nav-back": "", "aria-label": t("Back to Bot list"), title: t("Back to Bot list"), onClick: () => actions.showBotList() }, (0, import_react10.createElement)(ChevronLeftIcon)) : null;
+  const pill = (0, import_react10.createElement)(
+    "button",
+    {
+      type: "button",
+      className: "bt-pill",
+      "aria-expanded": detailsOpen,
+      "data-memory": memoryNotice ? "updated" : void 0,
+      "aria-label": memoryNotice ? t("Memory updated. Open {name}'s memory", { name: roster.byId[changed]?.name ?? name }) : t("View conversation details"),
+      onClick: () => memoryNotice ? actions.openMemory(changed) : actions.toggleDetails(sessionId)
+    },
+    bot ? (0, import_react10.createElement)(BotAvatar, { bot, size: 24, state: botState(running, doing, roster.questions?.[currentPart(bot)] !== void 0), badge: false }) : room2 ? (0, import_react10.createElement)(RoomAvatar, { room: room2, roster, size: 24 }) : null,
+    (0, import_react10.createElement)("span", { className: "bt-pill-name" }, bot?.name ?? room2?.name ?? (title || t("New chat"))),
+    (0, import_react10.createElement)(MemoryNotice, { shown: memoryNotice }),
+    (0, import_react10.createElement)("span", { className: "bt-pill-go", "aria-hidden": true }, (0, import_react10.createElement)(GoArrow))
+  );
+  const activity = (0, import_react10.createElement)(ActivityIndicator, { key: `activity:${sessionId}`, sessionId, useRoster, useSessionStatus, useSession, useLive, useWork, actions });
+  const sideControl = actions.hasRightSidebar?.() ? (0, import_react10.createElement)("button", { type: "button", className: "bt-icon-btn bt-head-side", "data-bt-right-sidebar": "", "aria-label": t("Show or hide the right sidebar"), title: t("Right sidebar"), onClick: () => actions.toggleRightSidebar() }, (0, import_react10.createElement)(SidePanelIcon)) : null;
+  const newMessages = (0, import_react10.createElement)(NewMessagePills, { key: sessionId, sessionId, useSessions, useUi, useTurnClock });
+  if (onPhone && collapsed && navLevel !== "list") {
+    return (0, import_react10.createElement)(
+      import_react10.Fragment,
+      null,
+      (0, import_react10.createElement)("div", { className: "bt-head" }),
+      newMessages,
+      (0, import_react_dom4.createPortal)((0, import_react10.createElement)(
+        "div",
+        { className: "bt-head-bar", "data-bt-head-bar": "" },
+        backControl,
+        pill,
+        activity,
+        sideControl,
+        (0, import_react10.createElement)("button", {
+          type: "button",
+          className: "bt-icon-btn bt-head-bar-go",
+          "data-bt-head-expand": "",
+          "aria-label": t("Show the conversation header"),
+          title: t("Show the conversation header"),
+          onClick: () => setCollapsed(false)
+        }, (0, import_react10.createElement)(ArrowDownIcon))
+      ), document.body)
+    );
+  }
   return (0, import_react10.createElement)(
     "div",
     { className: "bt-head" },
-    onNavChat ? (0, import_react10.createElement)("button", { type: "button", className: "bt-icon-btn bt-back", "data-bt-nav-back": "", "aria-label": t("Back to Bot list"), title: t("Back to Bot list"), onClick: () => actions.showBotList() }, (0, import_react10.createElement)(ChevronLeftIcon)) : null,
-    (0, import_react10.createElement)(
-      "button",
-      {
-        type: "button",
-        className: "bt-pill",
-        "aria-expanded": detailsOpen,
-        "data-memory": memoryNotice ? "updated" : void 0,
-        "aria-label": memoryNotice ? t("Memory updated. Open {name}'s memory", { name: roster.byId[changed]?.name ?? name }) : t("View conversation details"),
-        onClick: () => memoryNotice ? actions.openMemory(changed) : actions.toggleDetails(sessionId)
-      },
-      bot ? (0, import_react10.createElement)(BotAvatar, { bot, size: 24, state: botState(running, doing, roster.questions?.[currentPart(bot)] !== void 0), badge: false }) : room2 ? (0, import_react10.createElement)(RoomAvatar, { room: room2, roster, size: 24 }) : null,
-      (0, import_react10.createElement)("span", { className: "bt-pill-name" }, bot?.name ?? room2?.name ?? (title || t("New chat"))),
-      (0, import_react10.createElement)(MemoryNotice, { shown: memoryNotice }),
-      (0, import_react10.createElement)("span", { className: "bt-pill-go", "aria-hidden": true }, (0, import_react10.createElement)(GoArrow))
-    ),
+    backControl,
+    pill,
     (0, import_react10.createElement)("span", { className: "bt-sr", role: "status" }, memoryNotice ? t("Memory updated") : ""),
-    (0, import_react10.createElement)(NewMessagePills, { key: sessionId, sessionId, useSessions, useUi, useTurnClock }),
-    (0, import_react10.createElement)(ActivityIndicator, { key: `activity:${sessionId}`, sessionId, useRoster, useSessionStatus, useSession, useLive, useWork, actions }),
-    // DSH's way into its right sidebar sits in the session header this pill replaces.
-    actions.hasRightSidebar?.() ? (0, import_react10.createElement)("button", { type: "button", className: "bt-icon-btn bt-head-side", "data-bt-right-sidebar": "", "aria-label": t("Show or hide the right sidebar"), title: t("Right sidebar"), onClick: () => actions.toggleRightSidebar() }, (0, import_react10.createElement)(SidePanelIcon)) : null
+    newMessages,
+    activity,
+    sideControl
   );
 }
 function useTranscriptView() {

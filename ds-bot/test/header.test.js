@@ -65,3 +65,18 @@ test('the Bot header has the right sidebar toggle that DSH keeps in the header i
 test('without DSH\'s right sidebar the Bot header shows no toggle', () => {
   assert.equal(sideButton(header({ hasRightSidebar: () => false, toggleRightSidebar: () => {} })), null)
 })
+
+// The phone's header gives way on a real scroll down and returns on a real scroll up: the
+// thresholds keep it from flickering at every nudge, and a scroll that does not move leaves
+// it as it was.
+test('the phone header collapses on a scroll down and returns on a scroll up', () => {
+  const { headCollapse, HEAD_COLLAPSE_AT } = module.exports
+  assert.equal(headCollapse(HEAD_COLLAPSE_AT, HEAD_COLLAPSE_AT - 40, true), false, 'at the top it comes back')
+  assert.equal(headCollapse(HEAD_COLLAPSE_AT + 40, 0, false), true, 'past the threshold, down')
+  assert.equal(headCollapse(400, 500, true), false, 'up brings it back')
+  assert.equal(headCollapse(400, 400, true), true, 'no movement keeps the state')
+  assert.equal(headCollapse(400, 400, false), false, 'no movement keeps the state')
+  // A jump has no direction to read, so where it lands decides.
+  assert.equal(headCollapse(900, 2600, false, 'jump'), true, 'a jump down the transcript collapses')
+  assert.equal(headCollapse(10, 900, true, 'jump'), false, 'a jump back to the top returns it')
+})
