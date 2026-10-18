@@ -1,0 +1,8 @@
+{
+  "name": "ds-bot-ui-verify",
+  "private": true,
+  "description": "Headless browser for the mobile style verification service (dev/ui-verify/verify.mjs).",
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}
