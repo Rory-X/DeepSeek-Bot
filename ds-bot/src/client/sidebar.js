@@ -8,6 +8,7 @@ import { MAIN_LOOK } from './characters.js'
 import { botState, BotMark, BotAvatar, RoomAvatar } from './mark.js'
 import { reducedMotion } from './activity-row.js'
 import { Shimmer, workPhrase } from './cells.js'
+import { workStateLine } from './member-status.js'
 import { springEasing, SPRING_SHAPE } from './motion.js'
 import { hostText, t } from './i18n.js'
 import { showsDshRow } from './dsh-offer.js'
@@ -33,7 +34,7 @@ const useApproval = (useWork, match) => (useWork ? useWork(work => (work.approva
 // Picked as text, so a row redraws only when what it shows changes.
 const useGroupWork = (useWork, pick) => (useWork ? useWork(work => JSON.stringify(pick(work.rooms ?? {}))) : '[]')
 const workKeys = text => JSON.parse(text)
-const doingOf = ({ tool, said, note, target, switching }) => ({ tool, said, note, target, switching })
+const doingOf = ({ tool, said, note, target, switching, since }) => ({ tool, said, note, target, switching, since })
 const workLine = (lead, doing, more) => h(Shimmer, null, `${lead} · ${workPhrase(doing)}…${more > 0 ? ` +${more}` : ''}`)
 // The Bots and groups a Bot waits for (handoffs.js), by the names they have now.
 const waitingFor = (roster, waits) => {
@@ -57,8 +58,14 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   // Work in a group runs in a Session of its own, so the Bot's chat stays idle meanwhile.
   const groups = workKeys(useGroupWork(useWork, rooms => Object.entries(rooms).flatMap(([roomId, entries]) => entries.filter(entry => entry.botId === id).map(entry => ({ id: roomId, ...doingOf(entry) })))))
   const away = !running && groups.length > 0
+  // A Bot at work in its own chat, as the group's member list reads it: its own chat wins
+  // over a group there, so an entry that carries a room is the group's line.
+  const own = workKeys(useWork ? useWork(work => JSON.stringify(work.bots?.[id] ?? null)) : 'null')
   const state = botState(running || away, doing, alert)
-  const awayLine = away ? workLine(roster.roomsById[groups[0].id]?.name ?? t('a group chat'), groups[0], groups.length - 1) : null
+  const busy = running && own !== null && own.roomId === undefined
+    ? { doing: own, where: t('in its own chat') }
+    : away ? { doing: groups[0], where: t('in {name}', { name: roster.roomsById[groups[0].id]?.name ?? t('a group chat') }) } : null
+  const busyLine = busy ? workStateLine(busy.doing, busy.where, 'bt-member-state bt-row-state') : null
   const waits = workKeys(useWork ? useWork(work => JSON.stringify(work.waiting?.[id] ?? null)) : 'null')
   const waitsFor = state === 'waiting' ? waitingFor(roster, waits) : ''
   if (bot.hidden && !active && !main) return null
@@ -85,7 +92,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   pinned && !wide ? h(PinMark) : null,
   wide ? h('span', { className: 'bt-row-body' },
     h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, bot.name), pinned ? h(PinMark) : null, time ? h('span', { className: 'bt-row-time' }, time) : null),
-    awayLine ? h('span', { className: 'bt-row-preview' }, awayLine)
+    busyLine ? busyLine
       : waitsFor ? h('span', { className: 'bt-row-preview' }, waitsFor)
         : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
   wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true }) : null)

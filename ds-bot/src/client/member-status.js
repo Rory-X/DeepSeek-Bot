@@ -128,6 +128,11 @@ const stateLine = (className, at, ...what) => h('span', { className },
   h('span', { className: 'bt-member-what' }, ...what),
   typeof at === 'number' ? h(Elapsed, { at, className: 'bt-member-time' }) : null)
 
+// What a Bot at work is doing, where, and for how long. The group's member list and the
+// Bot list draw the same line; a caller names its own class for its own size.
+export const workStateLine = (doing, where, className = 'bt-member-state') =>
+  stateLine(className, doing?.since, h(Shimmer, null, `${workPhrase(doing)}…`), where ? ` ${where}` : '')
+
 function ApprovalCard({ approval, bot, actions }) {
   const [busy, setBusy] = useState(false)
   const answer = (choice) => {
@@ -156,7 +161,7 @@ export function MemberState({ entry, bot, room, roster }) {
   const where = entry.doing.roomId === room.id ? ''
     : entry.doing.roomId ? t('in {name}', { name: roster.roomsById[entry.doing.roomId]?.name ?? t('a group chat') })
       : t('in its own chat')
-  return stateLine('bt-member-state', entry.doing.since, h(Shimmer, null, `${workPhrase(entry.doing)}…`), where ? ` ${where}` : '')
+  return workStateLine(entry.doing, where)
 }
 
 // Work in this group can be stopped from its details, since the user cannot reach the
