@@ -6122,12 +6122,12 @@ function pressSettingsShortcut() {
     metaKey: held.has("meta")
   }));
 }
-function accountGroups(actions) {
+function accountGroups(actions, phone) {
   return [
     [
       [t("Usage"), GaugeIcon, () => actions.openSettings("usage")],
       [t("Connectors"), ConnectorIcon, () => actions.openConnectors()],
-      [t("Automation tasks"), ClockIcon, () => actions.selectPanel("schedules")],
+      [t("Automation tasks"), ClockIcon, () => phone ? actions.openSettings("schedules") : actions.selectPanel("schedules")],
       [t("Bot settings"), GearIcon, () => actions.openSettings("general")]
     ],
     [
@@ -6169,7 +6169,7 @@ function useAccountMenu(actions, place = "up") {
     role: "menu",
     "aria-label": t("Account"),
     style: box
-  }, accountGroups(actions).map((group, index) => (0, import_react9.createElement)(
+  }, accountGroups(actions, place === "down").map((group, index) => (0, import_react9.createElement)(
     import_react9.Fragment,
     { key: index },
     index > 0 ? (0, import_react9.createElement)("div", { className: "bt-menu-sep", role: "separator" }) : null,
@@ -7396,9 +7396,9 @@ function ModelMenu({ bot, roster, actions, run, wide = false, onPick, onPickEffo
       models.length > 0 ? (0, import_react14.createElement)(ModelRows, { roster, current, onPick: pick2 }) : (0, import_react14.createElement)("div", { className: "bt-model-none" }, t("No models are set up in DeepSeek Harness yet.")),
       effortRows(reasoning).length > 0 ? (0, import_react14.createElement)(EffortRows, { reasoning, current: picked, onPick: pickEffort }) : null,
       actions.openHarnessSettings ? (0, import_react14.createElement)("div", { className: "bt-menu-sep", role: "separator" }) : null,
-      actions.openHarnessSettings ? (0, import_react14.createElement)("button", { type: "button", role: "menuitem", onClick: () => {
+      actions.openHarnessSettings ? (0, import_react14.createElement)("button", { type: "button", role: "menuitem", onClick: (event) => {
         close();
-        actions.openHarnessSettings();
+        actions.openHarnessSettings(event.currentTarget);
       } }, (0, import_react14.createElement)(SlidersIcon), (0, import_react14.createElement)("span", { className: "bt-menu-label" }, t("Models and providers…"))) : null
     ), document.body) : null
   );
@@ -7443,7 +7443,7 @@ function ModelChoiceDock({ sessionId, useRoster, actions }) {
         onClick: () => pick2(model.ref)
       }, model.name, busy === model.ref ? (0, import_react14.createElement)("span", { className: "bt-model-spin", "aria-label": t("Saving…") }) : null)))
     )),
-    actions.openHarnessSettings ? (0, import_react14.createElement)("button", { key: "manage", type: "button", className: "bt-model-chip bt-model-chip-quiet", onClick: actions.openHarnessSettings }, (0, import_react14.createElement)(SlidersIcon), t("Manage models")) : null
+    actions.openHarnessSettings ? (0, import_react14.createElement)("button", { key: "manage", type: "button", className: "bt-model-chip bt-model-chip-quiet", onClick: (event) => actions.openHarnessSettings(event.currentTarget) }, (0, import_react14.createElement)(SlidersIcon), t("Manage models")) : null
   ];
   return (0, import_react14.createElement)(
     "div",
@@ -7495,7 +7495,7 @@ function setupChoices(actions) {
   return [
     actions.canSignIn?.() ? [t("Sign in to DeepSeek"), () => actions.signIn()] : null,
     actions.openHarnessOnboarding ? [t("Enter a DeepSeek API key"), () => actions.openHarnessOnboarding("deepseek-official")] : null,
-    actions.openHarnessSettings ? [t("Open settings to set up a custom model"), actions.openHarnessSettings] : null
+    actions.openHarnessSettings ? [t("Open settings to set up a custom model"), (event) => actions.openHarnessSettings(event.currentTarget)] : null
   ].filter(Boolean);
 }
 function DeepSeekSignIn({ useUi, actions }) {
@@ -7939,7 +7939,7 @@ function AutomationOff({ actions }) {
     (0, import_react16.createElement)("span", { className: "bt-task-off-mark" }, (0, import_react16.createElement)(ClockIcon)),
     (0, import_react16.createElement)("span", { className: "bt-task-off-title" }, t("Turn on Automation tasks in DSH")),
     (0, import_react16.createElement)("span", { className: "bt-set-hint" }, t("Switch on Automation tasks on the Plugins page in Harness settings.")),
-    actions.openHarnessSettings ? (0, import_react16.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: actions.openHarnessSettings }, t("Open Harness settings")) : null
+    actions.openHarnessSettings ? (0, import_react16.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: (event) => actions.openHarnessSettings(event.currentTarget) }, t("Open Harness settings")) : null
   );
 }
 function SchedulesPage({ roster, actions, start }) {
@@ -7980,7 +7980,7 @@ function BotSchedules({ bot, roster, actions }) {
         "div",
         { className: "bt-set-row bt-bs-row" },
         (0, import_react16.createElement)("span", { className: "bt-set-copy" }, (0, import_react16.createElement)("span", { className: "bt-set-hint" }, t("Switch on Automation tasks on the Plugins page in Harness settings."))),
-        actions.openHarnessSettings ? (0, import_react16.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: actions.openHarnessSettings }, t("Open Harness settings")) : null
+        actions.openHarnessSettings ? (0, import_react16.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: (event) => actions.openHarnessSettings(event.currentTarget) }, t("Open Harness settings")) : null
       ) : [
         ...tasks.map((task) => (0, import_react16.createElement)(TaskRow, { key: task.id, task, actions, roster, onView: publish })),
         (0, import_react16.createElement)("button", { key: "new", type: "button", className: "bt-set-row bt-bs-row bt-gs-add", onClick: () => actions.openSettings("schedules", bot.id) }, (0, import_react16.createElement)(PlusIcon), t("New task"))
@@ -11806,9 +11806,10 @@ function SettingsDialog({ page, id, roster, actions, useUpdate, leaving = false 
           type: "button",
           className: "bt-settings-item bt-settings-shell",
           title: t("Models, providers, and the rest of DeepSeek Harness"),
-          onClick: () => {
-            close();
-            actions.openHarnessSettings();
+          // The phone answers beside the entry and the dialog stays where it is; the desktop
+          // hands the surface to the shell, so this dialog closes first.
+          onClick: (event) => {
+            if (!actions.openHarnessSettings(event.currentTarget)) close();
           }
         }, (0, import_react30.createElement)(SlidersIcon), t("Harness settings")) : null
       ),
@@ -13250,6 +13251,53 @@ var import_react35 = require("react");
 var import_react_dom9 = require("react-dom");
 var DIALOG_EXIT_MS = 160;
 var MENU_EXIT_MS3 = 120;
+var HINT_MS = 2600;
+var HINT_EXIT_MS = 200;
+function SettingHint({ hint, actions }) {
+  const box = (0, import_react35.useRef)(null);
+  const [leaving, setLeaving] = (0, import_react35.useState)(false);
+  const { rect, token } = hint;
+  const above = rect.top > 64;
+  (0, import_react35.useLayoutEffect)(() => {
+    const el = box.current;
+    if (el === null) return;
+    const half = el.getBoundingClientRect().width / 2;
+    const x = Math.min(Math.max(rect.left + rect.width / 2, half + 8), window.innerWidth - half - 8);
+    el.style.left = `${x}px`;
+  }, [token]);
+  (0, import_react35.useEffect)(() => {
+    const dismiss = () => actions.dismissHint(token);
+    const fade = setTimeout(() => setLeaving(true), HINT_MS);
+    const gone = setTimeout(dismiss, HINT_MS + HINT_EXIT_MS);
+    const onDown = (event) => {
+      if (!(event.target instanceof Element) || event.target.closest(".bt-hint") === null) dismiss();
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") dismiss();
+    };
+    window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      clearTimeout(fade);
+      clearTimeout(gone);
+      window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [token]);
+  return (0, import_react35.createElement)("div", {
+    ref: box,
+    className: "bt-hint",
+    role: "status",
+    "data-leaving": leaving || void 0,
+    style: above ? { bottom: `${Math.round(window.innerHeight - rect.top + 8)}px` } : { top: `${Math.round(rect.bottom + 8)}px` }
+  }, hint.text);
+}
+var HINT_CSS = `
+.bt-hint{position:fixed;z-index:80;transform:translateX(-50%);max-width:min(300px,calc(100vw - 24px));padding:8px 12px;border-radius:10px;background:var(--bt-card);color:var(--bt-ink);border:.5px solid var(--bt-line-2);box-shadow:0 10px 24px -8px rgba(0,0,0,.28);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:13px;line-height:18px;text-align:center;box-sizing:border-box;animation:bt-hint-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .16s ease-out}
+.bt-hint[data-leaving]{opacity:0;transform:translate(-50%,4px);transition:opacity .18s ease-in,transform .18s ease-in}
+@keyframes bt-hint-in{from{opacity:0;transform:translate(-50%,4px)}}
+@media (prefers-reduced-motion:reduce){.bt-hint{animation:none}.bt-hint[data-leaving]{transition:none}}
+`;
 function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity, useWork, useRegistry, useBrowserPages, useBrowserTabs, useUpdate, actions }) {
   const roster = useRoster((value) => value);
   const ui2 = useUi((value) => value);
@@ -13285,7 +13333,8 @@ function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity
     ui2.voice ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(VoiceMode, { key: ui2.voice, sessionId: ui2.voice, roster, actions, useSessions, useSessionStatus }), document.body) : null,
     menu ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(ContextMenu, { key: `${menu.kind ?? ""}:${menu.id}:${menu.x}:${menu.y}`, menu, roster, actions, leaving: menuLeaving }), document.body) : null,
     settings ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(SettingsDialog, { page: settings.page, id: settings.id, roster, actions, useUpdate, leaving: settingsLeaving }), document.body) : null,
-    memory && roster.byId[memory] ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(MemoryDialog, { key: memory, bot: roster.byId[memory], actions, leaving: memoryLeaving }), document.body) : null
+    memory && roster.byId[memory] ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(MemoryDialog, { key: memory, bot: roster.byId[memory], actions, leaving: memoryLeaving }), document.body) : null,
+    ui2.hint ? (0, import_react_dom9.createPortal)((0, import_react35.createElement)(SettingHint, { key: ui2.hint.token, hint: ui2.hint, actions }), document.body) : null
   );
 }
 
@@ -14334,7 +14383,7 @@ function apply(ctx) {
   const reactionStore = sharedMap(STORAGE.reactions);
   const seenStore = sharedMap(STORAGE.seen);
   let seenAt = seenStore.read();
-  const ui2 = createSource({ details: null, view: "details", renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} });
+  const ui2 = createSource({ details: null, view: "details", renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, hint: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} });
   const surface = createSource({ mode: readMode(), plain: false });
   const mobileNav = createSource(false);
   const navLevel = createSource("list");
@@ -14890,12 +14939,24 @@ function apply(ctx) {
   actions.closeSignIn = () => ui2.set((state) => ({ ...state, signIn: null }));
   actions.accountT = () => ctx.get("locale").bind("settings.account");
   actions.speech = () => ctx.get("remote.speech") ?? void 0;
-  actions.openHarnessSettings = () => {
+  const showHint = (text, anchor) => {
+    const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : null;
+    ui2.set((state) => ({ ...state, hint: {
+      text,
+      token: Date.now(),
+      // The rect is captured now: the hint stays where the entry was, even when the menu it
+      // came from closes on this press.
+      rect: rect === null ? { left: window.innerWidth / 2, top: 0, bottom: 0, width: 0 } : { left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width }
+    } }));
+  };
+  actions.dismissHint = (token) => ui2.set((state) => state.hint && (token === void 0 || state.hint.token === token) ? { ...state, hint: null } : state);
+  actions.openHarnessSettings = (anchor) => {
     if (mobileNav.getSnapshot()) {
-      ui2.set((state) => ({ ...state, toast: { text: t("Open this setting on a desktop."), token: Date.now() } }));
-      return;
+      showHint(t("Open this setting on a desktop."), anchor);
+      return true;
     }
     openHarnessSettings();
+    return false;
   };
   actions.openHarnessOnboarding = openHarnessOnboarding;
   actions.voiceSetup = () => {
@@ -15078,6 +15139,7 @@ function apply(ctx) {
     () => installCompiledStyles(USAGE_CSS, "usage"),
     () => installCompiledStyles(SCHEDULE_CSS, "schedules"),
     () => installCompiledStyles(FEEDBACK_CSS, "feedback"),
+    () => installCompiledStyles(HINT_CSS, "hint"),
     () => installCompiledStyles(ABOUT_CSS, "about"),
     () => installCompiledStyles(MEMBER_CSS, "members"),
     () => installCompiledStyles(USER_MESSAGE_CSS, "user-messages"),

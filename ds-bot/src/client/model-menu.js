@@ -184,7 +184,7 @@ export function ModelMenu({ bot, roster, actions, run, wide = false, onPick, onP
         : h('div', { className: 'bt-model-none' }, t('No models are set up in DeepSeek Harness yet.')),
       effortRows(reasoning).length > 0 ? h(EffortRows, { reasoning, current: picked, onPick: pickEffort }) : null,
       actions.openHarnessSettings ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
-      actions.openHarnessSettings ? h('button', { type: 'button', role: 'menuitem', onClick: () => { close(); actions.openHarnessSettings() } }, h(SlidersIcon), h('span', { className: 'bt-menu-label' }, t('Models and providers…'))) : null), document.body) : null)
+      actions.openHarnessSettings ? h('button', { type: 'button', role: 'menuitem', onClick: (event) => { close(); actions.openHarnessSettings(event.currentTarget) } }, h(SlidersIcon), h('span', { className: 'bt-menu-label' }, t('Models and providers…'))) : null), document.body) : null)
 }
 
 // The card a Bot's chat opens on while the Bot has no model, or has one that is no
@@ -231,7 +231,7 @@ export function ModelChoiceDock({ sessionId, useRoster, actions }) {
             title: model.ref === roster.defaultModel ? `${model.ref} · ${t('Harness default')}` : model.ref,
             onClick: () => pick(model.ref),
           }, model.name, busy === model.ref ? h('span', { className: 'bt-model-spin', 'aria-label': t('Saving…') }) : null))))),
-        actions.openHarnessSettings ? h('button', { key: 'manage', type: 'button', className: 'bt-model-chip bt-model-chip-quiet', onClick: actions.openHarnessSettings }, h(SlidersIcon), t('Manage models')) : null,
+        actions.openHarnessSettings ? h('button', { key: 'manage', type: 'button', className: 'bt-model-chip bt-model-chip-quiet', onClick: (event) => actions.openHarnessSettings(event.currentTarget) }, h(SlidersIcon), t('Manage models')) : null,
       ]
   return h('div', { className: 'bt-model-dock' },
     h('div', { className: 'bt-astack', 'data-lead': '' },
@@ -276,7 +276,7 @@ function setupChoices(actions) {
   return [
     actions.canSignIn?.() ? [t('Sign in to DeepSeek'), () => actions.signIn()] : null,
     actions.openHarnessOnboarding ? [t('Enter a DeepSeek API key'), () => actions.openHarnessOnboarding('deepseek-official')] : null,
-    actions.openHarnessSettings ? [t('Open settings to set up a custom model'), actions.openHarnessSettings] : null,
+    actions.openHarnessSettings ? [t('Open settings to set up a custom model'), (event) => actions.openHarnessSettings(event.currentTarget)] : null,
   ].filter(Boolean)
 }
 

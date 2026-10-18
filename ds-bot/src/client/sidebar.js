@@ -591,13 +591,15 @@ function pressSettingsShortcut() {
 }
 
 // The account menu's entries. The footer avatar and the phone's list page open the same
-// menu, so it is built in one place.
-function accountGroups(actions) {
+// menu, so it is built in one place. `phone` is the list page's menu: the shell's sidebar
+// panels are not there — the list page covers the screen and the shell's sidebar is away —
+// so its automation tasks open the settings page a phone can see.
+function accountGroups(actions, phone) {
   return [
     [
       [t('Usage'), GaugeIcon, () => actions.openSettings('usage')],
       [t('Connectors'), ConnectorIcon, () => actions.openConnectors()],
-      [t('Automation tasks'), ClockIcon, () => actions.selectPanel('schedules')],
+      [t('Automation tasks'), ClockIcon, () => (phone ? actions.openSettings('schedules') : actions.selectPanel('schedules'))],
       [t('Bot settings'), GearIcon, () => actions.openSettings('general')],
     ],
     [
@@ -631,7 +633,7 @@ function useAccountMenu(actions, place = 'up') {
   }
   const menu = open && box ? createPortal(h('div', {
     className: `bt-menu bt-account-menu${place === 'up' ? ' bt-menu-up' : ''}`, role: 'menu', 'aria-label': t('Account'), style: box,
-  }, accountGroups(actions).map((group, index) => h(Fragment, { key: index },
+  }, accountGroups(actions, place === 'down').map((group, index) => h(Fragment, { key: index },
     index > 0 ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
     group.map(([label, Icon, run]) => h('button', {
       key: label, type: 'button', role: 'menuitem',

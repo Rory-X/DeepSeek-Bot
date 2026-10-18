@@ -188,7 +188,9 @@ export function SettingsDialog({ page, id, roster, actions, useUpdate, leaving =
         }, h(PAGE_ICONS[key]), t(text))),
         actions.openHarnessSettings ? h('button', {
           type: 'button', className: 'bt-settings-item bt-settings-shell', title: t('Models, providers, and the rest of DeepSeek Harness'),
-          onClick: () => { close(); actions.openHarnessSettings() },
+          // The phone answers beside the entry and the dialog stays where it is; the desktop
+          // hands the surface to the shell, so this dialog closes first.
+          onClick: (event) => { if (!actions.openHarnessSettings(event.currentTarget)) close() },
         }, h(SlidersIcon), t('Harness settings')) : null),
       h('div', { className: 'bt-settings-main' },
         h('div', { className: 'bt-settings-head' },

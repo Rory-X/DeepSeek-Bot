@@ -18,7 +18,7 @@ import { VOICE_BUNDLE } from './speech.js'
 import { sameVersion } from './dsh-offer.js'
 import { AnsweredCell, QuestionCard, QuestionDock } from './questions.js'
 import { AssistantCell, TriggerCell, TurnProcessCell, Nothing, TurnTailCell, ToolCell } from './cells.js'
-import { Overlays } from './overlays.js'
+import { Overlays, HINT_CSS } from './overlays.js'
 import { createBotBrowsers, serveBrowserReads } from './bot-browsers.js'
 import { BROWSER_CSS } from './browser-pane.js'
 import { SECRET_CSS, SecretDock } from './secret-card.js'
@@ -52,7 +52,7 @@ export function apply(ctx) {
   let seenAt = seenStore.read()
   // `details` is the panel's subject (a Session id); `view` picks details or the
   // subject Bot's browser inside it.
-  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} })
+  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, hint: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} })
   // Bot mode paints the whole team surface; Agent mode withdraws every slot and
   // style so the shell's own interface returns. `plain` stays false until a Bot-mode
   // view hosts a plain session, which drops only the conversation replacements.
@@ -613,13 +613,29 @@ export function apply(ctx) {
   actions.speech = () => ctx.get('remote.speech') ?? undefined
   // DSH's own settings: models, providers, keys and its plugins.
   // The shell's own settings are a desktop surface. On a phone the entries that lead there
-  // say so instead of opening something the reader cannot use; the desktop keeps its path.
-  actions.openHarnessSettings = () => {
+  // say so beside themselves instead of opening something the reader cannot use; the
+  // desktop keeps its path. True means the phone answered the press itself, so a settings
+  // dialog the entry sits in stays where it is.
+  const showHint = (text, anchor) => {
+    const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : null
+    ui.set(state => ({ ...state, hint: {
+      text,
+      token: Date.now(),
+      // The rect is captured now: the hint stays where the entry was, even when the menu it
+      // came from closes on this press.
+      rect: rect === null
+        ? { left: window.innerWidth / 2, top: 0, bottom: 0, width: 0 }
+        : { left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width },
+    } }))
+  }
+  actions.dismissHint = token => ui.set(state => (state.hint && (token === undefined || state.hint.token === token) ? { ...state, hint: null } : state))
+  actions.openHarnessSettings = (anchor) => {
     if (mobileNav.getSnapshot()) {
-      ui.set(state => ({ ...state, toast: { text: t('Open this setting on a desktop.'), token: Date.now() } }))
-      return
+      showHint(t('Open this setting on a desktop.'), anchor)
+      return true
     }
     openHarnessSettings()
+    return false
   }
   actions.openHarnessOnboarding = openHarnessOnboarding
   actions.voiceSetup = () => {
@@ -829,6 +845,7 @@ export function apply(ctx) {
     () => installCompiledStyles(USAGE_CSS, 'usage'),
     () => installCompiledStyles(SCHEDULE_CSS, 'schedules'),
     () => installCompiledStyles(FEEDBACK_CSS, 'feedback'),
+    () => installCompiledStyles(HINT_CSS, 'hint'),
     () => installCompiledStyles(ABOUT_CSS, 'about'),
     () => installCompiledStyles(MEMBER_CSS, 'members'),
     () => installCompiledStyles(USER_MESSAGE_CSS, 'user-messages'),
