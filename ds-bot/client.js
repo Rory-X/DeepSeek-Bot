@@ -12207,6 +12207,8 @@ var savedWidth = () => {
 };
 var widthRange = (view, viewport) => view === "browser" ? [MIN_WIDTH, viewport - MIN_CHAT] : [DETAILS_WIDTH, Math.min(DETAILS_MAX, viewport - MIN_CHAT)];
 var fitWidth = (width, [low, high]) => Math.round(Math.max(low, Math.min(width, high)));
+var minPanelWidth = (view) => view === "browser" ? MIN_WIDTH : DETAILS_WIDTH;
+var overlayPanel = (view, viewport) => viewport < MIN_CHAT + minPanelWidth(view);
 var room = { rule: null, selector: "" };
 var roomRule = () => {
   const live = room.rule?.parentStyleSheet?.ownerNode?.isConnected;
@@ -12494,7 +12496,8 @@ function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatu
   const [resizing, setResizing] = (0, import_react34.useState)(false);
   const instant = dragging || resizing;
   const [reading, setReading] = (0, import_react34.useState)(false);
-  const panelWidth = fitWidth(width ?? (view === "browser" ? DEFAULT_WIDTH : DETAILS_WIDTH), widthRange(view, viewport));
+  const overlay = overlayPanel(view, viewport);
+  const panelWidth = overlay ? viewport : fitWidth(width ?? (view === "browser" ? DEFAULT_WIDTH : DETAILS_WIDTH), widthRange(view, viewport));
   (0, import_react34.useLayoutEffect)(() => {
     if (view === "browser" && width === null) setWidth(DEFAULT_WIDTH);
   }, [view, width]);
@@ -12511,9 +12514,9 @@ function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatu
     const switched = settling && shownView.current !== view;
     shownView.current = view;
     if (switched) chatRoom.hold(true);
-    chatRoom.set(leaving ? null : panelWidth);
+    chatRoom.set(leaving || overlay ? null : panelWidth);
     if (switched) chatRoom.hold(false);
-  }, [view, panelWidth, leaving]);
+  }, [view, panelWidth, leaving, overlay]);
   (0, import_react34.useEffect)(() => () => {
     chatRoom.set(null);
     chatRoom.hold(false);
@@ -12630,7 +12633,7 @@ function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatu
     });
   }, [view, pane.id]);
   const startResize = (event) => {
-    if (event.button !== 0 || leaving) return;
+    if (event.button !== 0 || leaving || overlay) return;
     event.preventDefault();
     const panel = root.current;
     const grip = event.currentTarget;
@@ -12690,7 +12693,7 @@ function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatu
         if (event.target === event.currentTarget) setLanded(true);
       }
     },
-    leaving ? null : (0, import_react34.createElement)("div", { className: "bt-panel-grip", role: "separator", "aria-orientation": "vertical", "aria-label": t("Resize panel"), onPointerDown: startResize }),
+    leaving || overlay ? null : (0, import_react34.createElement)("div", { className: "bt-panel-grip", role: "separator", "aria-orientation": "vertical", "aria-label": t("Resize panel"), onPointerDown: startResize }),
     // Over the whole window while dragging: the cursor stays a resize cursor and the
     // pages underneath (the chat, the guest) see no pointer.
     dragging ? (0, import_react_dom8.createPortal)((0, import_react34.createElement)("div", { className: "bt-drag-shield", "aria-hidden": true }), document.body) : null,
