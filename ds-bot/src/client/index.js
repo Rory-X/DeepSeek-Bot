@@ -4,6 +4,7 @@ import { DEFAULT_MASK, SHAPES, markupCache, maskOf } from './characters.js'
 import { createSource, EMPTY_ROSTER, indexRoster, isAgentSession } from './sources.js'
 import { watchMobileNav } from './media.js'
 import { installViewport, watchStandalone } from './platform.js'
+import { NAV_MOTION_MS, installSwipeBack } from './nav-motion.js'
 import { teamActions } from './team-actions.js'
 import { themeCss, shellTokens, registry, registerShape, registerTheme, allThemes } from './themes.js'
 import { MENTION_ORIGIN, currentPart } from './text.js'
@@ -60,6 +61,11 @@ export function apply(ctx) {
   // `navLevel` says which of the two levels the Bot surface shows.
   const mobileNav = createSource(false)
   const navLevel = createSource('list')
+  // Which level a conversation was entered from, and the page motion in flight. The return
+  // path reads the origin, so a second entry point (a search, a notification) returns to
+  // where it came from instead of to the list page by name.
+  const navOrigin = createSource(null)
+  const navMotion = createSource('idle')
   // An installed app: no browser chrome, so the styles and the motion default treat it as
   // the most app-like case there is.
   const standalone = createSource(false)
@@ -382,6 +388,13 @@ export function apply(ctx) {
     openSession: (id) => {
       // A DSH Agent Session id lands on the plain surface, not the Bot skin.
       if (isAgentSessionId(id)) return actions.openAgentSession(id)
+      // Opening a conversation from the list page is the push: the list yields and the
+      // conversation arrives from the right. The origin is what the way back reads.
+      const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === 'list'
+      if (fromList) {
+        navOrigin.set('list')
+        runMotion('push', { from: '100%', to: '0' })
+      }
       // Opening a conversation is what leaves the phone's list page.
       navLevel.set('chat')
       ui.set(state => (state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state))
@@ -393,6 +406,11 @@ export function apply(ctx) {
     // The conversation replacements withdraw for a plain Session; set the surface
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
+      const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === 'list'
+      if (fromList) {
+        navOrigin.set('list')
+        runMotion('push', { from: '100%', to: '0' })
+      }
       navLevel.set('chat')
       ui.set(state => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: 'details', renaming: false, tab: null }))
       setPlain(true)
@@ -460,12 +478,21 @@ export function apply(ctx) {
     },
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
     toggleSidebar: () => { ctx.layout.toggleSidebar() },
-    // Back to the phone's list page, from the conversation's back control. Leaving the
-    // conversation closes the details pane with it.
-    showBotList: () => {
+    // The one return path: the back control, the edge swipe and anything else that leaves a
+    // conversation come here. The origin says where it lands, and the conversation leaves
+    // the way it arrived — it goes out to the right while the page it came from comes back.
+    goBack: () => {
+      if (navLevel.getSnapshot() !== 'chat') return
       ui.set(state => (state.details ? { ...state, details: null, view: 'details' } : state))
-      navLevel.set('list')
+      if (!mobileNav.getSnapshot()) {
+        navLevel.set('list')
+        return
+      }
+      const origin = navOrigin.getSnapshot() ?? 'list'
+      const from = document.body.style.getPropertyValue('--bt-nav-x') || '0px'
+      runMotion('pop', { from, to: '100%', done: () => { navOrigin.set(null); navLevel.set(origin) } })
     },
+    showBotList: () => actions.goBack(),
     // Agent mode hands the surface back to the shell; everything open on the Bot
     // surface closes first so nothing stale reopens on the way back.
     setSurface: (mode) => {
@@ -573,7 +600,15 @@ export function apply(ctx) {
   // The Voice Input plugin's speech Remote; absent while that plugin is off.
   actions.speech = () => ctx.get('remote.speech') ?? undefined
   // DSH's own settings: models, providers, keys and its plugins.
-  actions.openHarnessSettings = openHarnessSettings
+  // The shell's own settings are a desktop surface. On a phone the entries that lead there
+  // say so instead of opening something the reader cannot use; the desktop keeps its path.
+  actions.openHarnessSettings = () => {
+    if (mobileNav.getSnapshot()) {
+      ui.set(state => ({ ...state, toast: { text: t('Open this setting on a desktop.'), token: Date.now() } }))
+      return
+    }
+    openHarnessSettings()
+  }
   actions.openHarnessOnboarding = openHarnessOnboarding
   actions.voiceSetup = () => {
     const navigation = ctx.get('pluginNavigation')
@@ -606,7 +641,7 @@ export function apply(ctx) {
   }
   const browserPages = browsers?.pages ?? createSource({})
   const browserTabs = browsers?.tabs ?? createSource({})
-  const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel } })
+  const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel, navMotion } })
   // The level is published on <body> so the styles, the test bench and a screen reader all
   // read the same fact; it is absent whenever the navigation is not in effect (a desktop,
   // or the plain surface an Agent Session gets).
@@ -618,6 +653,36 @@ export function apply(ctx) {
     for (const column of document.querySelectorAll('[class*="_centerCol"]')) {
       if (covered) column.setAttribute('inert', '')
       else column.removeAttribute('inert')
+    }
+  }
+  // The page motion is written straight to the DOM: a page change is a transition, not a
+  // state the reader sees, and the timers are what end it. `hold` seats the start position
+  // without a transition, so the movement runs from there.
+  let motionTimer = 0
+  const setMotion = (phase, x) => {
+    if (navMotion.getSnapshot() !== phase) navMotion.set(phase)
+    if (phase === 'idle') delete document.body.dataset.btNavMotion
+    else document.body.dataset.btNavMotion = phase
+    if (x === undefined) document.body.style.removeProperty('--bt-nav-x')
+    else document.body.style.setProperty('--bt-nav-x', x)
+  }
+  const runMotion = (phase, { from, to, done, ms = NAV_MOTION_MS }) => {
+    clearTimeout(motionTimer)
+    const start = () => {
+      setMotion(phase, to)
+      motionTimer = setTimeout(() => {
+        setMotion('idle')
+        done?.()
+      }, ms + 40)
+    }
+    // Seating the start is only needed when the page is somewhere else: a drag that ends
+    // where it already is, or a return from rest, starts its transition in this frame — the
+    // two ways back have to begin alike.
+    const now = document.body.style.getPropertyValue('--bt-nav-x') || '0px'
+    if (now === from) start()
+    else {
+      setMotion('hold', from)
+      requestAnimationFrame(start)
     }
   }
   const syncNav = () => {
@@ -640,6 +705,16 @@ export function apply(ctx) {
       coverConversation(false)
     }
   }, 'ds-bot: mobile navigation')
+  ctx.effect(() => installSwipeBack({
+    // Only a conversation the reader is looking at: not a dialog, not the details pane, not
+    // the plain surface an Agent Session gets.
+    canStart: () => mobileNav.getSnapshot() && !surface.getSnapshot().plain && navLevel.getSnapshot() === 'chat'
+      && ui.getSnapshot().details === null && ui.getSnapshot().settings === null && ui.getSnapshot().newChat === null,
+    onStart: () => setMotion('drag', '0px'),
+    onMove: (x) => document.body.style.setProperty('--bt-nav-x', `${x}px`),
+    onCommit: () => actions.goBack(),
+    onCancel: () => runMotion('cancel', { from: document.body.style.getPropertyValue('--bt-nav-x') || '0px', to: '0px' }),
+  }), 'ds-bot: edge swipe back')
   ctx.effect(() => noticeApprovals({
     work,
     roster,

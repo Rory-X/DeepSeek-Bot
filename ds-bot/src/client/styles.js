@@ -106,6 +106,9 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 @keyframes bt-blink-idle{0%,29.6%,35%,69.2%,74.6%,100%{transform:scaleY(1)}32.2%,71.8%{transform:scaleY(.03)}33.8%,73.4%{transform:scaleY(1.06)}}
 @keyframes bt-blink{0%,42%,50%,100%{transform:scaleY(1)}46%{transform:scaleY(.03)}48%{transform:scaleY(1.06)}}
 @media (prefers-reduced-motion:reduce){.bt-mark *{animation:none!important;transition:none!important}}
+/* A reader who asked for less motion gets none: not only the page changes, but the short
+   tints and slides a tap would otherwise set off. */
+@media (prefers-reduced-motion:reduce){.bt-row,.bt-tile,.bt-round,.bt-icon-btn,.bt-soft,.bt-settings-item,.bt-menu button,.bt-tool,.bt-brand,.bt-chief-bar{animation:none!important;transition:none!important}}
 .bt-badge{position:absolute;right:0;bottom:0;width:12px;height:12px;border-radius:50%;corner-shape:round;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.5px var(--bt-sidebar)}
 .bt-badge-admin{background:color-mix(in srgb,var(--bt-star) 82%,var(--bt-sidebar))}
 .bt-badge-admin svg{width:7px;height:7px}
@@ -585,20 +588,33 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
    positions itself against: the column covers the viewport with it, so the panel is the
    whole screen and the shell's own chrome inside it is the way out. */
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
-/* The Main Bot's card is the list's first item; once it has scrolled out of view a small
-   pill under the top row stands in for it, centred, holding the mark, the name and the way
-   back to the full card. It overlays the list instead of taking a row: the list's scroll
-   geometry must not change when the pill comes and goes, or the content under the reader's
-   finger would move and the card could slide back into view by itself. */
+/* A page change on a phone: the conversation slides out of the way and the page it came
+   from follows it, so the list yields on the way in and comes back on the way out. The edge
+   swipe sets the same offset by hand, which is why one variable drives both. */
+${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{position:relative;z-index:36;transform:translateX(var(--bt-nav-x,0px))}
+${NOT_DESKTOP} body[data-bt-nav-motion=push] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=pop] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=cancel] [class*="_centerCol"]{transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
+${NOT_DESKTOP} body[data-bt-nav-motion=pop] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=drag] .bt-nav-page{animation:bt-nav-list-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
+${NOT_DESKTOP} body[data-bt-nav-motion=push] .bt-nav-page{animation:bt-nav-list-out ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing} forwards}
+@keyframes bt-nav-list-in{from{transform:translateX(-14%);opacity:.55}to{transform:none;opacity:1}}
+@keyframes bt-nav-list-out{from{transform:none;opacity:1}to{transform:translateX(-14%);opacity:.55}}
+@media (prefers-reduced-motion:reduce){
+${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{transition:none}
+${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{animation:none}
+}
+/* The Main Bot's card is the list's first item; once it has scrolled away a small rounded
+   card under the top row says who it is — the mark with its Main Bot star, the name and the
+   role. It is a mark, not a control, and it overlays the list rather than taking a row: the
+   list's scroll geometry must not change when it comes and goes, or the content under the
+   reader's finger would move and the card could slide back into view by itself. */
 .bt-nav-body{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
-.bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:4px;height:44px;padding:0 4px 0 6px;border:0;border-radius:999px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;cursor:pointer;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
-.bt-chief-bar[data-open]{gap:8px;height:auto;min-height:44px;padding:6px 6px 6px 8px;border-radius:20px}
-.bt-chief-text{display:flex;flex-direction:column;min-width:0;max-width:56%;text-align:left}
+.bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:8px;max-width:min(300px,88%);padding:6px 12px 6px 6px;border-radius:16px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
+.bt-chief-text{display:flex;flex-direction:column;min-width:0;text-align:left}
 .bt-chief-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:20px;font-weight:600}
 .bt-chief-role{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
-.bt-chief-go{flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:999px;color:var(--bt-ink-2);transition:transform .16s ease-out}
-.bt-chief-bar[data-open] .bt-chief-go{transform:rotate(180deg)}
-@media (prefers-reduced-motion:reduce){.bt-chief-bar,.bt-chief-go{animation:none;transition:none}}
+@media (prefers-reduced-motion:reduce){.bt-chief-bar{animation:none}}
+/* While the pill stands in for the card, the card itself is not drawn: leaving it there
+   would show two cards at once, and taking it out of the flow would move the list. */
+body[data-bt-chief=collapsed] .bt-nav-body .bt-tile-wrap{visibility:hidden}
 /* The phone's list page opens the account menu from its own brand: the entries take a
    touch height, the menu scrolls where it is long, and it stays clear of the home bar. */
 ${NOT_DESKTOP} .bt-nav-account{cursor:pointer;min-height:44px;padding:6px 10px}

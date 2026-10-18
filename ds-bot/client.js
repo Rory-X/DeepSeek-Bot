@@ -657,7 +657,8 @@ var ZH = {
   "Checking memory": "正在查看记忆",
   "Memory updated": "记忆已更新",
   "Show or hide the right sidebar": "显示或隐藏右侧栏",
-  "Expand the Main Bot card": "展开主 Bot 卡片",
+  "{name}, Main Bot": "{name}，主 Bot",
+  "Open this setting on a desktop.": "该设置项请在桌面端查看",
   "Right sidebar": "右侧栏",
   "Team memory updated": "团队记忆已更新",
   "Updated {name}'s memory": "已更新 {name} 的记忆",
@@ -1374,6 +1375,84 @@ function installViewport() {
       apply2();
     },
     dispose: () => observer.disconnect()
+  };
+}
+
+// src/client/nav-motion.js
+var NAV_MOTION_MS = 200;
+var NAV_EDGE = 28;
+var NAV_EDGE_SLOPE = 1.2;
+var NAV_COMMIT_RATIO = 0.4;
+var NAV_COMMIT_VELOCITY = 0.35;
+var NAV_DECIDE_AT = 8;
+var NAV_LONG_PRESS_MS = 600;
+function swipeBack(x, width, velocity) {
+  if (width <= 0) return false;
+  return x >= width * NAV_COMMIT_RATIO || velocity >= NAV_COMMIT_VELOCITY;
+}
+var OWN_GESTURE = '[data-rightbar-col], .bt-panel, .bt-settings-layer, .bt-mem-layer, .bt-palette-layer, [role="dialog"]';
+function scrollsSideways(el) {
+  for (let node = el; node !== null && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (!/auto|scroll/.test(style.overflowX)) continue;
+    if (node.scrollWidth > node.clientWidth + 1) return true;
+  }
+  return false;
+}
+function installSwipeBack({ canStart, onStart, onMove, onCommit, onCancel }) {
+  let drag = null;
+  const onTouchStart = (event) => {
+    if (event.touches.length !== 1 || drag !== null) return;
+    const touch = event.touches[0];
+    if (touch.clientX > NAV_EDGE) return;
+    if (!canStart?.()) return;
+    if (event.target instanceof Element && (event.target.closest(OWN_GESTURE) !== null || scrollsSideways(event.target))) return;
+    drag = { x0: touch.clientX, y0: touch.clientY, at: performance.now(), x: 0, lastX: touch.clientX, lastAt: performance.now(), velocity: 0, decided: false, active: false };
+  };
+  const onTouchMove = (event) => {
+    if (drag === null || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const dx = touch.clientX - drag.x0;
+    const dy = touch.clientY - drag.y0;
+    if (!drag.decided) {
+      if (Math.abs(dx) < NAV_DECIDE_AT && Math.abs(dy) < NAV_DECIDE_AT) return;
+      drag.decided = true;
+      if (dx <= 0 || Math.abs(dx) < Math.abs(dy) * NAV_EDGE_SLOPE || performance.now() - drag.at > NAV_LONG_PRESS_MS) {
+        drag = null;
+        return;
+      }
+      drag.active = true;
+      onStart?.();
+    }
+    if (!drag.active) return;
+    if (event.cancelable) event.preventDefault();
+    const width = window.innerWidth;
+    const x = Math.max(0, Math.min(dx, width));
+    const now = performance.now();
+    drag.velocity = (touch.clientX - drag.lastX) / Math.max(1, now - drag.lastAt);
+    drag.lastX = touch.clientX;
+    drag.lastAt = now;
+    drag.x = x;
+    onMove?.(x, width);
+  };
+  const onTouchEnd = () => {
+    if (drag === null) return;
+    const ended = drag;
+    drag = null;
+    if (!ended.active) return;
+    if (swipeBack(ended.x, window.innerWidth, ended.velocity)) onCommit?.();
+    else onCancel?.();
+  };
+  document.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+  document.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+  document.addEventListener("touchend", onTouchEnd, { capture: true, passive: true });
+  document.addEventListener("touchcancel", onTouchEnd, { capture: true, passive: true });
+  return () => {
+    drag = null;
+    document.removeEventListener("touchstart", onTouchStart, { capture: true });
+    document.removeEventListener("touchmove", onTouchMove, { capture: true });
+    document.removeEventListener("touchend", onTouchEnd, { capture: true });
+    document.removeEventListener("touchcancel", onTouchEnd, { capture: true });
   };
 }
 
@@ -2229,6 +2308,9 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 @keyframes bt-blink-idle{0%,29.6%,35%,69.2%,74.6%,100%{transform:scaleY(1)}32.2%,71.8%{transform:scaleY(.03)}33.8%,73.4%{transform:scaleY(1.06)}}
 @keyframes bt-blink{0%,42%,50%,100%{transform:scaleY(1)}46%{transform:scaleY(.03)}48%{transform:scaleY(1.06)}}
 @media (prefers-reduced-motion:reduce){.bt-mark *{animation:none!important;transition:none!important}}
+/* A reader who asked for less motion gets none: not only the page changes, but the short
+   tints and slides a tap would otherwise set off. */
+@media (prefers-reduced-motion:reduce){.bt-row,.bt-tile,.bt-round,.bt-icon-btn,.bt-soft,.bt-settings-item,.bt-menu button,.bt-tool,.bt-brand,.bt-chief-bar{animation:none!important;transition:none!important}}
 .bt-badge{position:absolute;right:0;bottom:0;width:12px;height:12px;border-radius:50%;corner-shape:round;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.5px var(--bt-sidebar)}
 .bt-badge-admin{background:color-mix(in srgb,var(--bt-star) 82%,var(--bt-sidebar))}
 .bt-badge-admin svg{width:7px;height:7px}
@@ -2708,20 +2790,33 @@ ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
    positions itself against: the column covers the viewport with it, so the panel is the
    whole screen and the shell's own chrome inside it is the way out. */
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
-/* The Main Bot's card is the list's first item; once it has scrolled out of view a small
-   pill under the top row stands in for it, centred, holding the mark, the name and the way
-   back to the full card. It overlays the list instead of taking a row: the list's scroll
-   geometry must not change when the pill comes and goes, or the content under the reader's
-   finger would move and the card could slide back into view by itself. */
+/* A page change on a phone: the conversation slides out of the way and the page it came
+   from follows it, so the list yields on the way in and comes back on the way out. The edge
+   swipe sets the same offset by hand, which is why one variable drives both. */
+${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{position:relative;z-index:36;transform:translateX(var(--bt-nav-x,0px))}
+${NOT_DESKTOP} body[data-bt-nav-motion=push] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=pop] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=cancel] [class*="_centerCol"]{transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
+${NOT_DESKTOP} body[data-bt-nav-motion=pop] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=drag] .bt-nav-page{animation:bt-nav-list-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
+${NOT_DESKTOP} body[data-bt-nav-motion=push] .bt-nav-page{animation:bt-nav-list-out ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing} forwards}
+@keyframes bt-nav-list-in{from{transform:translateX(-14%);opacity:.55}to{transform:none;opacity:1}}
+@keyframes bt-nav-list-out{from{transform:none;opacity:1}to{transform:translateX(-14%);opacity:.55}}
+@media (prefers-reduced-motion:reduce){
+${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{transition:none}
+${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{animation:none}
+}
+/* The Main Bot's card is the list's first item; once it has scrolled away a small rounded
+   card under the top row says who it is — the mark with its Main Bot star, the name and the
+   role. It is a mark, not a control, and it overlays the list rather than taking a row: the
+   list's scroll geometry must not change when it comes and goes, or the content under the
+   reader's finger would move and the card could slide back into view by itself. */
 .bt-nav-body{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
-.bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:4px;height:44px;padding:0 4px 0 6px;border:0;border-radius:999px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;cursor:pointer;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
-.bt-chief-bar[data-open]{gap:8px;height:auto;min-height:44px;padding:6px 6px 6px 8px;border-radius:20px}
-.bt-chief-text{display:flex;flex-direction:column;min-width:0;max-width:56%;text-align:left}
+.bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:8px;max-width:min(300px,88%);padding:6px 12px 6px 6px;border-radius:16px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
+.bt-chief-text{display:flex;flex-direction:column;min-width:0;text-align:left}
 .bt-chief-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:20px;font-weight:600}
 .bt-chief-role{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
-.bt-chief-go{flex:none;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:999px;color:var(--bt-ink-2);transition:transform .16s ease-out}
-.bt-chief-bar[data-open] .bt-chief-go{transform:rotate(180deg)}
-@media (prefers-reduced-motion:reduce){.bt-chief-bar,.bt-chief-go{animation:none;transition:none}}
+@media (prefers-reduced-motion:reduce){.bt-chief-bar{animation:none}}
+/* While the pill stands in for the card, the card itself is not drawn: leaving it there
+   would show two cards at once, and taking it out of the flow would move the list. */
+body[data-bt-chief=collapsed] .bt-nav-body .bt-tile-wrap{visibility:hidden}
 /* The phone's list page opens the account menu from its own brand: the entries take a
    touch height, the menu scrolls where it is long, and it stays clear of the home bar. */
 ${NOT_DESKTOP} .bt-nav-account{cursor:pointer;min-height:44px;padding:6px 10px}
@@ -5667,7 +5762,8 @@ function TeamSidebar(props) {
     event.preventDefault();
     actions.openPalette(event.key);
   };
-  if (onPhone && atList) {
+  const moving = props.useNavMotion((value) => value !== "idle");
+  if (onPhone && (atList || moving)) {
     return (0, import_react_dom3.createPortal)((0, import_react9.createElement)(MobileNavList, {
       roster,
       actions,
@@ -5714,65 +5810,46 @@ function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTim
 }
 var CHIEF_COLLAPSE_AT = 24;
 function useChiefBar(listRef) {
-  const [chief, setChief] = (0, import_react9.useState)({ out: false, open: false });
-  const state = (0, import_react9.useRef)(chief);
-  state.current = chief;
+  const [out, setOut] = (0, import_react9.useState)(false);
   (0, import_react9.useEffect)(() => {
     const list = listRef.current;
     if (list === null) return void 0;
-    let last = list.scrollTop;
     const read = () => {
       const card = list.querySelector(".bt-tile-wrap");
-      const top = list.scrollTop;
-      const down = top > last;
-      last = top;
       const box = list.getBoundingClientRect();
-      const out = card !== null && top > CHIEF_COLLAPSE_AT && card.getBoundingClientRect().bottom <= box.top + 28;
-      const now = state.current;
-      const open = out && now.open && !down;
-      if (out === now.out && open === now.open) return;
-      setChief({ out, open });
+      const next = card !== null && list.scrollTop > CHIEF_COLLAPSE_AT && card.getBoundingClientRect().bottom <= box.top + 24;
+      setOut((current) => current === next ? current : next);
     };
     list.addEventListener("scroll", read, { passive: true });
     read();
     return () => list.removeEventListener("scroll", read);
   }, [listRef]);
-  return [chief, () => setChief((current) => current.open ? current : { ...current, open: true })];
+  return out;
 }
-function ChiefBar({ chief, main, onExpand }) {
-  if (!chief.out) return null;
-  const name = main?.name ?? t("Main Bot");
-  const mark = (size) => main ? (0, import_react9.createElement)(BotAvatar, { bot: main, size, state: "idle", main: true, badge: true, live: false }) : (0, import_react9.createElement)(BotMark, { look: MAIN_LOOK, size });
+function ChiefBar({ main }) {
+  if (main === void 0) return null;
+  const name = main.name;
   return (0, import_react9.createElement)(
-    "button",
-    {
-      type: "button",
-      className: "bt-chief-bar",
-      "data-bt-chief-bar": "",
-      "data-open": chief.open ? "" : void 0,
-      "aria-label": t("Expand the Main Bot card"),
-      "aria-expanded": chief.open,
-      onClick: onExpand
-    },
-    mark(chief.open ? 40 : 24),
+    "div",
+    { className: "bt-chief-bar", "data-bt-chief-bar": "", role: "status", "aria-label": t("{name}, Main Bot", { name }) },
+    (0, import_react9.createElement)(BotAvatar, { bot: main, size: 30, state: "idle", main: true, badge: true, live: false }),
     (0, import_react9.createElement)(
       "span",
       { className: "bt-chief-text" },
       (0, import_react9.createElement)("span", { className: "bt-chief-name" }, name),
-      chief.open && main?.role ? (0, import_react9.createElement)("span", { className: "bt-chief-role" }, main.role) : null
-    ),
-    (0, import_react9.createElement)("span", { className: "bt-chief-go", "data-bt-chief-expand": "" }, (0, import_react9.createElement)(ArrowDownIcon))
+      main.role ? (0, import_react9.createElement)("span", { className: "bt-chief-role" }, main.role) : null
+    )
   );
 }
 function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, "down");
-  const [chief, expand] = useChiefBar(listRef);
+  const chiefOut = useChiefBar(listRef);
   (0, import_react9.useEffect)(() => {
-    document.body.dataset.btChief = chief.out && !chief.open ? "collapsed" : "expanded";
+    document.body.dataset.btChief = chiefOut ? "collapsed" : "expanded";
     return () => {
       delete document.body.dataset.btChief;
     };
-  }, [chief.out, chief.open]);
+  }, [chiefOut]);
   return (0, import_react9.createElement)(
     "div",
     { className: "bt-nav-page", "data-bt-nav": "list", onKeyDown: typeToSearch },
@@ -5797,8 +5874,9 @@ function MobileNavList({ roster, actions, listRef, main, order, markedUnread, ro
     (0, import_react9.createElement)(
       "div",
       { className: "bt-nav-body" },
-      (0, import_react9.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true }),
-      (0, import_react9.createElement)(ChiefBar, { chief, main, onExpand: expand })
+      // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
+      chiefOut ? (0, import_react9.createElement)(ChiefBar, { main }) : null,
+      (0, import_react9.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true })
     ),
     menu.menu
   );
@@ -11008,14 +11086,26 @@ button.bt-us-row:hover{background:var(--bt-hover)}
 @keyframes bt-us-ring{from{stroke-dasharray:0 ${Math.ceil(RING)}}}
 @keyframes bt-us-pulse{50%{opacity:.25}}
 @keyframes bt-us-shine{from{background-position:200% 0}to{background-position:-200% 0}}
-/* The calendar is a fixed 252px and the stat row is four columns wide. A phone's page
-   area is narrower than either, so both follow it instead of running past its edge. */
+/* The calendar is a fixed 252px, the stat row is four columns wide and the range tabs run
+   to 473px. A phone's page area is narrower than any of them, so each one follows it: the
+   calendar takes the row, the stats keep two columns at a size that fits them, the tabs
+   scroll sideways, and the names wrap rather than run past their box. The heat map's month
+   labels are a column per week, which a phone cannot hold at all. */
 @media (max-width:640px){
 .bt-us-month{width:100%}
 .bt-us-weekdays,.bt-us-days{grid-template-columns:repeat(7,1fr)}
 .bt-us-stats{grid-template-columns:repeat(2,1fr)}
 .bt-us-stat:nth-child(odd){border-left:0}
 .bt-us-stat:nth-child(n+3){border-top:1px solid var(--bt-line)}
+.bt-us-tabs{box-sizing:border-box;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.bt-us-row-line{flex-wrap:wrap}
+.bt-us-stat-value{flex-wrap:wrap;white-space:normal}
+.bt-us-ticks{display:none}
+.bt-us-stat-value{font-size:16px;line-height:22px}
+.bt-us-stat-main .bt-us-stat-value{font-size:22px;line-height:28px}
+.bt-us-heat-months{display:none}
+.bt-us-row-name,.bt-us-row-sub,.bt-us-profile-copy h3,.bt-us-pick-foot{white-space:normal;overflow:visible;text-overflow:clip}
+.bt-us-pick-foot{flex-wrap:wrap;gap:6px}
 }
 @media (prefers-reduced-motion:reduce){.bt-us *,.bt-us *::before{animation:none!important;transition:none!important}}
 `;
@@ -14224,6 +14314,8 @@ function apply(ctx) {
   const surface = createSource({ mode: readMode(), plain: false });
   const mobileNav = createSource(false);
   const navLevel = createSource("list");
+  const navOrigin = createSource(null);
+  const navMotion = createSource("idle");
   const standalone = createSource(false);
   let agentSessionCache = /* @__PURE__ */ new Set();
   try {
@@ -14557,6 +14649,11 @@ function apply(ctx) {
     isAgentSession: (id) => isAgentSessionId(id),
     openSession: (id) => {
       if (isAgentSessionId(id)) return actions.openAgentSession(id);
+      const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === "list";
+      if (fromList) {
+        navOrigin.set("list");
+        runMotion("push", { from: "100%", to: "0" });
+      }
       navLevel.set("chat");
       ui2.set((state) => state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state);
       setPlain(false);
@@ -14567,6 +14664,11 @@ function apply(ctx) {
     // The conversation replacements withdraw for a plain Session; set the surface
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
+      const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === "list";
+      if (fromList) {
+        navOrigin.set("list");
+        runMotion("push", { from: "100%", to: "0" });
+      }
       navLevel.set("chat");
       ui2.set((state) => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: "details", renaming: false, tab: null }));
       setPlain(true);
@@ -14638,12 +14740,24 @@ function apply(ctx) {
     toggleSidebar: () => {
       ctx.layout.toggleSidebar();
     },
-    // Back to the phone's list page, from the conversation's back control. Leaving the
-    // conversation closes the details pane with it.
-    showBotList: () => {
+    // The one return path: the back control, the edge swipe and anything else that leaves a
+    // conversation come here. The origin says where it lands, and the conversation leaves
+    // the way it arrived — it goes out to the right while the page it came from comes back.
+    goBack: () => {
+      if (navLevel.getSnapshot() !== "chat") return;
       ui2.set((state) => state.details ? { ...state, details: null, view: "details" } : state);
-      navLevel.set("list");
+      if (!mobileNav.getSnapshot()) {
+        navLevel.set("list");
+        return;
+      }
+      const origin = navOrigin.getSnapshot() ?? "list";
+      const from = document.body.style.getPropertyValue("--bt-nav-x") || "0px";
+      runMotion("pop", { from, to: "100%", done: () => {
+        navOrigin.set(null);
+        navLevel.set(origin);
+      } });
     },
+    showBotList: () => actions.goBack(),
     // Agent mode hands the surface back to the shell; everything open on the Bot
     // surface closes first so nothing stale reopens on the way back.
     setSurface: (mode) => {
@@ -14744,7 +14858,13 @@ function apply(ctx) {
   actions.closeSignIn = () => ui2.set((state) => ({ ...state, signIn: null }));
   actions.accountT = () => ctx.get("locale").bind("settings.account");
   actions.speech = () => ctx.get("remote.speech") ?? void 0;
-  actions.openHarnessSettings = openHarnessSettings;
+  actions.openHarnessSettings = () => {
+    if (mobileNav.getSnapshot()) {
+      ui2.set((state) => ({ ...state, toast: { text: t("Open this setting on a desktop."), token: Date.now() } }));
+      return;
+    }
+    openHarnessSettings();
+  };
   actions.openHarnessOnboarding = openHarnessOnboarding;
   actions.voiceSetup = () => {
     const navigation = ctx.get("pluginNavigation");
@@ -14773,11 +14893,35 @@ function apply(ctx) {
   };
   const browserPages = browsers?.pages ?? createSource({});
   const browserTabs = browsers?.tabs ?? createSource({});
-  const face = () => ({ actions, hooks: { roster, ui: ui2, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel } });
+  const face = () => ({ actions, hooks: { roster, ui: ui2, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel, navMotion } });
   const coverConversation = (covered) => {
     for (const column of document.querySelectorAll('[class*="_centerCol"]')) {
       if (covered) column.setAttribute("inert", "");
       else column.removeAttribute("inert");
+    }
+  };
+  let motionTimer = 0;
+  const setMotion = (phase, x) => {
+    if (navMotion.getSnapshot() !== phase) navMotion.set(phase);
+    if (phase === "idle") delete document.body.dataset.btNavMotion;
+    else document.body.dataset.btNavMotion = phase;
+    if (x === void 0) document.body.style.removeProperty("--bt-nav-x");
+    else document.body.style.setProperty("--bt-nav-x", x);
+  };
+  const runMotion = (phase, { from, to, done, ms = NAV_MOTION_MS }) => {
+    clearTimeout(motionTimer);
+    const start = () => {
+      setMotion(phase, to);
+      motionTimer = setTimeout(() => {
+        setMotion("idle");
+        done?.();
+      }, ms + 40);
+    };
+    const now = document.body.style.getPropertyValue("--bt-nav-x") || "0px";
+    if (now === from) start();
+    else {
+      setMotion("hold", from);
+      requestAnimationFrame(start);
     }
   };
   const syncNav = () => {
@@ -14801,6 +14945,15 @@ function apply(ctx) {
       coverConversation(false);
     };
   }, "ds-bot: mobile navigation");
+  ctx.effect(() => installSwipeBack({
+    // Only a conversation the reader is looking at: not a dialog, not the details pane, not
+    // the plain surface an Agent Session gets.
+    canStart: () => mobileNav.getSnapshot() && !surface.getSnapshot().plain && navLevel.getSnapshot() === "chat" && ui2.getSnapshot().details === null && ui2.getSnapshot().settings === null && ui2.getSnapshot().newChat === null,
+    onStart: () => setMotion("drag", "0px"),
+    onMove: (x) => document.body.style.setProperty("--bt-nav-x", `${x}px`),
+    onCommit: () => actions.goBack(),
+    onCancel: () => runMotion("cancel", { from: document.body.style.getPropertyValue("--bt-nav-x") || "0px", to: "0px" })
+  }), "ds-bot: edge swipe back");
   ctx.effect(() => noticeApprovals({
     work,
     roster,

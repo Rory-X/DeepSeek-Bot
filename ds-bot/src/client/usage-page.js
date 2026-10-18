@@ -740,14 +740,26 @@ button.bt-us-row:hover{background:var(--bt-hover)}
 @keyframes bt-us-ring{from{stroke-dasharray:0 ${Math.ceil(RING)}}}
 @keyframes bt-us-pulse{50%{opacity:.25}}
 @keyframes bt-us-shine{from{background-position:200% 0}to{background-position:-200% 0}}
-/* The calendar is a fixed 252px and the stat row is four columns wide. A phone's page
-   area is narrower than either, so both follow it instead of running past its edge. */
+/* The calendar is a fixed 252px, the stat row is four columns wide and the range tabs run
+   to 473px. A phone's page area is narrower than any of them, so each one follows it: the
+   calendar takes the row, the stats keep two columns at a size that fits them, the tabs
+   scroll sideways, and the names wrap rather than run past their box. The heat map's month
+   labels are a column per week, which a phone cannot hold at all. */
 @media (max-width:640px){
 .bt-us-month{width:100%}
 .bt-us-weekdays,.bt-us-days{grid-template-columns:repeat(7,1fr)}
 .bt-us-stats{grid-template-columns:repeat(2,1fr)}
 .bt-us-stat:nth-child(odd){border-left:0}
 .bt-us-stat:nth-child(n+3){border-top:1px solid var(--bt-line)}
+.bt-us-tabs{box-sizing:border-box;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.bt-us-row-line{flex-wrap:wrap}
+.bt-us-stat-value{flex-wrap:wrap;white-space:normal}
+.bt-us-ticks{display:none}
+.bt-us-stat-value{font-size:16px;line-height:22px}
+.bt-us-stat-main .bt-us-stat-value{font-size:22px;line-height:28px}
+.bt-us-heat-months{display:none}
+.bt-us-row-name,.bt-us-row-sub,.bt-us-profile-copy h3,.bt-us-pick-foot{white-space:normal;overflow:visible;text-overflow:clip}
+.bt-us-pick-foot{flex-wrap:wrap;gap:6px}
 }
 @media (prefers-reduced-motion:reduce){.bt-us *,.bt-us *::before{animation:none!important;transition:none!important}}
 `

@@ -103,7 +103,7 @@ test('an open sidebar has a button that collapses it; the rail leaves that to th
     useRoster: pick => pick(roster), useUi: pick => pick({ unread: {} }), useRegistry: pick => pick({}),
     useSessions: pick => pick({ ids: [], byId: {} }), useUpdate: () => ({}),
     useMobileNav: pick => pick(false), useSurface: pick => pick({ plain: false }),
-    useNavLevel: pick => pick('list'),
+    useNavLevel: pick => pick('list'), useNavMotion: pick => pick('idle'),
     actions: { toggleSidebar: () => calls.push('toggle') },
   })
   const find = (node, match) => {
@@ -129,7 +129,7 @@ test('a phone renders the list page in place of the sidebar, and only at the lis
     useRoster: pick => pick(roster), useUi: pick => pick({ unread: {} }), useRegistry: pick => pick({}),
     useSessions: pick => pick({ ids: [], byId: {} }), useUpdate: () => ({}),
     useMobileNav: pick => pick(mobile), useSurface: pick => pick({ plain: false }),
-    useNavLevel: pick => pick(level),
+    useNavLevel: pick => pick(level), useNavMotion: pick => pick('idle'),
     actions: {},
   })
   const classes = node => (node?.props?.className ?? '').split(' ')

@@ -194,13 +194,14 @@ test('the phone pins the page against bounce, refresh and zoom', () => {
 // centred is not what the phone asks for.
 test('the phone stands in for the Main Bot card with a centred pill', () => {
   const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
-  const pill = css.split('\n').find(line => line.includes('.bt-chief-bar{'))
+  const pill = css.split('\n').find(line => line.includes('.bt-chief-bar{') && line.includes('left:50%'))
   assert.ok(pill, 'the pill is there')
   assert.match(pill, /left:50%;transform:translateX\(-50%\)/)
-  assert.match(pill, /border-radius:999px/)
+  assert.match(pill, /border-radius:16px/)
   assert.equal(/left:0;right:0/.test(pill), false, 'not a full-width bar')
-  const arrow = css.split('\n').find(line => line.includes('.bt-chief-go{'))
-  assert.match(arrow, /width:44px;height:44px/)
+  assert.equal(/bt-chief-go/.test(css), false, 'the pill is not a control')
+  const role = css.split('\n').find(line => line.includes('.bt-chief-role{'))
+  assert.match(role, /color:var\(--bt-ink-3\)/, 'the role rides under the name')
 })
 
 // The shell's right panel goes fullscreen below 768px, and its column is the box it
