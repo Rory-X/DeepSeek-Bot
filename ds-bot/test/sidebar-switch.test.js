@@ -28,7 +28,9 @@ const react = {
 const module = { exports: {} }
 runInNewContext(outputFiles[0].text, {
   module, exports: module.exports,
-  require: name => (name === 'react' ? react : {}),
+  // The phone's list page is a portal; here it renders in place, so the tree can be read.
+  document: { body: {} },
+  require: name => (name === 'react' ? react : name === 'react-dom' ? { createPortal: node => node } : {}),
 })
 const { SHELL_CSS, SIDEBAR_CSS, TeamSidebar } = module.exports
 
@@ -100,6 +102,7 @@ test('an open sidebar has a button that collapses it; the rail leaves that to th
     wide,
     useRoster: pick => pick(roster), useUi: pick => pick({ unread: {} }), useRegistry: pick => pick({}),
     useSessions: pick => pick({ ids: [], byId: {} }), useUpdate: () => ({}),
+    useMobileNav: pick => pick(false), useSurface: pick => pick({ plain: false }),
     actions: { toggleSidebar: () => calls.push('toggle') },
   })
   const find = (node, match) => {
@@ -113,6 +116,36 @@ test('an open sidebar has a button that collapses it; the rail leaves that to th
   button.props.onClick()
   assert.deepEqual(calls, ['toggle'])
   assert.equal(find(TeamSidebar(props(false)), collapse), undefined)
+})
+
+// A phone shows the list as a page of its own. The sidebar hands over to it rather than
+// showing the rail, so the DOM never carries two copies of the list for the test bench to
+// count, and the page's root carries the hook the bench reads.
+test('a phone renders the list page in place of the sidebar', () => {
+  const roster = { bots: [], rooms: [], agents: [], byId: {}, ready: true }
+  const props = mobile => ({
+    wide: false,
+    useRoster: pick => pick(roster), useUi: pick => pick({ unread: {} }), useRegistry: pick => pick({}),
+    useSessions: pick => pick({ ids: [], byId: {} }), useUpdate: () => ({}),
+    useMobileNav: pick => pick(mobile), useSurface: pick => pick({ plain: false }),
+    actions: {},
+  })
+  const classes = node => (node?.props?.className ?? '').split(' ')
+  const collect = (node, found = []) => {
+    if (Array.isArray(node)) { for (const child of node) collect(child, found); return found }
+    if (!node || typeof node !== 'object') return found
+    found.push(node)
+    return collect(node.props?.children, found)
+  }
+  // The portal hands back the element it was given; render one level so the page's own
+  // markup can be read.
+  const render = node => (typeof node?.type === 'function' ? render(node.type(node.props)) : node)
+  const page = collect(render(TeamSidebar(props(true))))
+  assert.deepEqual(page.filter(node => classes(node).includes('bt-nav-page')).map(node => node.props['data-bt-nav']), ['list'])
+  assert.equal(page.some(node => classes(node).includes('bt-side')), false)
+  const sidebar = collect(render(TeamSidebar(props(false))))
+  assert.equal(sidebar.some(node => classes(node).includes('bt-side')), true)
+  assert.equal(sidebar.some(node => node.props['data-bt-nav'] !== undefined), false)
 })
 
 test('the logo row takes no room in an open sidebar under a Windows title bar', () => {

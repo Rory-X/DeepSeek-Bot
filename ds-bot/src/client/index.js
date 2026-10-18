@@ -2,6 +2,7 @@ import { call } from './api.js'
 import { isHex, inkText, paintCss } from './inks.js'
 import { DEFAULT_MASK, SHAPES, markupCache, maskOf } from './characters.js'
 import { createSource, EMPTY_ROSTER, indexRoster, isAgentSession } from './sources.js'
+import { watchMobileNav } from './media.js'
 import { teamActions } from './team-actions.js'
 import { themeCss, shellTokens, registry, registerShape, registerTheme, allThemes } from './themes.js'
 import { MENTION_ORIGIN, currentPart } from './text.js'
@@ -54,6 +55,10 @@ export function apply(ctx) {
   // style so the shell's own interface returns. `plain` stays false until a Bot-mode
   // view hosts a plain session, which drops only the conversation replacements.
   const surface = createSource({ mode: readMode(), plain: false })
+  // A phone gets a two-level navigation: `mobileNav` is the device test (media.js), and
+  // `navLevel` says which of the two levels the Bot surface shows.
+  const mobileNav = createSource(false)
+  const navLevel = createSource('list')
   // DSH Agent Session ids from the last pull, so a reload already knows the main
   // view is a plain Session before the team answers.
   let agentSessionCache = new Set()
@@ -348,6 +353,8 @@ export function apply(ctx) {
     openSession: (id) => {
       // A DSH Agent Session id lands on the plain surface, not the Bot skin.
       if (isAgentSessionId(id)) return actions.openAgentSession(id)
+      // Opening a conversation is what leaves the phone's list page.
+      navLevel.set('chat')
       ui.set(state => (state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state))
       setPlain(false)
       const target = partFor(id)
@@ -357,6 +364,7 @@ export function apply(ctx) {
     // The conversation replacements withdraw for a plain Session; set the surface
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
+      navLevel.set('chat')
       ui.set(state => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: 'details', renaming: false, tab: null }))
       setPlain(true)
       expected = sessionId
@@ -423,6 +431,12 @@ export function apply(ctx) {
     },
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
     toggleSidebar: () => { ctx.layout.toggleSidebar() },
+    // Back to the phone's list page, from the conversation's back control. Leaving the
+    // conversation closes the details pane with it.
+    showBotList: () => {
+      ui.set(state => (state.details ? { ...state, details: null, view: 'details' } : state))
+      navLevel.set('list')
+    },
     // Agent mode hands the surface back to the shell; everything open on the Bot
     // surface closes first so nothing stale reopens on the way back.
     setSurface: (mode) => {
@@ -563,7 +577,25 @@ export function apply(ctx) {
   }
   const browserPages = browsers?.pages ?? createSource({})
   const browserTabs = browsers?.tabs ?? createSource({})
-  const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update } })
+  const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel } })
+  // The level is published on <body> so the styles, the test bench and a screen reader all
+  // read the same fact; it is absent whenever the navigation is not in effect (a desktop,
+  // or the plain surface an Agent Session gets).
+  const syncNav = () => {
+    if (mobileNav.getSnapshot() && !surface.getSnapshot().plain) document.body.dataset.btNav = navLevel.getSnapshot()
+    else delete document.body.dataset.btNav
+  }
+  ctx.effect(() => {
+    const watch = watchMobileNav((value) => { mobileNav.set(value); navLevel.set('list') })
+    mobileNav.set(watch.read())
+    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav)]
+    syncNav()
+    return () => {
+      watch.dispose()
+      for (const off of offs) off()
+      delete document.body.dataset.btNav
+    }
+  }, 'ds-bot: mobile navigation')
   ctx.effect(() => noticeApprovals({
     work,
     roster,

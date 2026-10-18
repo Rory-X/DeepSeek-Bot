@@ -92,6 +92,7 @@ var ZH = {
   "New Bot": "新 Bot",
   // Sidebar and account menu
   "Bot list": "Bot 列表",
+  "Back to Bot list": "返回 Bot 列表",
   "Setting up your Main Bot…": "正在设置你的主 Bot…",
   "Connect plugins": "连接插件",
   "Plugin compatibility is not fully verified.": "插件兼容性未完全验证",
@@ -1324,6 +1325,19 @@ function countCards(state, sessionId, callIds, delta) {
   return { ...state, [sessionId]: own };
 }
 
+// src/client/media.js
+var TOUCH = "(hover:none) and (pointer:coarse)";
+var NARROW = "(max-width:640px)";
+var MOBILE_NAV = `${TOUCH} and ${NARROW}`;
+var NOT_DESKTOP = "html:not([data-platform])";
+function watchMobileNav(onChange) {
+  const query = window.matchMedia(MOBILE_NAV);
+  const read = () => query.matches && document.documentElement.dataset.platform === void 0;
+  const update = () => onChange(read());
+  query.addEventListener("change", update);
+  return { read, dispose: () => query.removeEventListener("change", update) };
+}
+
 // src/client/team-actions.js
 function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards, turnClock }) {
   return {
@@ -2232,7 +2246,10 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-pill{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;height:40px;padding:7.5px 13.5px 7.5px 7.5px;border-radius:999px;background:var(--bt-main);border:.5px solid var(--bt-line-2);box-shadow:0 2px 8px -1px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);color:var(--bt-ink);font-family:inherit;font-size:14px;line-height:20px;cursor:pointer;max-width:70%;box-sizing:border-box;transition:background-color .12s ease,transform ${SPRING_TAP.duration}ms ${SPRING_TAP.easing}}
 .bt-pill:hover{background:color-mix(in srgb,var(--bt-main),#777 9%)}
 .bt-head-side{position:absolute;right:12px;top:4px;width:32px;height:32px;border-radius:8px;pointer-events:auto;transition:background-color .12s ease}
-.bt-head-side:hover{background:color-mix(in srgb,var(--bt-main),#777 12%);color:var(--bt-ink)}
+.bt-head-side:hover,.bt-back:hover{background:color-mix(in srgb,var(--bt-main),#777 12%);color:var(--bt-ink)}
+/* The phone's conversation is the second level; this leaves it for the list page. It sits
+   where the shell's own leading control does, opposite the right-sidebar button. */
+.bt-back{position:absolute;left:12px;top:4px;pointer-events:auto}
 .bt-pill:active{transform:scale(.965)}
 .bt-pill-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .bt-pill-mem{flex:none;display:inline-flex;width:0;margin-left:-8px;overflow:hidden;transition:${spring(SPRING_SHAPE, "width", "margin-left")}}
@@ -2626,6 +2643,17 @@ ${SKIN_FOOT}{display:flex!important;flex-direction:row!important;align-items:cen
 ${SKIN_FOOT}>div:has(> [data-slot="sidebar.footer.action"]){display:flex!important;align-items:center!important;flex:1 1 auto!important;min-width:0!important}
 ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:none!important;width:auto!important}
 [class*="_widthHandle"]{display:none!important}
+/* On a phone the Bot list is a page of its own, so the shell's sidebar goes away for the
+   whole surface. Below 1024px the shell keeps a 56px rail for a collapsed sidebar and
+   offers no way to set that track to zero, so the frame's grid is closed here — the
+   sidebar track only; the conversation and the shell's right panel keep their tracks.
+   The media query is the device test (the same string the navigation state reads, from
+   media.js); the body attribute narrows it to the Bot surface, which a media query cannot
+   see — an Agent Session keeps the shell's own sidebar. */
+@media ${MOBILE_NAV}{
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) minmax(0,70vw)!important}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"]{display:none!important}
+}
 
 .bt-voice-pane{flex-direction:column;align-items:center;justify-content:center;animation:bt-fade .2s ease-out}
 .bt-voice-stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;max-width:560px;text-align:center}
@@ -2932,6 +2960,9 @@ var CONVERSATION_CSS = `
 header[class*="_header"]:has(.bt-head){position:absolute!important;top:0;left:0;right:0;z-index:8;display:flex!important;padding:10px 0 0!important;background:transparent!important;pointer-events:none;justify-content:center}
 header[class*="_header"]:has(.bt-head)::before{content:"";position:absolute;inset:0 0 auto;height:60px;background:linear-gradient(to bottom,var(--bt-main),color-mix(in srgb,var(--bt-main) 0%,transparent));pointer-events:none;z-index:-1}
 header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{position:absolute;left:12px;top:10px;pointer-events:auto}
+/* The back control takes the corner; anything the shell or another plugin put in the
+   leading seat moves aside rather than sitting under it. */
+header[class*="_header"]:has(.bt-back)>[class*="_headerLeading"]{left:52px}
 header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 [class*="_body"]:has(> [class*="_scrollBody"]){--dsh-chat-content-width:min(960px,100%)}
 /* The shell writes the column's width on the conversation root at every resize, only to
@@ -5237,7 +5268,7 @@ var waitingFor = (roster, waits) => {
   const names = [...(waits?.bots ?? []).map((id) => roster.byId[id]?.name), ...(waits?.rooms ?? []).map((id) => roster.roomsById[id]?.name)].filter(Boolean);
   return names.length === 0 ? "" : t("Waiting for {names}", { names: names.join(t(" and ")) });
 };
-function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, wide, marked }) {
+function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, wide, marked, time }) {
   const id = bot.id;
   const part = currentPart(bot);
   const preview = useSessions((list) => previewOf(list, part, roster.exchangeTurns[part]));
@@ -5298,13 +5329,13 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
     wide ? (0, import_react9.createElement)(
       "span",
       { className: "bt-row-body" },
-      (0, import_react9.createElement)("span", { className: "bt-row-name" }, (0, import_react9.createElement)("span", { className: "bt-row-title" }, bot.name), pinned ? (0, import_react9.createElement)(PinMark) : null),
+      (0, import_react9.createElement)("span", { className: "bt-row-name" }, (0, import_react9.createElement)("span", { className: "bt-row-title" }, bot.name), pinned ? (0, import_react9.createElement)(PinMark) : null, time ? (0, import_react9.createElement)("span", { className: "bt-row-time" }, time) : null),
       awayLine ? (0, import_react9.createElement)("span", { className: "bt-row-preview" }, awayLine) : waitsFor ? (0, import_react9.createElement)("span", { className: "bt-row-preview" }, waitsFor) : preview ? (0, import_react9.createElement)("span", { className: "bt-row-preview" }, preview) : null
     ) : null,
     wide && unread && !active ? (0, import_react9.createElement)("span", { className: "bt-unread", "aria-hidden": true }) : null
   );
 }
-function RoomRow({ room: room2, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, wide, marked }) {
+function RoomRow({ room: room2, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, wide, marked, time }) {
   const id = room2.id;
   const fallback = useSessions((list) => previewOf(list, id));
   const preview = room2.preview?.replace(/\s+/g, " ").trim() || fallback;
@@ -5337,7 +5368,7 @@ function RoomRow({ room: room2, roster, actions, useSessions, useSessionStatus, 
     wide ? (0, import_react9.createElement)(
       "span",
       { className: "bt-row-body" },
-      (0, import_react9.createElement)("span", { className: "bt-row-name" }, (0, import_react9.createElement)("span", { className: "bt-row-title" }, room2.name), pinned ? (0, import_react9.createElement)(PinMark) : null),
+      (0, import_react9.createElement)("span", { className: "bt-row-name" }, (0, import_react9.createElement)("span", { className: "bt-row-title" }, room2.name), pinned ? (0, import_react9.createElement)(PinMark) : null, time ? (0, import_react9.createElement)("span", { className: "bt-row-time" }, time) : null),
       workingLine ? (0, import_react9.createElement)("span", { className: "bt-row-preview" }, workingLine) : preview ? (0, import_react9.createElement)("span", { className: "bt-row-preview" }, preview) : null
     ) : null,
     wide && approval && !active ? (0, import_react9.createElement)("span", { className: "bt-unread bt-unread-wait", "aria-hidden": true }) : wide && unread && !active ? (0, import_react9.createElement)("span", { className: "bt-unread", "aria-hidden": true }) : null
@@ -5536,6 +5567,20 @@ function TeamSidebar(props) {
     event.preventDefault();
     actions.openPalette(event.key);
   };
+  const onListPage = props.useMobileNav((value) => value) && !props.useSurface((value) => value.plain);
+  if (onListPage) {
+    return (0, import_react_dom3.createPortal)((0, import_react9.createElement)(MobileNavList, {
+      roster,
+      actions,
+      listRef,
+      main,
+      order,
+      markedUnread,
+      typeToSearch,
+      rowProps: { ...rowProps, wide: true },
+      useUpdate: props.useUpdate
+    }), document.body);
+  }
   return (0, import_react9.createElement)(
     "div",
     { className: wide ? "bt-side" : "bt-side bt-rail", onKeyDown: typeToSearch },
@@ -5554,12 +5599,32 @@ function TeamSidebar(props) {
       (0, import_react9.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react9.createElement)(PlusIcon))
     ),
     wide && roster.readOnly ? (0, import_react9.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
+    (0, import_react9.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps })
+  );
+}
+function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTime }) {
+  const stamp = (entry) => showTime ? relativeShort(entry.at) : void 0;
+  return (0, import_react9.createElement)(
+    "div",
+    { ref: listRef, className: "bt-list", role: "region", "aria-label": t("Bot list") },
+    main ? (0, import_react9.createElement)(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true, time: void 0 }) : roster.ready ? null : (0, import_react9.createElement)("div", { className: "bt-hint" }, t("Setting up your Main Bot…")),
+    order.map((entry) => entry.kind === "bot" ? (0, import_react9.createElement)(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) }) : entry.kind === "room" ? (0, import_react9.createElement)(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) }) : (0, import_react9.createElement)(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))
+  );
+}
+function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+  return (0, import_react9.createElement)(
+    "div",
+    { className: "bt-nav-page", "data-bt-nav": "list", onKeyDown: typeToSearch },
     (0, import_react9.createElement)(
       "div",
-      { ref: listRef, className: "bt-list", role: "region", "aria-label": t("Bot list") },
-      main ? (0, import_react9.createElement)(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true }) : roster.ready ? null : (0, import_react9.createElement)("div", { className: "bt-hint" }, t("Setting up your Main Bot…")),
-      order.map((entry) => entry.kind === "bot" ? (0, import_react9.createElement)(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true }) : entry.kind === "room" ? (0, import_react9.createElement)(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true }) : (0, import_react9.createElement)(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))
-    )
+      { className: "bt-nav-top" },
+      (0, import_react9.createElement)("span", { className: "bt-brand" }, (0, import_react9.createElement)(BrandMark, { size: 22 }), (0, import_react9.createElement)(BrandName)),
+      (0, import_react9.createElement)(UpdateButton, { useUpdate, actions }),
+      (0, import_react9.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Search"), title: t("Search"), onClick: () => actions.openPalette() }, (0, import_react9.createElement)(SearchIcon)),
+      (0, import_react9.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react9.createElement)(PlusIcon))
+    ),
+    roster.readOnly ? (0, import_react9.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
+    (0, import_react9.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true })
   );
 }
 function UpdateButton({ useUpdate, actions }) {
@@ -5982,6 +6047,15 @@ var SIDEBAR_CSS = `
 .bt-agent-sub[data-open] .bt-agent-sub-row{animation:bt-agent-row-in .24s ease both;animation-delay:calc(var(--i, 0)*30ms)}
 @keyframes bt-agent-row-in{from{opacity:0;filter:blur(4px)}to{opacity:1;filter:blur(0)}}
 @media (prefers-reduced-motion:reduce){.bt-agent-sub{transition:none}.bt-agent-sub .bt-agent-sub-row{animation:none}}
+
+/* The phone's list page. It is the only copy of the list while it is up: the sidebar
+   renders nothing, and the shell's own sidebar column is closed by the shell styles. */
+.bt-nav-page{position:fixed;inset:0;z-index:35;display:flex;flex-direction:column;background:var(--bt-main);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box}
+.bt-nav-top{display:flex;align-items:center;gap:8px;flex:none;padding:10px 12px 6px}
+.bt-nav-page .bt-list{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 8px 12px}
+.bt-nav-page .bt-row{min-height:60px}
+.bt-nav-page .bt-tile-wrap{padding:8px 0 12px}
+.bt-row-time{flex:none;margin-left:auto;padding-left:8px;font-size:12px;line-height:18px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums}
 `;
 
 // src/client/header.js
@@ -6015,7 +6089,7 @@ function MemoryNotice({ shown }) {
     (0, import_react10.createElement)("span", { className: "bt-pill-mem-in", ref: inner }, (0, import_react10.createElement)("span", { className: "bt-pill-mem-ico" }, (0, import_react10.createElement)(MemoryIcon)), label)
   );
 }
-function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSession, useActivity, useMemoryNews, useTurnClock, useUi, useLive, useWork, actions }) {
+function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSession, useActivity, useMemoryNews, useTurnClock, useUi, useLive, useWork, useMobileNav, useNavLevel, actions }) {
   const roster = useRoster((value) => value);
   const title = useSessions((list) => list.byId[sessionId]?.displayTitle ?? list.byId[sessionId]?.title ?? "");
   const firstTurns = useSessions((list) => {
@@ -6059,9 +6133,11 @@ function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSe
     };
   }, [Boolean(room2)]);
   const memoryNotice = notice && changed !== null && roster.memory !== false;
+  const onNavChat = useMobileNav((value) => value) && useNavLevel((value) => value === "chat");
   return (0, import_react10.createElement)(
     "div",
     { className: "bt-head" },
+    onNavChat ? (0, import_react10.createElement)("button", { type: "button", className: "bt-icon-btn bt-back", "data-bt-nav-back": "", "aria-label": t("Back to Bot list"), title: t("Back to Bot list"), onClick: () => actions.showBotList() }, (0, import_react10.createElement)(ChevronLeftIcon)) : null,
     (0, import_react10.createElement)(
       "button",
       {
@@ -13962,6 +14038,8 @@ function apply(ctx) {
   let seenAt = seenStore.read();
   const ui2 = createSource({ details: null, view: "details", renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} });
   const surface = createSource({ mode: readMode(), plain: false });
+  const mobileNav = createSource(false);
+  const navLevel = createSource("list");
   let agentSessionCache = /* @__PURE__ */ new Set();
   try {
     agentSessionCache = new Set(JSON.parse(localStorage.getItem(STORAGE.agentSessions) ?? "[]"));
@@ -14274,6 +14352,7 @@ function apply(ctx) {
     isAgentSession: (id) => isAgentSessionId(id),
     openSession: (id) => {
       if (isAgentSessionId(id)) return actions.openAgentSession(id);
+      navLevel.set("chat");
       ui2.set((state) => state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state);
       setPlain(false);
       const target = partFor(id);
@@ -14283,6 +14362,7 @@ function apply(ctx) {
     // The conversation replacements withdraw for a plain Session; set the surface
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
+      navLevel.set("chat");
       ui2.set((state) => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: "details", renaming: false, tab: null }));
       setPlain(true);
       expected = sessionId;
@@ -14352,6 +14432,12 @@ function apply(ctx) {
     },
     toggleSidebar: () => {
       ctx.layout.toggleSidebar();
+    },
+    // Back to the phone's list page, from the conversation's back control. Leaving the
+    // conversation closes the details pane with it.
+    showBotList: () => {
+      ui2.set((state) => state.details ? { ...state, details: null, view: "details" } : state);
+      navLevel.set("list");
     },
     // Agent mode hands the surface back to the shell; everything open on the Bot
     // surface closes first so nothing stale reopens on the way back.
@@ -14482,7 +14568,25 @@ function apply(ctx) {
   };
   const browserPages = browsers?.pages ?? createSource({});
   const browserTabs = browsers?.tabs ?? createSource({});
-  const face = () => ({ actions, hooks: { roster, ui: ui2, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update } });
+  const face = () => ({ actions, hooks: { roster, ui: ui2, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel } });
+  const syncNav = () => {
+    if (mobileNav.getSnapshot() && !surface.getSnapshot().plain) document.body.dataset.btNav = navLevel.getSnapshot();
+    else delete document.body.dataset.btNav;
+  };
+  ctx.effect(() => {
+    const watch = watchMobileNav((value) => {
+      mobileNav.set(value);
+      navLevel.set("list");
+    });
+    mobileNav.set(watch.read());
+    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav)];
+    syncNav();
+    return () => {
+      watch.dispose();
+      for (const off of offs) off();
+      delete document.body.dataset.btNav;
+    };
+  }, "ds-bot: mobile navigation");
   ctx.effect(() => noticeApprovals({
     work,
     roster,

@@ -2,6 +2,7 @@ import { INKS } from './inks.js'
 import { DEFAULT_MASK } from './characters.js'
 import { MENTION_ORIGIN } from './text.js'
 import { SPRING_SHAPE, SPRING_TAP, SPRING_STRETCH, SPRING_POP, spring } from './motion.js'
+import { MOBILE_NAV, NOT_DESKTOP } from './media.js'
 
 // The pill stretches for "Memory updated" on SPRING_STRETCH, and its icon pops on
 // SPRING_POP; it closes on SPRING_SHAPE.
@@ -161,7 +162,10 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-pill{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;height:40px;padding:7.5px 13.5px 7.5px 7.5px;border-radius:999px;background:var(--bt-main);border:.5px solid var(--bt-line-2);box-shadow:0 2px 8px -1px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);color:var(--bt-ink);font-family:inherit;font-size:14px;line-height:20px;cursor:pointer;max-width:70%;box-sizing:border-box;transition:background-color .12s ease,transform ${SPRING_TAP.duration}ms ${SPRING_TAP.easing}}
 .bt-pill:hover{background:color-mix(in srgb,var(--bt-main),#777 9%)}
 .bt-head-side{position:absolute;right:12px;top:4px;width:32px;height:32px;border-radius:8px;pointer-events:auto;transition:background-color .12s ease}
-.bt-head-side:hover{background:color-mix(in srgb,var(--bt-main),#777 12%);color:var(--bt-ink)}
+.bt-head-side:hover,.bt-back:hover{background:color-mix(in srgb,var(--bt-main),#777 12%);color:var(--bt-ink)}
+/* The phone's conversation is the second level; this leaves it for the list page. It sits
+   where the shell's own leading control does, opposite the right-sidebar button. */
+.bt-back{position:absolute;left:12px;top:4px;pointer-events:auto}
 .bt-pill:active{transform:scale(.965)}
 .bt-pill-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .bt-pill-mem{flex:none;display:inline-flex;width:0;margin-left:-8px;overflow:hidden;transition:${spring(SPRING_SHAPE, 'width', 'margin-left')}}
@@ -555,6 +559,17 @@ ${SKIN_FOOT}{display:flex!important;flex-direction:row!important;align-items:cen
 ${SKIN_FOOT}>div:has(> [data-slot="sidebar.footer.action"]){display:flex!important;align-items:center!important;flex:1 1 auto!important;min-width:0!important}
 ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:none!important;width:auto!important}
 [class*="_widthHandle"]{display:none!important}
+/* On a phone the Bot list is a page of its own, so the shell's sidebar goes away for the
+   whole surface. Below 1024px the shell keeps a 56px rail for a collapsed sidebar and
+   offers no way to set that track to zero, so the frame's grid is closed here — the
+   sidebar track only; the conversation and the shell's right panel keep their tracks.
+   The media query is the device test (the same string the navigation state reads, from
+   media.js); the body attribute narrows it to the Bot surface, which a media query cannot
+   see — an Agent Session keeps the shell's own sidebar. */
+@media ${MOBILE_NAV}{
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) minmax(0,70vw)!important}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"]{display:none!important}
+}
 
 .bt-voice-pane{flex-direction:column;align-items:center;justify-content:center;animation:bt-fade .2s ease-out}
 .bt-voice-stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;max-width:560px;text-align:center}
@@ -862,6 +877,9 @@ export const CONVERSATION_CSS = `
 header[class*="_header"]:has(.bt-head){position:absolute!important;top:0;left:0;right:0;z-index:8;display:flex!important;padding:10px 0 0!important;background:transparent!important;pointer-events:none;justify-content:center}
 header[class*="_header"]:has(.bt-head)::before{content:"";position:absolute;inset:0 0 auto;height:60px;background:linear-gradient(to bottom,var(--bt-main),color-mix(in srgb,var(--bt-main) 0%,transparent));pointer-events:none;z-index:-1}
 header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{position:absolute;left:12px;top:10px;pointer-events:auto}
+/* The back control takes the corner; anything the shell or another plugin put in the
+   leading seat moves aside rather than sitting under it. */
+header[class*="_header"]:has(.bt-back)>[class*="_headerLeading"]{left:52px}
 header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 [class*="_body"]:has(> [class*="_scrollBody"]){--dsh-chat-content-width:min(960px,100%)}
 /* The shell writes the column's width on the conversation root at every resize, only to

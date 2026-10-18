@@ -41,7 +41,7 @@ const waitingFor = (roster, waits) => {
   return names.length === 0 ? '' : t('Waiting for {names}', { names: names.join(t(' and ')) })
 }
 
-function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, wide, marked }) {
+function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, wide, marked, time }) {
   const id = bot.id
   const part = currentPart(bot)
   const preview = useSessions(list => previewOf(list, part, roster.exchangeTurns[part]))
@@ -84,14 +84,14 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   h(BotAvatar, { bot, size: 36, state, main }),
   pinned && !wide ? h(PinMark) : null,
   wide ? h('span', { className: 'bt-row-body' },
-    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, bot.name), pinned ? h(PinMark) : null),
+    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, bot.name), pinned ? h(PinMark) : null, time ? h('span', { className: 'bt-row-time' }, time) : null),
     awayLine ? h('span', { className: 'bt-row-preview' }, awayLine)
       : waitsFor ? h('span', { className: 'bt-row-preview' }, waitsFor)
         : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
   wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true }) : null)
 }
 
-function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, wide, marked }) {
+function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, wide, marked, time }) {
   const id = room.id
   const fallback = useSessions(list => previewOf(list, id))
   const preview = room.preview?.replace(/\s+/g, ' ').trim() || fallback
@@ -113,7 +113,7 @@ function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSess
   h(RoomAvatar, { room, roster, size: 36 }),
   pinned && !wide ? h(PinMark) : null,
   wide ? h('span', { className: 'bt-row-body' },
-    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, room.name), pinned ? h(PinMark) : null),
+    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, room.name), pinned ? h(PinMark) : null, time ? h('span', { className: 'bt-row-time' }, time) : null),
     workingLine ? h('span', { className: 'bt-row-preview' }, workingLine) : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
   wide && approval && !active ? h('span', { className: 'bt-unread bt-unread-wait', 'aria-hidden': true })
     : wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true }) : null)
@@ -275,6 +275,15 @@ export function TeamSidebar(props) {
     event.preventDefault()
     actions.openPalette(event.key)
   }
+  // On a phone the list is a page of its own: the sidebar hands over to it instead of
+  // showing the rail, so only one copy of the list is ever mounted.
+  const onListPage = props.useMobileNav(value => value) && !props.useSurface(value => value.plain)
+  if (onListPage) {
+    return createPortal(h(MobileNavList, {
+      roster, actions, listRef, main, order, markedUnread, typeToSearch,
+      rowProps: { ...rowProps, wide: true }, useUpdate: props.useUpdate,
+    }), document.body)
+  }
   return h('div', { className: wide ? 'bt-side' : 'bt-side bt-rail', onKeyDown: typeToSearch },
     wide ? h('div', { className: 'bt-side-top' },
       h('span', { className: 'bt-brand' }, h(BrandMark, { size: 22 }), h(BrandName)),
@@ -286,13 +295,33 @@ export function TeamSidebar(props) {
           h(UpdateButton, { useUpdate: props.useUpdate, actions }),
           h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
     wide && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
-    h('div', { ref: listRef, className: 'bt-list', role: 'region', 'aria-label': t('Bot list') },
-      main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true }) : roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…')),
-      order.map(entry => (entry.kind === 'bot'
-        ? h(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true })
-        : entry.kind === 'room'
-          ? h(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true })
-          : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true })))))
+    h(BotList, { listRef, main, order, roster, markedUnread, rowProps }))
+}
+
+// The Bot and group list. The sidebar and the phone's list page both render it, so the
+// two views cannot disagree about order, marks or rows.
+function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTime }) {
+  const stamp = entry => (showTime ? relativeShort(entry.at) : undefined)
+  return h('div', { ref: listRef, className: 'bt-list', role: 'region', 'aria-label': t('Bot list') },
+    main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true, time: undefined }) : roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…')),
+    order.map(entry => (entry.kind === 'bot'
+      ? h(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
+      : entry.kind === 'room'
+        ? h(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
+        : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))))
+}
+
+// The phone's list page: the same list as the sidebar, on a page of its own. Its root
+// carries the hook the styles and the test bench read.
+function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+  return h('div', { className: 'bt-nav-page', 'data-bt-nav': 'list', onKeyDown: typeToSearch },
+    h('div', { className: 'bt-nav-top' },
+      h('span', { className: 'bt-brand' }, h(BrandMark, { size: 22 }), h(BrandName)),
+      h(UpdateButton, { useUpdate, actions }),
+      h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Search'), title: t('Search'), onClick: () => actions.openPalette() }, h(SearchIcon)),
+      h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
+    roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
+    h(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true }))
 }
 
 // The update button at the sidebar's top right: a cloud while a newer DS Bot —
@@ -666,4 +695,13 @@ export const SIDEBAR_CSS = `
 .bt-agent-sub[data-open] .bt-agent-sub-row{animation:bt-agent-row-in .24s ease both;animation-delay:calc(var(--i, 0)*30ms)}
 @keyframes bt-agent-row-in{from{opacity:0;filter:blur(4px)}to{opacity:1;filter:blur(0)}}
 @media (prefers-reduced-motion:reduce){.bt-agent-sub{transition:none}.bt-agent-sub .bt-agent-sub-row{animation:none}}
+
+/* The phone's list page. It is the only copy of the list while it is up: the sidebar
+   renders nothing, and the shell's own sidebar column is closed by the shell styles. */
+.bt-nav-page{position:fixed;inset:0;z-index:35;display:flex;flex-direction:column;background:var(--bt-main);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box}
+.bt-nav-top{display:flex;align-items:center;gap:8px;flex:none;padding:10px 12px 6px}
+.bt-nav-page .bt-list{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 8px 12px}
+.bt-nav-page .bt-row{min-height:60px}
+.bt-nav-page .bt-tile-wrap{padding:8px 0 12px}
+.bt-row-time{flex:none;margin-left:auto;padding-left:8px;font-size:12px;line-height:18px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums}
 `
