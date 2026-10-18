@@ -1457,6 +1457,78 @@ function installSwipeBack({ canStart, onStart, onMove, onCommit, onCancel }) {
   };
 }
 
+// src/client/right-columns.js
+var FRAME = '[class*="_frame"]';
+var COLUMN = "[data-rightbar-col]";
+function installRightColumns({ ui: ui2, isDesktop, rightbar, onError }) {
+  if (rightbar === void 0) return () => {
+  };
+  let frame = null;
+  let column = null;
+  let frameWatch = null;
+  let columnWatch = null;
+  let findWatch = null;
+  let open = false;
+  const isOpen = () => {
+    try {
+      return rightbar.isExpanded() === true;
+    } catch (error) {
+      onError?.(error);
+      return false;
+    }
+  };
+  const collapse = () => {
+    try {
+      if (rightbar.isExpanded()) rightbar.toggleExpanded();
+    } catch (error) {
+      onError?.(error);
+    }
+  };
+  const closeDrawer = () => ui2.set((state) => state.details ? { ...state, details: null, view: "details" } : state);
+  const read = () => {
+    const now = isDesktop() && isOpen();
+    if (now && !open) closeDrawer();
+    open = now;
+  };
+  const attach = () => {
+    const nextFrame = document.querySelector(FRAME);
+    const nextColumn = document.querySelector(COLUMN);
+    if (nextFrame === frame && nextColumn === column) return;
+    frameWatch?.disconnect();
+    columnWatch?.disconnect();
+    frame = nextFrame;
+    column = nextColumn;
+    if (frame !== null) {
+      frameWatch = new MutationObserver(read);
+      frameWatch.observe(frame, { attributes: true, attributeFilter: ["data-rightbar-collapsed", "data-rightbar-fullscreen"] });
+      findWatch?.disconnect();
+      findWatch = null;
+    }
+    if (column !== null && typeof ResizeObserver === "function") {
+      columnWatch = new ResizeObserver(read);
+      columnWatch.observe(column);
+    }
+    open = isDesktop() && isOpen();
+  };
+  attach();
+  if (frame === null) {
+    findWatch = new MutationObserver(attach);
+    findWatch.observe(document.documentElement, { childList: true, subtree: true });
+  }
+  const offMounted = rightbar.mounted?.subscribe ? rightbar.mounted.subscribe(attach) : null;
+  const offUi = ui2.subscribe(() => {
+    if (ui2.getSnapshot().details === null) return;
+    if (isDesktop() && isOpen()) collapse();
+  });
+  return () => {
+    frameWatch?.disconnect();
+    columnWatch?.disconnect();
+    findWatch?.disconnect();
+    offMounted?.();
+    offUi();
+  };
+}
+
 // src/client/team-actions.js
 function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards, turnClock }) {
   return {
@@ -15058,6 +15130,14 @@ function apply(ctx) {
       listTo: "-18px"
     })
   }), "ds-bot: edge swipe back");
+  ctx.inject(["sidebarRight"], (scope) => {
+    scope.effect(() => installRightColumns({
+      ui: ui2,
+      isDesktop: () => !mobileNav.getSnapshot(),
+      rightbar: scope.sidebarRight,
+      onError: (error) => actions.reportError(error, "right-sidebar")
+    }), "ds-bot: one right column at a time");
+  });
   ctx.effect(() => {
     const onFocusIn = (event) => {
       if (!mobileNav.getSnapshot()) return;

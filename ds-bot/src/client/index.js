@@ -5,6 +5,7 @@ import { createSource, EMPTY_ROSTER, indexRoster, isAgentSession } from './sourc
 import { watchMobileNav } from './media.js'
 import { installViewport, watchStandalone } from './platform.js'
 import { NAV_MOTION_MS, installSwipeBack } from './nav-motion.js'
+import { installRightColumns } from './right-columns.js'
 import { teamActions } from './team-actions.js'
 import { themeCss, shellTokens, registry, registerShape, registerTheme, allThemes } from './themes.js'
 import { MENTION_ORIGIN, currentPart } from './text.js'
@@ -754,6 +755,16 @@ export function apply(ctx) {
       listTo: '-18px',
     }),
   }), 'ds-bot: edge swipe back')
+  // The shell's right sidebar loads after this plugin, so the rule is installed when it
+  // arrives; it is the shell's own face, never a patched shell.
+  ctx.inject(['sidebarRight'], (scope) => {
+    scope.effect(() => installRightColumns({
+      ui,
+      isDesktop: () => !mobileNav.getSnapshot(),
+      rightbar: scope.sidebarRight,
+      onError: error => actions.reportError(error, 'right-sidebar'),
+    }), 'ds-bot: one right column at a time')
+  })
   ctx.effect(() => {
     const onFocusIn = (event) => {
       if (!mobileNav.getSnapshot()) return
