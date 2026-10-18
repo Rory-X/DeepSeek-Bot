@@ -683,7 +683,11 @@ body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:
 /* The toolbar's invisible hover bridge reaches 128px left of it to catch a pointer on its
    way from the bubble; a finger has no such path, and the strip swallows taps meant for
    whatever sits under it, the conversation header included. */
-.bt-tools::after{display:none}}
+.bt-tools::after{display:none}
+/* A group message is sized against the row the sender's avatar shares, so its cap left the
+   toolbar's own 82px out: the toolbar then reached past the transcript's scrollport and the
+   conversation could be panned sideways by a few pixels. */
+.bt-astack[data-lead]>.bt-msg{max-width:min(calc(80% + 6px),590px,calc(100% - 82px))}}
 .bt-tool{width:24px;height:24px;border:0;padding:0;border-radius:6px;background:none;color:var(--bt-ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s ease,color .12s ease}
 .bt-tool:hover,.bt-tool[aria-expanded=true]{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-tool:active{background:var(--bt-active)}
