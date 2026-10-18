@@ -2558,6 +2558,22 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-set-bot{flex:1;display:flex;align-items:center;gap:8px;min-width:0}
 .bt-set-paste{flex-direction:column;align-items:stretch;gap:8px}
 .bt-chevron{color:var(--bt-ink-3);display:inline-flex;flex:none}
+/* A phone has no room for a 198px page list beside the page, so the list becomes a strip
+   above it. The glide thumb is a bar that only glides vertically, and a row gives it
+   nothing to glide along: it steps aside and the current item keeps the highlight. The
+   strip keeps room on the right for the close button, which stays where it is. */
+@media (max-width:640px){
+.bt-settings{--bt-set-w:calc(100vw - 16px);flex-direction:column}
+.bt-settings-nav{width:auto;flex-direction:row;align-items:center;gap:2px;overflow-x:auto;padding:8px 48px 8px 8px;border-right:0;border-bottom:.5px solid var(--bt-line);scrollbar-width:none}
+.bt-settings-nav>.bt-thumb{display:none}
+.bt-settings-nav[data-glide] .bt-settings-item[aria-current=page]{background:var(--bt-active)}
+.bt-settings-item{flex:none;white-space:nowrap}
+.bt-settings-shell{margin-top:0;margin-left:auto}
+.bt-settings-main{flex:1 1 auto;width:auto;height:auto;min-height:0}
+.bt-settings-usage[data-off]{left:0;width:100%}
+.bt-settings-head{padding:12px 16px 4px}
+.bt-settings-scroll{padding:12px 16px 20px}
+}
 
 /* Settings → Connectors. */
 .bt-connector{display:flex;flex-direction:column;gap:10px;padding:12px}
@@ -8594,6 +8610,9 @@ var BOT_SETTINGS_CSS = `
 .bt-bs-name{font-size:17px;line-height:24px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-bs-sub{font-size:13px;line-height:18px;color:var(--bt-ink-2)}
 .bt-bs .bt-avedit{left:0;transform:none}
+/* A 300px popover overflows a phone. Cap it to the window and put it back on its anchor,
+   which sits in the middle of the pane. */
+@media (max-width:640px){.bt-avedit{width:min(300px,calc(100vw - 32px))}.bt-bs .bt-avedit{left:50%;transform:translateX(-50%)}}
 .bt-bs-row{min-height:48px}
 label.bt-bs-row{cursor:text}
 .bt-bs-row>.bt-set-copy{flex:1 1 auto}
@@ -12207,6 +12226,7 @@ var savedWidth = () => {
 };
 var widthRange = (view, viewport) => view === "browser" ? [MIN_WIDTH, viewport - MIN_CHAT] : [DETAILS_WIDTH, Math.min(DETAILS_MAX, viewport - MIN_CHAT)];
 var fitWidth = (width, [low, high]) => Math.round(Math.max(low, Math.min(width, high)));
+var layoutWidth = () => document.documentElement.clientWidth;
 var minPanelWidth = (view) => view === "browser" ? MIN_WIDTH : DETAILS_WIDTH;
 var overlayPanel = (view, viewport) => viewport < MIN_CHAT + minPanelWidth(view);
 var room = { rule: null, selector: "" };
@@ -12491,7 +12511,7 @@ function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatu
   const [landed, setLanded] = (0, import_react34.useState)(false);
   const [settling, setSettling] = (0, import_react34.useState)(false);
   const [width, setWidth] = (0, import_react34.useState)(savedWidth);
-  const [viewport, setViewport] = (0, import_react34.useState)(() => window.innerWidth);
+  const [viewport, setViewport] = (0, import_react34.useState)(() => layoutWidth());
   const [dragging, setDragging] = (0, import_react34.useState)(false);
   const [resizing, setResizing] = (0, import_react34.useState)(false);
   const instant = dragging || resizing;
@@ -12525,7 +12545,7 @@ function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatu
     let timer;
     const onResize = () => {
       setResizing(true);
-      setViewport(window.innerWidth);
+      setViewport(layoutWidth());
       clearTimeout(timer);
       timer = setTimeout(() => setResizing(false), 160);
     };
@@ -12638,7 +12658,7 @@ function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatu
     const panel = root.current;
     const grip = event.currentTarget;
     grip.setPointerCapture?.(event.pointerId);
-    const range = widthRange(view, window.innerWidth);
+    const range = widthRange(view, layoutWidth());
     const from = { x: event.clientX, width: panelWidth };
     let next = panelWidth;
     setDragging(true);

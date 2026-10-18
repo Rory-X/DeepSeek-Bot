@@ -64,6 +64,9 @@ const widthRange = (view, viewport) => (view === 'browser'
   ? [MIN_WIDTH, viewport - MIN_CHAT]
   : [DETAILS_WIDTH, Math.min(DETAILS_MAX, viewport - MIN_CHAT)])
 const fitWidth = (width, [low, high]) => Math.round(Math.max(low, Math.min(width, high)))
+// The layout viewport, without a scrollbar: window.innerWidth counts one, and a panel as
+// wide as that overhangs the window by the scrollbar's width.
+const layoutWidth = () => document.documentElement.clientWidth
 // The narrowest a panel can be, per view.
 const minPanelWidth = view => (view === 'browser' ? MIN_WIDTH : DETAILS_WIDTH)
 // Below this the chat column cannot keep MIN_CHAT beside the panel. The panel then covers
@@ -297,7 +300,7 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
   const [landed, setLanded] = useState(false)
   const [settling, setSettling] = useState(false)
   const [width, setWidth] = useState(savedWidth)
-  const [viewport, setViewport] = useState(() => window.innerWidth)
+  const [viewport, setViewport] = useState(() => layoutWidth())
   // While dragging or while the window resizes, width changes land at once.
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
@@ -333,7 +336,7 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     let timer
     const onResize = () => {
       setResizing(true)
-      setViewport(window.innerWidth)
+      setViewport(layoutWidth())
       clearTimeout(timer)
       timer = setTimeout(() => setResizing(false), 160)
     }
@@ -440,7 +443,7 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     const panel = root.current
     const grip = event.currentTarget
     grip.setPointerCapture?.(event.pointerId)
-    const range = widthRange(view, window.innerWidth)
+    const range = widthRange(view, layoutWidth())
     const from = { x: event.clientX, width: panelWidth }
     let next = panelWidth
     setDragging(true)

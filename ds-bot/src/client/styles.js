@@ -495,6 +495,22 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-set-bot{flex:1;display:flex;align-items:center;gap:8px;min-width:0}
 .bt-set-paste{flex-direction:column;align-items:stretch;gap:8px}
 .bt-chevron{color:var(--bt-ink-3);display:inline-flex;flex:none}
+/* A phone has no room for a 198px page list beside the page, so the list becomes a strip
+   above it. The glide thumb is a bar that only glides vertically, and a row gives it
+   nothing to glide along: it steps aside and the current item keeps the highlight. The
+   strip keeps room on the right for the close button, which stays where it is. */
+@media (max-width:640px){
+.bt-settings{--bt-set-w:calc(100vw - 16px);flex-direction:column}
+.bt-settings-nav{width:auto;flex-direction:row;align-items:center;gap:2px;overflow-x:auto;padding:8px 48px 8px 8px;border-right:0;border-bottom:.5px solid var(--bt-line);scrollbar-width:none}
+.bt-settings-nav>.bt-thumb{display:none}
+.bt-settings-nav[data-glide] .bt-settings-item[aria-current=page]{background:var(--bt-active)}
+.bt-settings-item{flex:none;white-space:nowrap}
+.bt-settings-shell{margin-top:0;margin-left:auto}
+.bt-settings-main{flex:1 1 auto;width:auto;height:auto;min-height:0}
+.bt-settings-usage[data-off]{left:0;width:100%}
+.bt-settings-head{padding:12px 16px 4px}
+.bt-settings-scroll{padding:12px 16px 20px}
+}
 
 /* Settings → Connectors. */
 .bt-connector{display:flex;flex-direction:column;gap:10px;padding:12px}
