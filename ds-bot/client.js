@@ -16735,7 +16735,7 @@ function apply(ctx) {
   const mainView = () => Object.values(ctx.sessions.list.getSnapshot().byId ?? {}).find((session) => (session?.retainedBy?.mainView ?? 0) > 0)?.id;
   const show = listedOpener({ list: ctx.sessions.list, refresh: () => Promise.resolve(ctx.sessions.refresh?.()).catch(quietly("refresh sessions")), open: (target) => {
     expected = target;
-    ctx.uiWorkspace.openSession(target);
+    openTarget(target);
   }, current: mainView });
   const COMPOSER_TAP_MS = 900;
   let composerTappedAt = 0;

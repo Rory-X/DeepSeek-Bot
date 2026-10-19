@@ -139,7 +139,7 @@ test('a long result is cut, a token is redacted, and an error is short', async (
   assert.equal(text.startsWith('z'.repeat(CALL_RESULT_MAX)), true)
   assert.match(text, /result cut: \d+ characters in all/)
 
-  const secret = 'tok_super_secret'
+  const secret = 'mock_vercel_secret'
   const redacted = createCallTool({ client: clientFor(`token ${secret}`), index: INDEX, output, redact: value => value.split(secret).join('[secret:VERCEL_TOKEN]') })
   const answer = await redacted.execute({ tool: 'list_projects' })
   assert.equal(answer, 'token [secret:VERCEL_TOKEN]')

@@ -394,7 +394,7 @@ export function apply(ctx) {
     return ids
   }
   const mainView = () => Object.values(ctx.sessions.list.getSnapshot().byId ?? {}).find(session => (session?.retainedBy?.mainView ?? 0) > 0)?.id
-  const show = listedOpener({ list: ctx.sessions.list, refresh: () => Promise.resolve(ctx.sessions.refresh?.()).catch(quietly('refresh sessions')), open: (target) => { expected = target; ctx.uiWorkspace.openSession(target) }, current: mainView })
+  const show = listedOpener({ list: ctx.sessions.list, refresh: () => Promise.resolve(ctx.sessions.refresh?.()).catch(quietly('refresh sessions')), open: (target) => { expected = target; openTarget(target) }, current: mainView })
   // The shell focuses the resident composer whenever a Session opens and again when a turn
   // ends. On a phone that raises the keyboard over the conversation the reader is looking at,
   // and the shell has no way to ask for no focus, so the focus is handed straight back —
