@@ -579,6 +579,9 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
+.bt-connector-input{flex:1 1 auto;min-width:0;border:0;background:none;color:inherit;font:inherit;font-size:13px;outline:none;padding:0}
+.bt-connector-hint{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+.bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the

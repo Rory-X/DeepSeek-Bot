@@ -148,6 +148,17 @@ var ZH = {
   On: "开启",
   "Allow actions": "允许执行操作",
   "Connector settings": "连接器设置",
+  "Waiting for the browser…": "正在浏览器里等待…",
+  "Not connected": "未连接",
+  "Could not connect": "连接失败",
+  "Connect again": "重新连接",
+  "The authorization page could not be opened": "授权页面打不开",
+  "Client ID": "Client ID",
+  "Client secret": "Client secret",
+  "In the app settings, set the redirect URL to {url}": "在应用后台把 Redirect URL 填成 {url}",
+  "Save and connect": "保存并连接",
+  "Open the authorization page": "打开授权页面",
+  "Use a different app": "换一个应用",
   "Each run asks for your approval": "每次执行都会弹出审批",
   "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
   "Projects, deployments, and logs": "项目、部署和日志",
@@ -1710,6 +1721,8 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     connectorDisconnect: (id) => after(call2("connector-disconnect", { id })),
     connectorRetry: (id) => after(call2("connector-retry", { id })),
     connectorSetActions: (id, enabled) => after(call2("connector-set-actions", { id, enabled })),
+    connectorOauthStart: (id) => after(call2("connector-oauth-start", { id })),
+    connectorOauthApp: (id, clientId, clientSecret) => after(call2("connector-oauth-app", { id, clientId, clientSecret })),
     saveCapability: (capability) => after(call2("capability-save", capability)),
     deleteCapability: (name) => after(call2("capability-delete", { name })),
     approveCapability: (name) => after(call2("capability-approve", { name })),
@@ -2927,6 +2940,9 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
+.bt-connector-input{flex:1 1 auto;min-width:0;border:0;background:none;color:inherit;font:inherit;font-size:13px;outline:none;padding:0}
+.bt-connector-hint{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+.bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the
@@ -11932,7 +11948,23 @@ var VercelMark = () => (0, import_react30.createElement)(
   { width: 20, height: 20, viewBox: "0 0 20 20", fill: "currentColor", "aria-hidden": true },
   (0, import_react30.createElement)("path", { d: "M10 2.8 18.6 17.6H1.4z" })
 );
-var MARKS = { github: GitHubMark, vercel: VercelMark };
+var CloudflareMark = () => (0, import_react30.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", "aria-hidden": true },
+  (0, import_react30.createElement)("path", { d: "M6.2 15h7.4a3.2 3.2 0 0 0 .4-6.4 4.6 4.6 0 0 0-8.8-1.1A3.7 3.7 0 0 0 6.2 15z" })
+);
+var NotionMark = () => (0, import_react30.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react30.createElement)("rect", { x: 3.2, y: 3.2, width: 13.6, height: 13.6, rx: 2.6 }),
+  (0, import_react30.createElement)("path", { d: "M7.2 13.2V6.8l5.6 6.4V6.8" })
+);
+var SlackMark = () => (0, import_react30.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", "aria-hidden": true },
+  (0, import_react30.createElement)("path", { d: "M7.6 4.4v11.2M12.4 4.4v11.2M4.4 7.6h11.2M4.4 12.4h11.2" })
+);
+var MARKS = { github: GitHubMark, vercel: VercelMark, cloudflare: CloudflareMark, notion: NotionMark, slack: SlackMark };
 var ABOUT = {
   github: () => t("Repositories, issues, and pull requests"),
   vercel: () => t("Projects, deployments, and logs")
@@ -11977,16 +12009,66 @@ function ConnectorOption({ title, note, checked, disabled = false, describedby, 
   );
 }
 function statusText2(connector) {
-  if (connector.state === "connecting") return t("Connecting…");
+  if (connector.state === "connecting") return connector.oauth === true ? t("Waiting for the browser…") : t("Connecting…");
+  if (connector.state === "error" && connector.oauth === true) return connector.error ?? t("Could not connect");
   if (connector.state === "error") return t("Could not connect: {error}", { error: connector.error ?? "" });
   if (connector.state === "ready") return connector.account ? t("Connected as {account}", { account: connector.account }) : t("Connected");
-  return ABOUT[connector.id]?.() ?? "";
+  return ABOUT[connector.id]?.() ?? (connector.oauth === true ? t("Not connected") : "");
 }
 function ConnectorRow({ connector, actions }) {
   const [form, setForm] = (0, import_react30.useState)(false);
   const [token, setToken] = (0, import_react30.useState)("");
   const [busy, setBusy] = (0, import_react30.useState)(false);
   const [error, setError] = (0, import_react30.useState)(null);
+  const oauth = connector.oauth === true;
+  const manual = oauth && connector.manualClient === true;
+  const configured = typeof connector.clientId === "string" && connector.clientId !== "";
+  const [appForm, setAppForm] = (0, import_react30.useState)(false);
+  const [appId, setAppId] = (0, import_react30.useState)("");
+  const [appSecret, setAppSecret] = (0, import_react30.useState)("");
+  const [authorizeUrl, setAuthorizeUrl] = (0, import_react30.useState)(null);
+  const startAuthorization = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const tab = window.open("about:blank", "_blank");
+    try {
+      const result = await actions.connectorOauthStart(connector.id);
+      const url = typeof result?.authorizeUrl === "string" ? result.authorizeUrl : "";
+      if (url === "") throw new Error(t("The authorization page could not be opened"));
+      setAuthorizeUrl(url);
+      if (tab !== null) {
+        try {
+          tab.location.href = url;
+        } catch {
+        }
+        tab.focus?.();
+      }
+    } catch (failure) {
+      try {
+        tab?.close?.();
+      } catch {
+      }
+      setError(failure?.message ?? String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveApp = async () => {
+    if (busy || appId.trim() === "" || appSecret.trim() === "") return;
+    setBusy(true);
+    setError(null);
+    try {
+      await actions.connectorOauthApp(connector.id, appId.trim(), appSecret);
+      setAppSecret("");
+      setAppForm(false);
+      await startAuthorization();
+    } catch (failure) {
+      setError(failure?.message ?? String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
   const run = (task, after) => {
     setBusy(true);
     setError(null);
@@ -12032,14 +12114,30 @@ function ConnectorRow({ connector, actions }) {
       (0, import_react30.createElement)(
         "span",
         { className: "bt-connector-actions" },
-        connector.state === "error" ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+        connector.state === "error" && !oauth ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
           event.stopPropagation();
           void run(actions.connectorRetry(connector.id));
         } }, t("Try again")) : null,
-        on ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+        connector.state === "error" && oauth ? (0, import_react30.createElement)("button", {
+          type: "button",
+          className: "bt-soft bt-soft-sm",
+          disabled: busy,
+          onClick: (event) => {
+            event.stopPropagation();
+            void startAuthorization();
+          }
+        }, t("Connect again")) : on && connector.state !== "connecting" ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
           event.stopPropagation();
           void run(actions.connectorDisconnect(connector.id));
-        } }, t("Disconnect")) : form ? null : (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: (event) => {
+        } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? manual && !configured && !appForm ? null : (0, import_react30.createElement)("button", {
+          type: "button",
+          className: "bt-soft bt-soft-sm",
+          disabled: busy,
+          onClick: (event) => {
+            event.stopPropagation();
+            void startAuthorization();
+          }
+        }, connector.state === "error" ? t("Connect again") : t("Connect")) : form ? null : (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: (event) => {
           event.stopPropagation();
           setForm(true);
         } }, t("Connect"))
@@ -12056,7 +12154,7 @@ function ConnectorRow({ connector, actions }) {
         onChange: (next) => void run(actions.connectorSetActions(connector.id, next))
       })
     ) : null,
-    !on && form ? (0, import_react30.createElement)(
+    !oauth && !on && form ? (0, import_react30.createElement)(
       "div",
       { className: "bt-connector-form" },
       (0, import_react30.createElement)("label", { className: "bt-q-field bt-secret-field" }, (0, import_react30.createElement)(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),
@@ -12071,6 +12169,49 @@ function ConnectorRow({ connector, actions }) {
         } }, t("Cancel")),
         (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy || token.trim() === "", onClick: connect }, busy ? t("Connecting…") : t("Connect"))
       )
+    ) : null,
+    // Slack has no dynamic registration: its app id and secret are typed here first, with the
+    // redirect URL the app has to carry.
+    manual && !on && (!configured || appForm) ? (0, import_react30.createElement)(
+      "div",
+      { className: "bt-connector-form" },
+      (0, import_react30.createElement)("label", { className: "bt-q-field" }, (0, import_react30.createElement)("input", {
+        className: "bt-connector-input",
+        value: appId,
+        placeholder: t("Client ID"),
+        "aria-label": t("Client ID"),
+        autoComplete: "off",
+        spellCheck: false,
+        onChange: (event) => setAppId(event.target.value),
+        onKeyDown: (event) => {
+          if (event.key === "Enter") void saveApp();
+        }
+      })),
+      (0, import_react30.createElement)("label", { className: "bt-q-field bt-secret-field" }, (0, import_react30.createElement)(MaskedInput, { value: appSecret, onChange: setAppSecret, onEnter: () => void saveApp(), label: t("Client secret") })),
+      (0, import_react30.createElement)("div", { className: "bt-connector-hint" }, t("In the app settings, set the redirect URL to {url}", { url: `${location.origin}/oauth/ds-bot/slack` })),
+      (0, import_react30.createElement)(
+        "div",
+        { className: "bt-connector-form-row" },
+        configured ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => {
+          setAppForm(false);
+          setAppSecret("");
+        } }, t("Cancel")) : null,
+        (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy || appId.trim() === "" || appSecret.trim() === "", onClick: () => void saveApp() }, busy ? t("Connecting…") : t("Save and connect"))
+      )
+    ) : null,
+    // A tab the browser refused to open still has a way in.
+    oauth && !on && authorizeUrl !== null && connector.state !== "connecting" ? (0, import_react30.createElement)(
+      "div",
+      { className: "bt-connector-form-row" },
+      (0, import_react30.createElement)("a", { className: "bt-connector-link", href: authorizeUrl, target: "_blank", rel: "noopener noreferrer" }, t("Open the authorization page"))
+    ) : null,
+    manual && configured && !on && !appForm ? (0, import_react30.createElement)(
+      "div",
+      { className: "bt-connector-form-row" },
+      (0, import_react30.createElement)("button", { type: "button", className: "bt-connector-link bt-connector-link-btn", onClick: () => {
+        setAppForm(true);
+        setAppId(connector.clientId ?? "");
+      } }, t("Use a different app"))
     ) : null,
     error ? (0, import_react30.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
   );
