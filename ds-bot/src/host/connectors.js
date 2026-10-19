@@ -11,8 +11,9 @@
 // memory, never written to the DSH profile. A new token is shared with no Bot's shell:
 // the tools do not need it there, and a Bot that reads a planted instruction in an issue
 // could send it anywhere. The Secrets page can still share it.
-import { McpHttpClient } from './mcp.js'
+import { McpHttpClient, mcpResultText } from './mcp.js'
 import { output } from './tools.js'
+import { buildToolIndex, createCallTool, createSearchTool, TOOLBOX_TOOLS } from './vercel-toolbox.js'
 
 const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 const CHECK_TIMEOUT_MS = 15_000
@@ -66,6 +67,7 @@ const CONNECTORS = {
     tokenSecret: 'VERCEL_TOKEN',
     readTools: VERCEL_READ_TOOLS,
     actionTools: VERCEL_ACTION_TOOLS,
+    toolbox: true,
     accountField: 'username',
     checkPath: '/v2/user',
     checkHeaders: token => ({ Authorization: `Bearer ${token}` }),
@@ -109,36 +111,58 @@ export function install(rt) {
     options[id] = { ...connector, ...override, url: override.url ?? connector.mcpUrl, api: override.api ?? connector.api }
   }
   const ids = Object.keys(options)
-  // A connector action changes something outside DS Bot, so each call asks the user
-  // through DSH's own approval card before it runs.
-  const actionTools = new Map()
-  for (const [id, connector] of Object.entries(options)) {
-    for (const name of connector.actionTools ?? []) actionTools.set(`${id}_${name}`, { connector: connector.displayName, name })
-  }
-  ctx.on('tools/pre-execute', async (exec, next) => {
-    const action = actionTools.get(exec.name)
-    if (action === undefined) return next()
-    return {
-      kind: 'ask',
-      reason: `${action.connector}: ${action.name} changes the connected account`,
-      displayReason: {
-        en: `Run ${action.connector}'s ${action.name} on the connected account? It changes your projects or deployments.`,
-        zh: `要在已连接的 ${action.connector} 账号上执行 ${action.name} 吗？这会改动你的项目或部署。`,
-      },
-    }
-  })
   // `token` is what the current mount was made with, so a changed secret mounts again.
   const mounts = new Map()
+  // The catalog index of a connector whose toolbox is mounted, for the approval gate.
+  const toolIndexes = new Map()
   const statuses = new Map(ids.map(id => [id, { state: 'off' }]))
   let queue = Promise.resolve()
   let stopped = false
 
+  // A connector action changes something outside DS Bot, so each call asks the user
+  // through DSH's own approval card before it runs. The toolbox carries the same gate:
+  // its call tool names the target, and a blocked target is refused outright.
+  const actionTools = new Map()
+  for (const [id, connector] of Object.entries(options)) {
+    for (const name of connector.actionTools ?? []) actionTools.set(`${id}_${name}`, { connector: connector.displayName, name })
+  }
+  const toolboxCall = TOOLBOX_TOOLS[1]
+  const askAction = (connector, name) => ({
+    kind: 'ask',
+    reason: `${connector}: ${name} changes the connected account`,
+    displayReason: {
+      en: `Run ${connector}'s ${name} on the connected account? It changes your projects or deployments.`,
+      zh: `要在已连接的 ${connector} 账号上执行 ${name} 吗？这会改动你的项目或部署。`,
+    },
+  })
+  ctx.on('tools/pre-execute', async (exec, next) => {
+    const action = actionTools.get(exec.name)
+    if (action !== undefined) return askAction(action.connector, action.name)
+    if (exec.name !== toolboxCall) return next()
+    const owner = ids.find(id => options[id].toolbox === true)
+    if (owner === undefined) return next()
+    const target = typeof exec.arguments?.tool === 'string' ? exec.arguments.tool.trim() : ''
+    const entry = toolIndexes.get(owner)?.find(item => item.name === target)
+    if (entry === undefined) return next()
+    if (entry.class === 'blocked') return { kind: 'deny', reason: `Vercel tool "${target}" can return environment values or credentials; the toolbox does not run it.` }
+    if (entry.class === 'write') return askAction(options[owner].displayName, target)
+    return next()
+  })
   const insecure = id => [options[id].url, options[id].api].some(address => !/^https:\/\//i.test(String(address)))
   const insecureText = id => `${options[id].displayName} addresses must start with https://`
+  // The switches a connect or an account probe must carry over instead of dropping.
+  const switchesOf = (id) => {
+    const prior = state.connectors?.[id] ?? {}
+    return {
+      ...(typeof prior.actions === 'boolean' ? { actions: prior.actions } : {}),
+      ...(typeof prior.toolbox === 'boolean' ? { toolbox: prior.toolbox } : {}),
+    }
+  }
 
   const unmount = async (id) => {
     const mounted = mounts.get(id)
     mounts.delete(id)
+    toolIndexes.delete(id)
     if (mounted?.dispose !== undefined) for (const dispose of mounted.dispose) dispose()
     mounted?.client?.close()
     const fiber = mounted?.fiber
@@ -149,16 +173,6 @@ export function install(rt) {
   const reason = (error) => {
     const text = [error, error?.cause].filter(Boolean).map(part => String(part?.message ?? part)).join(': ')
     return rt.redactSecrets(text || 'error').slice(0, 300)
-  }
-
-  // One MCP tool result as the text a Bot reads.
-  const toolText = (result) => {
-    const content = Array.isArray(result?.content) ? result.content : []
-    const text = content.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('\n')
-    if (result?.isError === true) throw new Error(text || 'The tool failed')
-    if (text !== '') return text
-    if (result?.structuredContent !== undefined) return JSON.stringify(result.structuredContent)
-    return 'The tool returned nothing.'
   }
 
   // One read tool of a `read-tools` connector, as a ToolRuntime definition.
@@ -175,7 +189,7 @@ export function install(rt) {
         // explicit argument wins.
         if (teamId !== undefined && parameters.properties?.teamId !== undefined && call.teamId === undefined) call.teamId = teamId
         try {
-          return toolText(await client.callTool(tool.name, call))
+          return mcpResultText(await client.callTool(tool.name, call))
         } catch (error) {
           throw new Error(rt.redactSecrets(String(error?.message ?? error)).slice(0, 300))
         }
@@ -193,8 +207,7 @@ export function install(rt) {
     if (!replace && state.connectors?.[id]?.[connector.accountField] !== undefined) return
     try {
       const account = await signIn(id, token, { api: connector.api })
-      const actions = state.connectors?.[id]?.actions === true ? { actions: true } : {}
-      state.connectors = { ...state.connectors, [id]: { ...actions, ...account, connectedAt: Date.now() } }
+      state.connectors = { ...state.connectors, [id]: { ...switchesOf(id), ...account, connectedAt: Date.now() } }
       await rt.save()
     } catch (error) {
       rt.warn('ds-bot: could not read the %s account of the saved token: %s', connector.displayName, reason(error))
@@ -207,18 +220,27 @@ export function install(rt) {
     try {
       await client.open()
       const listed = await client.listTools()
-      const actions = state.connectors?.[id]?.actions === true
+      // The toolbox replaces the four named action tools: with it on, an action is run
+      // through vercel_call (and still approved per call), so it is not offered twice.
+      const toolbox = connector.toolbox === true && state.connectors?.[id]?.toolbox === true
+      const actions = !toolbox && state.connectors?.[id]?.actions === true
       const wanted = [...connector.readTools, ...(actions ? connector.actionTools ?? [] : [])]
       const picked = listed.filter(tool => wanted.includes(tool.name))
       if (picked.length === 0) throw new Error(`${connector.displayName} offers none of the read tools DS Bot exposes`)
+      const index = toolbox ? buildToolIndex(listed) : undefined
       const teamId = state.connectors?.[id]?.teamId ?? connector.teamId
       const dispose = []
       try {
         for (const tool of picked) dispose.push(ctx.tools.register(readOnlyTool(id, tool, { client, teamId })))
+        if (index !== undefined) {
+          dispose.push(ctx.tools.register(createSearchTool({ index, output })))
+          dispose.push(ctx.tools.register(createCallTool({ client, index, output, redact: rt.redactSecrets, teamId })))
+        }
       } catch (error) {
         for (const undo of dispose) undo()
         throw error
       }
+      if (index !== undefined) toolIndexes.set(id, index)
       return { token, client, dispose }
     } catch (error) {
       client.close()
@@ -303,6 +325,7 @@ export function install(rt) {
       ...(status.error !== undefined ? { error: status.error } : {}),
       account: rt.secretValue(connector.tokenSecret) !== undefined ? state.connectors?.[id]?.[connector.accountField] ?? null : null,
       ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
+      ...(connector.toolbox === true ? { toolbox: state.connectors?.[id]?.toolbox === true } : {}),
     }
   })
 
@@ -322,8 +345,7 @@ export function install(rt) {
       const account = await signIn(body.id, token, { api: connector.api })
       // The account is written before the secret, so the mount the secret change starts
       // already knows the default team it hands to the read tools.
-      const actions = state.connectors?.[body.id]?.actions === true ? { actions: true } : {}
-      state.connectors = { ...state.connectors, [body.id]: { ...actions, ...account, connectedAt: Date.now() } }
+      state.connectors = { ...state.connectors, [body.id]: { ...switchesOf(body.id), ...account, connectedAt: Date.now() } }
       try {
         await rt.secretEndpoint('secret-set', { name: connector.tokenSecret, value: token, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
       } catch (error) {
@@ -358,6 +380,16 @@ export function install(rt) {
       if (connector.actionTools === undefined) throw new Error('This connector has no actions')
       const enabled = body.enabled === true
       state.connectors = { ...state.connectors, [body.id]: { ...state.connectors?.[body.id], actions: enabled } }
+      await rt.save()
+      await sync(body.id, true)
+      return connectorsView()
+    },
+    async 'connector-set-toolbox'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.toolbox !== true) throw new Error('This connector has no toolbox')
+      const enabled = body.enabled === true
+      state.connectors = { ...state.connectors, [body.id]: { ...state.connectors?.[body.id], toolbox: enabled } }
       await rt.save()
       await sync(body.id, true)
       return connectorsView()

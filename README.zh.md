@@ -74,7 +74,7 @@ ds bot 拥有群聊功能。群聊是非常好的多 bot 协作方式，但它�
 
 ### 连接器
 
-设置 → **连接器** 可以连接外部服务，连接后每个 bot 都能使用该服务的工具。GitHub（`GITHUB_TOKEN`）或 Vercel（`VERCEL_TOKEN`）只需连接一次：token 保存在密钥里，只在 MCP 连接中使用。GitHub 的工具名是 `mcp__github__…`；Vercel 只读连接，工具如 `vercel_list_projects`、`vercel_get_runtime_logs`。Vercel 的四个部署动作默认关闭：在连接器里打开后，每次调用都需要你批准。
+设置 → **连接器** 可以连接外部服务，连接后每个 bot 都能使用该服务的工具。GitHub（`GITHUB_TOKEN`）或 Vercel（`VERCEL_TOKEN`）只需连接一次：token 保存在密钥里，只在 MCP 连接中使用。GitHub 的工具名是 `mcp__github__…`；Vercel 只读连接，工具如 `vercel_list_projects`、`vercel_get_runtime_logs`。Vercel 的四个部署动作默认关闭：在连接器里打开后，每次调用都需要你批准。另有一个工具箱开关，打开后会加上 `vercel_search_tools` 和 `vercel_call`，用搜索触达 Vercel 的全部能力；写操作仍需批准，会返回凭据或环境变量值的工具一律不提供。
 
 ### 用量
 
