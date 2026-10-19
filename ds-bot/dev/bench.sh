@@ -81,6 +81,13 @@ write_overlay() {
       printf -- '      - { id: deepseek-v4-pro, contextWindow: %s, maxTokens: 8000 }\n' "$CONTEXT_WINDOW"
     } >> "$overlay"
   fi
+  if [ "${DSH_BOARD_DEMO:-}" = 1 ]; then
+    [ "$NAME" = project-board ] || [ "$NAME" = project-board-workflow ] || [ "$NAME" = project-board-queue ] || [ "$NAME" = project-board-shell ] || { echo "board fixtures require the project-board bench" >&2; exit 1; }
+    [ "$(cat "$overlay")" != '[]' ] || : > "$overlay"
+    fixture="$PLUGIN/dev/board-bench.mjs"
+    case "$NAME" in project-board-queue|project-board-shell) fixture="$PLUGIN/dev/board-queue-bench.mjs" ;; esac
+    printf -- '- insert:\n    - id: board-demo\n      name: %s\n' "$fixture" >> "$overlay"
+  fi
 }
 
 # Start one command in a session of its own and record the pid of that session's leader. The pid

@@ -868,7 +868,7 @@ export function install(rt) {
     if (signal.aborted) throw signal.reason
     const dir = rt.workDirOf(job)
     const intended = dir !== undefined && await rt.isFolder(dir) ? dir : rt.teamFolder()
-    const freshId = await rt.createSession(room ? `${bot.name} · ${room.name}` : bot.name, { dir })
+    const freshId = await rt.createSession(room ? `${bot.name} · ${room.name}` : bot.name, { dir, ...(room?.boardCardId ? { strictDir: true } : {}) })
     const picked = await freshRoute(bot, session)
     if (picked !== undefined) await selectRoute(bot, freshId, picked)
     await rt.applyPermission(bot, freshId, room)
@@ -1002,6 +1002,7 @@ export function install(rt) {
     const cwd = agent.session.header?.cwd
     if (place === undefined || cwd === undefined || (midTurn && place.roomId !== undefined) || Date.now() < (folderRetry.get(agent.id) ?? 0)) return undefined
     const wanted = rt.workDirOf(place)
+    if (rt.roomOf(place.roomId)?.boardCardId && (wanted === undefined || !await rt.isFolder(wanted))) throw new Error('The requirement project directory is no longer available')
     const target = wanted !== undefined && await rt.isFolder(wanted) ? wanted : rt.teamFolder()
     return target === undefined || target === cwd ? undefined : target
   }
@@ -1022,6 +1023,8 @@ export function install(rt) {
     const team = await rt.keepTeamFolder()
     if (current === team || !rt.isBotSession(agent.id)) return next()
     const place = placeOf(agent.id)
+    // Let DSH report the missing project; a requirement must never move to the team folder.
+    if (rt.roomOf(place?.roomId)?.boardCardId) return next()
     const wanted = rt.workDirOf(place)
     const target = wanted !== undefined && await rt.isFolder(wanted) ? wanted : team
     if (target !== undefined) {

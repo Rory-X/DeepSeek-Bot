@@ -54,6 +54,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { boardReply } from './mock-board.mjs'
 
 const PORT = Number(process.env.MOCK_PORT ?? 8765)
 const LOG = process.env.MOCK_LOG ?? fileURLToPath(new URL('../../.dsh-test/mock.jsonl', import.meta.url))
@@ -122,6 +123,10 @@ function decide(body) {
   const me = /You are (.+?), a Bot on the user's team/.exec(system)?.[1] ?? 'Bot'
   const isMain = system.includes('You are the Main Bot')
   const isRelay = system.includes('# Group chat relay')
+  if (!isRelay) {
+    const board = boardReply({ messages, tools, textOf, tool, text })
+    if (board) return board
+  }
 
   // Summary requests: the Bot's handoff prompt, or the backend's own one when the
   // plugin did not rewrite it. The note names which, and quotes the latest user lines.

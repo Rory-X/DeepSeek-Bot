@@ -167,6 +167,7 @@ export function install(rt) {
     : approval === undefined ? (({ approval: _, ...rest }) => rest)(record) : { ...record, approval }))
 
   async function resumeTurn(sessionId, record) {
+    if (rt.roomOf(record.roomId)?.boardCardId || record.trigger?.role === 'board') return
     const bot = rt.botOf(record.botId)
     if (bot === undefined) return
     const text = resumeText(record)
@@ -199,7 +200,7 @@ export function install(rt) {
       if (rt.isBotSession(sessionId)) return sessionId
       return args.roomId === undefined ? rt.chatOf(args.toId) : rt.roomOf(args.roomId)?.sessions?.[args.toId]
     }
-    const fresh = list.filter(item => Date.now() - item.at < QUEUED_KEPT_MS && rt.botOf(item.args?.toId) !== undefined
+    const fresh = list.filter(item => item.args?.role !== 'board' && !rt.roomOf(item.args?.roomId)?.boardCardId && Date.now() - item.at < QUEUED_KEPT_MS && rt.botOf(item.args?.toId) !== undefined
       && current(item.args) !== undefined && taken?.has(item.args.exchangeId) !== true)
     if (fresh.length === 0) return
     const target = current(fresh[0].args)
@@ -221,6 +222,7 @@ export function install(rt) {
     // Agents and inboxes are read before anything wakes their Sessions.
     const cut = []
     for (const [sessionId, record] of Object.entries(noted)) {
+      if (rt.roomOf(record.roomId)?.boardCardId || record.trigger?.role === 'board') continue
       const first = firstTurn.get(sessionId)
       if (first === 'turn/end') continue
       // Still running: noted again, as if it had started here.

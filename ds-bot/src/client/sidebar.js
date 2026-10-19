@@ -13,6 +13,7 @@ import { springEasing, SPRING_SHAPE } from './motion.js'
 import { hostText, t } from './i18n.js'
 import { showsDshRow } from './dsh-offer.js'
 import { useRowMenu } from './hold.js'
+import { BoardEntry } from './project-board.js'
 
 // -------------------------------------------------------------------------
 // Sidebar
@@ -317,6 +318,7 @@ export function TeamSidebar(props) {
           h(UpdateButton, { useUpdate: props.useUpdate, actions }),
           h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
     wide && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
+    h(BoardEntry, { actions, wide, pending: roster.boardPending ?? 0 }),
     h(BotList, { listRef, main, order, roster, markedUnread, rowProps }))
 }
 
@@ -416,6 +418,7 @@ function MobileNavList({ roster, actions, listRef, main, order, markedUnread, ro
       h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Search'), title: t('Search'), onClick: () => actions.openPalette() }, h(SearchIcon)),
       h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
     roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
+    h(BoardEntry, { actions, pending: roster.boardPending ?? 0 }),
     h('div', { className: 'bt-nav-body' },
       // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
       chiefOut ? h(ChiefBar, { main, actions }) : null,

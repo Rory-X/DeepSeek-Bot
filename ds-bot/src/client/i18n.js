@@ -2,9 +2,12 @@
 // Copy is looked up at render time and every slot outlet re-renders on a language
 // switch, so nothing caches a translated string.
 
+import { BOARD_ZH } from './board-i18n.js'
+
 export const NAMESPACE = 'ds-bot'
 
 const ZH = {
+  ...BOARD_ZH,
   // Shared
   'Main Bot': '主 Bot',
   Working: '工作中',

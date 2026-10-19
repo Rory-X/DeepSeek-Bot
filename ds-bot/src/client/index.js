@@ -13,6 +13,7 @@ import { MENTION_ORIGIN, currentPart } from './text.js'
 import { SHELL_CSS, CONVERSATION_CSS, installStyles, installCompiledStyles } from './styles.js'
 import { lookOf } from './mark.js'
 import { TeamSidebar, ConnectPlugins, YouAvatar, AccountLauncher, FooterAccount, BrandMark, BrandName, BotReturn, SIDEBAR_CSS, RETURN_CSS, holdShellShortcuts, openHarnessOnboarding, openHarnessSettings } from './sidebar.js'
+import { ProjectBoard, BOARD_CSS } from './project-board.js'
 import { HeaderPill, PlainBack } from './header.js'
 import { ComposerPlus, ComposerVoice, menuIcons } from './composer.js'
 import { ComposerQuote, QUOTE_SOURCE, quoteRef, quoteSource } from './quote.js'
@@ -416,10 +417,13 @@ export function apply(ctx) {
   ctx.effect(() => () => navHistory.dispose(), 'ds-bot: the phone levels in history')
   const actions = {
     ...teamActions({ call, after, partFor, roster, ui, live, cards, turnClock }),
+    openBoard: () => ui.set(state => ({ ...state, board: true, settings: null, details: null, newChat: null, palette: null, menu: null })),
+    closeBoard: () => ui.set(state => ({ ...state, board: false })),
     // The full-pane overlays sit above the conversation, so opening one must dismiss them
     // or the click appears to do nothing.
     isAgentSession: id => isAgentSessionId(id),
     openSession: (id) => {
+      actions.closeBoard()
       // A DSH Agent Session id lands on the plain surface, not the Bot skin.
       if (isAgentSessionId(id)) return actions.openAgentSession(id)
       // Opening a conversation from the list page is the push: the list yields and the
@@ -443,6 +447,7 @@ export function apply(ctx) {
     // The conversation replacements withdraw for a plain Session; set the surface
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
+      actions.closeBoard()
       const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === 'list'
       if (fromList) {
         navOrigin.set('list')
@@ -1000,6 +1005,7 @@ export function apply(ctx) {
   const installShell = () => [
     () => installCompiledStyles(SHELL_CSS, 'shell'),
     () => installCompiledStyles(SIDEBAR_CSS, 'sidebar'),
+    () => installCompiledStyles(BOARD_CSS, 'project-board'),
     () => installCompiledStyles(SECRET_CSS, 'secrets'),
     () => installCompiledStyles(MODEL_CSS + FOLDER_CSS + BOT_SETTINGS_CSS + GROUP_SETTINGS_CSS, 'models'),
     () => installCompiledStyles(USAGE_CSS, 'usage'),
@@ -1021,6 +1027,7 @@ export function apply(ctx) {
     // Desktop's "··· More"), which comes back in Agent mode.
     () => shadow('settings.launcher', { priority: BOT_PRIORITY, inject: face }, AccountLauncher),
     () => shadow('shell.overlay', { id: 'bot', order: 50, inject: face }, Overlays),
+    () => shadow('shell.overlay', { id: 'bot-project-board', order: 52, inject: face }, ProjectBoard),
     () => shadow('shell.overlay', { id: 'bot-signin', order: 55, inject: face }, DeepSeekSignIn),
     () => shadow('shell.overlay', { id: 'bot-toast', order: 60, inject: face }, ErrorToast),
     // A plain Session withdraws the conversation group, so the way back to the list lives in
