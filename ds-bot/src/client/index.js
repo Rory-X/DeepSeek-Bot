@@ -6,6 +6,7 @@ import { watchMobileNav } from './media.js'
 import { installViewport, watchStandalone } from './platform.js'
 import { NAV_MOTION_MS, installSwipeBack } from './nav-motion.js'
 import { installRightColumns } from './right-columns.js'
+import { installNavHistory } from './nav-history.js'
 import { teamActions } from './team-actions.js'
 import { themeCss, shellTokens, registry, registerShape, registerTheme, allThemes } from './themes.js'
 import { MENTION_ORIGIN, currentPart } from './text.js'
@@ -392,6 +393,18 @@ export function apply(ctx) {
     const field = node.closest('[role=textbox],input,textarea,[contenteditable=true]')
     return field !== null && field.closest('[class*="_centerCol"]') !== null ? field : null
   }
+  // The phone's levels live on the browser's history so the system's back gesture returns to
+  // the list; every way back still runs the one return, `goBack`.
+  // A return in flight: the pop the browser sends back arrives while the level has not moved
+  // yet, so the guard keeps one press from starting a second return.
+  let returning = false
+  const navHistory = installNavHistory({
+    mobileNav,
+    navLevel,
+    onLeave: () => actions.leaveChat(),
+    onEnter: () => navLevel.set('chat'),
+  })
+  ctx.effect(() => () => navHistory.dispose(), 'ds-bot: the phone levels in history')
   const actions = {
     ...teamActions({ call, after, partFor, roster, ui, live, cards, turnClock }),
     // The full-pane overlays sit above the conversation, so opening one must dismiss them
@@ -406,6 +419,9 @@ export function apply(ctx) {
       if (fromList) {
         navOrigin.set('list')
         runMotion('push', { from: '100%', to: '0px', listFrom: '0px', listTo: '-18px' })
+        // The arrival gets a history entry of its own, so the system's back gesture has
+        // somewhere to return to instead of leaving the app.
+        navHistory.entered()
       }
       // Opening a conversation is what leaves the phone's list page.
       navLevel.set('chat')
@@ -422,6 +438,7 @@ export function apply(ctx) {
       if (fromList) {
         navOrigin.set('list')
         runMotion('push', { from: '100%', to: '0px', listFrom: '0px', listTo: '-18px' })
+        navHistory.entered()
       }
       navLevel.set('chat')
       ui.set(state => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: 'details', renaming: false, tab: null }))
@@ -500,10 +517,21 @@ export function apply(ctx) {
         navLevel.set('list')
         return
       }
+      // The entry this arrival pushed is popped, and the return starts with the press rather
+      // than with the pop that follows: the pop then finds the level already back.
+      navHistory.returned()
+      actions.leaveChat()
+    },
+    // The conversation leaves the way it arrived: it goes out to the right while the page it
+    // came from comes back. The origin says where it lands. This is what a pop from the
+    // system's back gesture runs too, so every way back is this one return.
+    leaveChat: () => {
+      if (navLevel.getSnapshot() !== 'chat' || returning) return
+      returning = true
       const origin = navOrigin.getSnapshot() ?? 'list'
       const from = document.body.style.getPropertyValue('--bt-nav-x') || '0px'
       const listFrom = document.body.style.getPropertyValue('--bt-nav-list-x') || '-18px'
-      runMotion('pop', { from, to: '100%', listFrom, listTo: '0px', done: () => { navOrigin.set(null); navLevel.set(origin) } })
+      runMotion('pop', { from, to: '100%', listFrom, listTo: '0px', done: () => { returning = false; navOrigin.set(null); navLevel.set(origin) } })
     },
     showBotList: () => actions.goBack(),
     // Agent mode hands the surface back to the shell; everything open on the Bot

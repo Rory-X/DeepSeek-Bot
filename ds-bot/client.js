@@ -1575,6 +1575,60 @@ function installRightColumns({ ui: ui2, isDesktop, rightbar, onError }) {
   };
 }
 
+// src/client/nav-history.js
+var NAV_LEVEL_KEY = "btNav";
+function installNavHistory({ mobileNav, navLevel, onLeave, onEnter }) {
+  const landedLevel = () => {
+    try {
+      return window.history.state?.[NAV_LEVEL_KEY];
+    } catch {
+      return void 0;
+    }
+  };
+  const write = (level, replace) => {
+    try {
+      const state = { ...window.history.state, [NAV_LEVEL_KEY]: level };
+      if (replace) window.history.replaceState(state, "");
+      else window.history.pushState(state, "");
+    } catch {
+    }
+  };
+  const onPop = (event) => {
+    const landed = event.state?.[NAV_LEVEL_KEY];
+    if (landed === "list" && navLevel.getSnapshot() === "chat") onLeave();
+    else if (landed === "chat" && navLevel.getSnapshot() !== "chat") onEnter();
+  };
+  window.addEventListener("popstate", onPop);
+  const mark = () => {
+    if (mobileNav.getSnapshot() && navLevel.getSnapshot() === "list") write("list", true);
+  };
+  mark();
+  const off = mobileNav.subscribe(mark);
+  return {
+    /** One entry per arrival at a conversation, from the list. */
+    entered: () => {
+      if (mobileNav.getSnapshot()) write("chat", false);
+    },
+    /**
+     * Keep the stack in step with a return that is already under way: the pop lands on the
+     * list entry, where the level has already arrived, so nothing returns twice.
+     */
+    returned: () => {
+      if (!mobileNav.getSnapshot()) return;
+      if (landedLevel() === "chat") {
+        try {
+          window.history.back();
+        } catch {
+        }
+      }
+    },
+    dispose: () => {
+      off();
+      window.removeEventListener("popstate", onPop);
+    }
+  };
+}
+
 // src/client/team-actions.js
 function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards, turnClock }) {
   return {
@@ -15164,6 +15218,14 @@ function apply(ctx) {
     const field = node.closest("[role=textbox],input,textarea,[contenteditable=true]");
     return field !== null && field.closest('[class*="_centerCol"]') !== null ? field : null;
   };
+  let returning = false;
+  const navHistory = installNavHistory({
+    mobileNav,
+    navLevel,
+    onLeave: () => actions.leaveChat(),
+    onEnter: () => navLevel.set("chat")
+  });
+  ctx.effect(() => () => navHistory.dispose(), "ds-bot: the phone levels in history");
   const actions = {
     ...teamActions({ call, after, partFor, roster, ui: ui2, live, cards, turnClock }),
     // The full-pane overlays sit above the conversation, so opening one must dismiss them
@@ -15175,6 +15237,7 @@ function apply(ctx) {
       if (fromList) {
         navOrigin.set("list");
         runMotion("push", { from: "100%", to: "0px", listFrom: "0px", listTo: "-18px" });
+        navHistory.entered();
       }
       navLevel.set("chat");
       ui2.set((state) => state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state);
@@ -15190,6 +15253,7 @@ function apply(ctx) {
       if (fromList) {
         navOrigin.set("list");
         runMotion("push", { from: "100%", to: "0px", listFrom: "0px", listTo: "-18px" });
+        navHistory.entered();
       }
       navLevel.set("chat");
       ui2.set((state) => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: "details", renaming: false, tab: null }));
@@ -15272,10 +15336,20 @@ function apply(ctx) {
         navLevel.set("list");
         return;
       }
+      navHistory.returned();
+      actions.leaveChat();
+    },
+    // The conversation leaves the way it arrived: it goes out to the right while the page it
+    // came from comes back. The origin says where it lands. This is what a pop from the
+    // system's back gesture runs too, so every way back is this one return.
+    leaveChat: () => {
+      if (navLevel.getSnapshot() !== "chat" || returning) return;
+      returning = true;
       const origin = navOrigin.getSnapshot() ?? "list";
       const from = document.body.style.getPropertyValue("--bt-nav-x") || "0px";
       const listFrom = document.body.style.getPropertyValue("--bt-nav-list-x") || "-18px";
       runMotion("pop", { from, to: "100%", listFrom, listTo: "0px", done: () => {
+        returning = false;
         navOrigin.set(null);
         navLevel.set(origin);
       } });
