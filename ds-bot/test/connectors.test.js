@@ -14,8 +14,8 @@ const answer = (status, body) => ({ status, ok: status >= 200 && status < 300, j
 const off = id => ({ id, state: 'off', account: null })
 const OFF = {
   github: { id: 'github', name: 'GitHub', ...off('github') },
-  vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false },
-  cloudflare: { id: 'cloudflare', name: 'Cloudflare', ...off('cloudflare'), oauth: true },
+  vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false, toolboxCall: 'vercel_call' },
+  cloudflare: { id: 'cloudflare', name: 'Cloudflare', ...off('cloudflare'), oauth: true, toolbox: false, toolboxCall: 'cloudflare_call' },
 }
 const statuses = view => view.map(item => [item.id, item.state, item.account])
 
@@ -263,7 +263,7 @@ test('connecting Vercel mounts only its read tools, and the default team answers
 
   const connected = await call(ctx, 'connector-connect', { id: 'vercel', token })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false }, OFF.cloudflare])
+  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false, toolboxCall: 'vercel_call' }, OFF.cloudflare])
   // The write tool is never registered, and Vercel is not mounted through DSH's client.
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts.length, 0)
@@ -293,7 +293,7 @@ test('a saved Vercel token connects on its own and fills the account and team', 
     const view = (await call(ctx, 'state', {})).value.connectors
     return view[1]?.state === 'ready' ? view : undefined
   }, 'Vercel to connect from its saved token')
-  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false })
+  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false, toolboxCall: 'vercel_call' })
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   // The account and its default team are kept in the team file, without the token.
   const savedText = readFileSync(join(home, 'state.json'), 'utf8')
@@ -318,7 +318,7 @@ test('a failed account check does not stop the saved-token mount', async (t) => 
     const view = (await call(ctx, 'state', {})).value.connectors
     return view[1]?.state === 'ready' ? view : undefined
   }, 'Vercel to mount without an account')
-  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: null, actions: false, toolbox: false })
+  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: null, actions: false, toolbox: false, toolboxCall: 'vercel_call' })
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors?.vercel, undefined)
 })
@@ -930,4 +930,109 @@ test('Cloudflare connects read-only, mounts exactly its whitelist, names the acc
   }, 'the connector to ask for a reconnect')
   assert.match(broken.error, /connect again/)
   assert.equal(credentials.records.has('ds-bot/connector-cloudflare'), false)
+})
+
+test('the Cloudflare toolbox runs reads directly, asks for each write and never offers credentials', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const oauth = fakeOAuthServer({
+    resource: CLOUDFLARE_ADDRESS,
+    issuer: 'https://mcp.cloudflare.test',
+    declaredResource: 'https://mcp.cloudflare.test/mcp',
+  })
+  const accountId = '0123456789abcdef0123456789abcdef'
+  const namespaceTool = (name, properties = {}, required) => ({ name, description: `Cloudflare ${name}`, inputSchema: { type: 'object', properties, ...(required === undefined ? {} : { required }) } })
+  const listedTools = [
+    ...CLOUDFLARE_READ.map(name => namespaceTool(name, name === 'get_zones_dns_records' ? { zone_id: { type: 'string' }, account_id: { type: 'string' } } : {})),
+    namespaceTool('post_zones_dns_records', { zone_id: { type: 'string' }, body: { type: 'object' } }, ['zone_id', 'body']),
+    namespaceTool('delete_zones_by_zone_id', { zone_id: { type: 'string' } }, ['zone_id']),
+    namespaceTool('docs'),
+    namespaceTool('post_user_tokens'),
+    namespaceTool('get_accounts_workers_scripts_secrets'),
+    namespaceTool('get_accounts_members'),
+  ]
+  const mcpCalls = []
+  globalThis.fetch = async (url, init = {}) => {
+    const address = String(url)
+    if (address !== CLOUDFLARE_ADDRESS || init.headers?.authorization === undefined) return oauth.fetch(url, init)
+    const body = JSON.parse(init.body)
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Fake', version: '1' } })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: listedTools })
+    if (body.method === 'tools/call') {
+      mcpCalls.push({ name: body.params.name, args: body.params.arguments })
+      if (body.params.name === 'whoami') return mcpAnswer(body.id, { content: [{ type: 'text', text: JSON.stringify({ id: 'user:abc', email: 'dev@example.com' }) }] })
+      if (body.params.name === 'get_accounts') return mcpAnswer(body.id, { content: [{ type: 'text', text: JSON.stringify({ result: [{ id: accountId, name: 'Acme' }], success: true }) }] })
+      return mcpAnswer(body.id, { content: [{ type: 'text', text: `called ${body.params.name} ${JSON.stringify(body.params.arguments)}` }] })
+    }
+    throw new Error(`unexpected method ${body.method}`)
+  }
+  const credentials = fakeCredentials()
+  const webServer = fakeWebServer()
+  const { ctx, home, registered } = setup({ cloudflare: { url: CLOUDFLARE_ADDRESS }, services: { credentials, webServer } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const started = await call(ctx, 'connector-oauth-start', { id: 'cloudflare' }, { origin: 'https://dsh.test' })
+  const authorizeUrl = new URL(started.value.authorizeUrl)
+  const { res, done } = fakeResponse()
+  webServer.routes[0].handler({ method: 'GET', url: `/oauth/ds-bot/cloudflare?code=auth-code&state=${encodeURIComponent(authorizeUrl.searchParams.get('state'))}` }, res)
+  assert.equal((await done).statusCode, 200)
+  await until(async () => (registered.includes('cloudflare_whoami') ? true : undefined), 'the Cloudflare mount')
+
+  // The account list answers the id account-scoped calls default to; it is not a re-auth.
+  const saved = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors.cloudflare
+  assert.equal(saved.accountId, accountId)
+  assert.equal(saved.accountName, 'Acme')
+  const ready = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'cloudflare')
+  assert.deepEqual([ready.toolbox, ready.toolboxCall], [false, 'cloudflare_call'])
+
+  // The switch adds the two meta tools next to the 14 read tools.
+  const on = (await call(ctx, 'connector-set-toolbox', { id: 'cloudflare', enabled: true })).value.find(connector => connector.id === 'cloudflare')
+  assert.equal(on.toolbox, true)
+  await until(async () => (registered.includes('cloudflare_search_tools') ? true : undefined), 'the Cloudflare toolbox')
+  assert.deepEqual(registered.slice(-16).sort(), [...CLOUDFLARE_READ.map(name => `cloudflare_${name}`), 'cloudflare_search_tools', 'cloudflare_call'].sort())
+
+  // Search shows reads and writes, and none of the credential tools.
+  const search = ctx.registeredTools.get('cloudflare_search_tools')
+  const found = await search.execute({ query: 'dns' })
+  assert.match(found, /get_zones_dns_records \[read\]/)
+  assert.match(found, /post_zones_dns_records \[write: needs approval\]/)
+  assert.ok(!/user_tokens|workers_scripts_secrets|accounts_members/.test(found))
+  assert.match(await search.execute({ query: 'tokens' }), /No Cloudflare tool matches/)
+
+  const tool = ctx.registeredTools.get('cloudflare_call')
+  // A read runs straight through, with the connected account filled in.
+  const read = await tool.execute({ tool: 'get_zones_dns_records', args: { zone_id: 'z1' } }, { agent: { id: 'm1' } })
+  assert.match(read, /called get_zones_dns_records/)
+  assert.deepEqual(mcpCalls.at(-1).args, { zone_id: 'z1', account_id: accountId })
+  assert.equal(await approvalCard(ctx), undefined)
+
+  // A write asks first; the arguments never appear on the card.
+  const callsBefore = mcpCalls.length
+  const pending = tool.execute({ tool: 'post_zones_dns_records', args: { zone_id: 'z1', body: { marker: 'CARD-MUST-NOT-SHOW' } } }, { agent: { id: 'm1' } })
+  const card = await until(() => approvalCard(ctx), 'the write approval card')
+  assert.match(card.question, /Cloudflare's post_zones_dns_records/)
+  assert.ok(!JSON.stringify(card).includes('CARD-MUST-NOT-SHOW'))
+  assert.equal(mcpCalls.length, callsBefore)
+  assert.equal((await answerCard(ctx, card.id, ['Allow once'])).ok, true)
+  assert.match(await pending, /called post_zones_dns_records/)
+  assert.equal(mcpCalls.length, callsBefore + 1)
+
+  // A denied write never reaches Cloudflare.
+  const denied = tool.execute({ tool: 'delete_zones_by_zone_id', args: { zone_id: 'z1' } }, { agent: { id: 'm1' } })
+  const second = await until(() => approvalCard(ctx), 'the deny card')
+  await answerCard(ctx, second.id, ['Deny'])
+  await assert.rejects(denied, /denied Cloudflare's delete_zones_by_zone_id/)
+  assert.equal(mcpCalls.length, callsBefore + 1)
+
+  // A credential endpoint is refused before a card can even be made.
+  const [gate] = ctx.listeners.get('tools/pre-execute')
+  let passed = 0
+  const next = () => { passed += 1; return Promise.resolve({ kind: 'allow' }) }
+  const blocked = await gate({ name: 'cloudflare_call', arguments: { tool: 'post_user_tokens' } }, next)
+  assert.equal(blocked.kind, 'deny')
+  assert.match(blocked.reason, /mint or read credentials/)
+  assert.equal(passed, 0)
+  await assert.rejects(tool.execute({ tool: 'post_user_tokens' }, { agent: { id: 'm1' } }), /does not run it/)
+  assert.equal(await approvalCard(ctx), undefined)
 })
