@@ -175,6 +175,7 @@ export function install(rt) {
     const log = [...room.log, keepGroupLine(room.id, { ...line, seq: room.seq }, line.text ?? '')]
     for (const gone of log.slice(0, -ROOM_LOG_MAX)) dropGroupLine(room.id, gone)
     room.log = log.slice(-ROOM_LOG_MAX)
+    rt.noteRoomActivity?.(room.id)
   }
   Object.assign(rt, { keepGroupLine, dropGroupLines })
 
