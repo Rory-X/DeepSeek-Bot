@@ -1121,6 +1121,12 @@ div:has(> nav [class*="_marks"]){display:none!important}
 [data-chat-flow-kind=question-reply]:has(.bt-q-inline),[data-chat-group-key]:has([data-chat-flow-kind=question-reply] .bt-q-inline),[data-chat-group-key]:has(.bt-q-gone){margin-top:0!important}
 .bt-q-inline .bt-q{margin:0;max-width:min(550px,86%);order:0}
 .bt-q-dock{width:100%;display:flex;justify-content:center}
+.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width,748px);margin:0 auto 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
+.bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px}
+.bt-quote-dock-who{font-size:12px;line-height:16px;font-weight:600;color:var(--bt-ink)}
+.bt-quote-dock-text{font-size:12px;line-height:16px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bt-quote-dock-x{flex:none;width:24px;height:24px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--bt-ink-3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.bt-quote-dock-x:hover{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-q-dock .bt-q{margin:0 auto 8px}
 [class*="_toBottomSlot"]{justify-content:center!important;padding-right:0!important}
 [data-conversation-scroll] [class*="_toBottomSlot"]{bottom:calc(var(--dsh-composer-height,152px) + 8px)!important}
@@ -1154,6 +1160,18 @@ div:has(> nav [class*="_marks"]){display:none!important}
 .bt-ububble{max-width:min(560px,78%);background:var(--bt-user);color:var(--bt-user-ink);border-radius:18px;padding:7px 12px;font-size:14px;line-height:20px;box-sizing:border-box;overflow-wrap:anywhere}
 .bt-ububble [class*="_markdown"],.bt-ububble a{color:inherit!important}
 .bt-ububble p{margin:0;line-height:22px}
+/* A reply keeps the message it answers above its words: a left accent edge, the Bot that
+   sent it, and two lines of the quote. Tokens only; inside the dark user bubble the veil
+   and the text come from the bubble's own ink so they stay readable in both themes. */
+.bt-quote{margin:0 0 6px;padding:6px 10px 6px 9px;border-left:3px solid var(--bt-accent);border-radius:10px;background:var(--bt-hover);color:var(--bt-ink);white-space:normal;box-sizing:border-box}
+.bt-quote-who{display:flex;align-items:center;gap:5px;min-width:0;font-size:12px;line-height:16px;font-weight:600;margin-bottom:2px}
+.bt-quote-who>:first-child{flex:none}
+.bt-quote-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-quote-text{font-size:13px;line-height:18px;color:var(--bt-ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.bt-ubody .bt-quote{background:color-mix(in srgb,var(--bt-user-ink) 14%,transparent)}
+.bt-ubody .bt-quote-text{color:color-mix(in srgb,var(--bt-user-ink) 78%,transparent)}
+.bt-quote[data-compact]{padding:5px 9px 5px 8px}
+.bt-quote[data-compact] .bt-quote-who{display:none}
 .bt-uimages{display:block;font-size:12px;opacity:.7}
 .bt-earlier .bt-event{margin:4px 0}
 .bt-part-line{display:flex;align-items:center;gap:10px;margin:10px 0 6px;font-size:11px;line-height:14px;color:var(--bt-ink-3)}
