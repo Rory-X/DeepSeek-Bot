@@ -333,6 +333,11 @@ var ZH = {
   "Create a token": "创建 Token",
   "Vercel token": "Vercel 令牌",
   "Create a token on Vercel": "去 Vercel 创建 Token",
+  Documentation: "文档",
+  "Projects, branches, schemas, and read-only SQL": "项目、分支、schema 和只读 SQL",
+  "Read-only: DS Bot can query your databases but cannot change or delete data.": "只读：DS Bot 可以查询你的数据库，但不能修改或删除数据。",
+  "Read-only access to your Neon projects": "以只读权限访问你的 Neon 项目",
+  "DS Bot asks Neon for the read scope only. It can list projects, branches, schemas and run SQL in a read-only transaction, so it cannot create, change or delete anything.": "DS Bot 只向 Neon 申请 read 权限：可以列项目、分支和 schema，并在只读事务里执行 SQL，不能创建、修改或删除任何东西。",
   Actions: "执行操作",
   Off: "关闭",
   On: "开启",
@@ -3325,6 +3330,9 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 @media (prefers-reduced-motion:reduce){.bt-connector-scope{animation:none}}
 .bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
+/* What a connector says about itself: a quiet panel for a read-only grant, and a docs link. */
+.bt-connector-readonly{padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-accent) 6%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 22%,transparent);font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
+.bt-connector-docs{padding-left:48px;font-size:12px;line-height:16px}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the
    shell offers them and CSS-module name suffixes elsewhere. */
@@ -4799,7 +4807,7 @@ var scopeLabel = (scope, roster) => {
   return names.length === 0 ? t("No Bot") : names.join(t(" and "));
 };
 var when = (time) => Number.isFinite(time) ? new Date(time).toLocaleString(dateLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-function MaskedInput({ value, onChange, onEnter, label, autoFocus = false }) {
+function MaskedInput({ value, onChange, onEnter, label, placeholder, autoFocus = false }) {
   return (0, import_react6.createElement)("input", {
     className: "bt-secret-input",
     type: MASK_BY_CSS ? "text" : "password",
@@ -4815,7 +4823,7 @@ function MaskedInput({ value, onChange, onEnter, label, autoFocus = false }) {
     "data-bwignore": "",
     "data-form-type": "other",
     "aria-label": label,
-    placeholder: t("Paste or type the key"),
+    placeholder: placeholder ?? t("Paste or type the key"),
     onChange: (event) => onChange(event.target.value),
     onKeyDown: (event) => {
       if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
@@ -13438,7 +13446,28 @@ var SlackMark = () => (0, import_react32.createElement)(
   { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", "aria-hidden": true },
   (0, import_react32.createElement)("path", { d: "M7.6 4.4v11.2M12.4 4.4v11.2M4.4 7.6h11.2M4.4 12.4h11.2" })
 );
-var MARKS = { github: GitHubMark, vercel: VercelMark, cloudflare: CloudflareMark, notion: NotionMark, slack: SlackMark };
+var TelegramMark = () => (0, import_react32.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react32.createElement)("path", { d: "M17.2 3.4 2.7 9.6l4.9 1.6 1.6 4.7 2.9-3.2 3.6 2.7z" }),
+  (0, import_react32.createElement)("path", { d: "M7.6 11.2 17.2 3.4" })
+);
+var NeonMark = () => (0, import_react32.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react32.createElement)("ellipse", { cx: 10, cy: 5.4, rx: 6, ry: 2.4 }),
+  (0, import_react32.createElement)("path", { d: "M4 5.4v4.2c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V5.4" }),
+  (0, import_react32.createElement)("path", { d: "M4 9.6v4.2c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V9.6" })
+);
+var CARD_GLYPHS = {
+  github: GitHubMark,
+  vercel: VercelMark,
+  cloudflare: CloudflareMark,
+  notion: NotionMark,
+  slack: SlackMark,
+  telegram: TelegramMark,
+  neon: NeonMark
+};
 var ABOUT = {
   github: () => t("Repositories, issues, and pull requests"),
   vercel: () => t("Projects, deployments, and logs")
@@ -13451,13 +13480,33 @@ var TOKEN_LABELS = {
   github: () => t("GitHub token"),
   vercel: () => t("Vercel token")
 };
-var SCOPE_CHOICES = { cloudflare: true };
+var GENERIC_CONSENT = {
+  title: "Choose the access level on the authorization page",
+  body: "Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.",
+  acknowledge: "I'll choose the access level on the authorization page"
+};
 var TOKEN_CREATE = {
   github: () => t("Create a token on GitHub"),
   vercel: () => t("Create a token on Vercel")
 };
 var tokenLabel = (id) => (TOKEN_LABELS[id] ?? (() => t("Token")))();
 var tokenCreate = (id) => (TOKEN_CREATE[id] ?? (() => t("Create a token")))();
+var cardText = (connector, key) => {
+  const value = connector.card?.[key];
+  return typeof value === "string" && value !== "" ? t(value) : null;
+};
+var cardAbout = (connector) => cardText(connector, "about") ?? ABOUT[connector.id]?.();
+var cardConsent = (connector) => {
+  const declared = connector.card?.consent;
+  const source = declared !== null && typeof declared === "object" && typeof declared.title === "string" ? declared : GENERIC_CONSENT;
+  return {
+    title: t(source.title),
+    body: typeof source.body === "string" ? t(source.body, { service: connector.name }) : "",
+    // Only a connector whose authorization page asks the reader to choose says so in the
+    // card; without that line the consent is information, not a gate.
+    acknowledge: typeof source.acknowledge === "string" ? t(source.acknowledge) : null
+  };
+};
 function ConnectorOption({ title, note, checked, disabled = false, describedby, onChange }) {
   return (0, import_react32.createElement)(
     "div",
@@ -13488,7 +13537,7 @@ function statusText2(connector) {
   if (connector.state === "error" && connector.oauth === true) return connector.error ?? t("Could not connect");
   if (connector.state === "error") return t("Could not connect: {error}", { error: connector.error ?? "" });
   if (connector.state === "ready") return connector.account ? t("Connected as {account}", { account: connector.account }) : t("Connected");
-  return ABOUT[connector.id]?.() ?? (connector.oauth === true ? t("Not connected") : "");
+  return cardAbout(connector) ?? (connector.oauth === true ? t("Not connected") : "");
 }
 function ConnectorRow({ connector, actions }) {
   const [form, setForm] = (0, import_react32.useState)(false);
@@ -13497,8 +13546,9 @@ function ConnectorRow({ connector, actions }) {
   const [error, setError] = (0, import_react32.useState)(null);
   const oauth = connector.oauth === true;
   const manual = oauth && connector.manualClient === true;
-  const scopeChoice = oauth && connector.state === "off" && SCOPE_CHOICES[connector.id] === true;
-  const [scopeAck, setScopeAck] = (0, import_react32.useState)(false);
+  const consent = oauth && connector.state === "off" ? cardConsent(connector) : null;
+  const consentGate = consent !== null && consent.acknowledge !== null;
+  const [consentAck, setConsentAck] = (0, import_react32.useState)(false);
   const configured = typeof connector.clientId === "string" && connector.clientId !== "";
   const [appForm, setAppForm] = (0, import_react32.useState)(false);
   const [appId, setAppId] = (0, import_react32.useState)("");
@@ -13570,7 +13620,11 @@ function ConnectorRow({ connector, actions }) {
   const actionsNoteId = toolboxOn && actionsOffered ? `bt-connector-${connector.id}-actions-note` : void 0;
   const [details, setDetails] = (0, import_react32.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
-  const Mark = MARKS[connector.id];
+  const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id];
+  const readOnlyNote = cardText(connector, "readOnlyNote");
+  const docsUrl = typeof connector.card?.docsUrl === "string" && connector.card.docsUrl !== "" ? connector.card.docsUrl : TOKEN_URLS[connector.id];
+  const tokenFieldLabel = cardText(connector, "tokenLabel") ?? tokenLabel(connector.id);
+  const tokenFieldPlaceholder = cardText(connector, "tokenPlaceholder") ?? void 0;
   const row = (0, import_react32.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
   const mark = (0, import_react32.createElement)("span", { className: "bt-connector-mark" }, Mark ? (0, import_react32.createElement)(Mark) : null);
@@ -13614,7 +13668,7 @@ function ConnectorRow({ connector, actions }) {
         } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react32.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? manual && !configured && !appForm ? null : (0, import_react32.createElement)("button", {
           type: "button",
           className: "bt-soft bt-soft-sm",
-          disabled: busy || scopeChoice && !scopeAck,
+          disabled: busy || consentGate && !consentAck,
           onClick: (event) => {
             event.stopPropagation();
             void startAuthorization();
@@ -13625,22 +13679,30 @@ function ConnectorRow({ connector, actions }) {
         } }, t("Connect"))
       )
     ),
-    scopeChoice ? (0, import_react32.createElement)(
+    // What a read-only grant means, in the connector's own words: it says before connecting
+    // what the Bots may do, and stays there once connected.
+    readOnlyNote !== null ? (0, import_react32.createElement)("div", { className: "bt-connector-readonly" }, readOnlyNote) : null,
+    oauth && docsUrl !== void 0 ? (0, import_react32.createElement)(
+      "div",
+      { className: "bt-connector-docs" },
+      (0, import_react32.createElement)("a", { className: "bt-connector-link", href: docsUrl, target: "_blank", rel: "noopener noreferrer" }, t("Documentation"))
+    ) : null,
+    consent !== null ? (0, import_react32.createElement)(
       "div",
       { className: "bt-connector-scope" },
-      (0, import_react32.createElement)("div", { className: "bt-connector-scope-title" }, t("Choose the access level on the authorization page")),
-      (0, import_react32.createElement)("div", { className: "bt-connector-scope-body" }, t("Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.", { service: connector.name })),
-      (0, import_react32.createElement)(
+      (0, import_react32.createElement)("div", { className: "bt-connector-scope-title" }, consent.title),
+      consent.body !== "" ? (0, import_react32.createElement)("div", { className: "bt-connector-scope-body" }, consent.body) : null,
+      consent.acknowledge !== null ? (0, import_react32.createElement)(
         "label",
         { className: "bt-connector-consent" },
         (0, import_react32.createElement)("input", {
           type: "checkbox",
           className: "bt-connector-check",
-          checked: scopeAck,
-          onChange: (event) => setScopeAck(event.target.checked)
+          checked: consentAck,
+          onChange: (event) => setConsentAck(event.target.checked)
         }),
-        (0, import_react32.createElement)("span", null, t("I'll choose the access level on the authorization page"))
-      )
+        (0, import_react32.createElement)("span", null, consent.acknowledge)
+      ) : null
     ) : null,
     hasOptions && details ? (0, import_react32.createElement)(
       "div",
@@ -13675,11 +13737,11 @@ function ConnectorRow({ connector, actions }) {
     !oauth && !on && form ? (0, import_react32.createElement)(
       "div",
       { className: "bt-connector-form" },
-      (0, import_react32.createElement)("label", { className: "bt-q-field bt-secret-field" }, (0, import_react32.createElement)(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),
+      (0, import_react32.createElement)("label", { className: "bt-q-field bt-secret-field" }, (0, import_react32.createElement)(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenFieldLabel, placeholder: tokenFieldPlaceholder, autoFocus: true })),
       (0, import_react32.createElement)(
         "div",
         { className: "bt-connector-form-row" },
-        TOKEN_URLS[connector.id] ? (0, import_react32.createElement)("a", { className: "bt-connector-link", href: TOKEN_URLS[connector.id], target: "_blank", rel: "noopener noreferrer" }, tokenCreate(connector.id)) : null,
+        docsUrl ? (0, import_react32.createElement)("a", { className: "bt-connector-link", href: docsUrl, target: "_blank", rel: "noopener noreferrer" }, tokenCreate(connector.id)) : null,
         (0, import_react32.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => {
           setForm(false);
           setToken("");

@@ -23,9 +23,27 @@ export const NotionMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 
 export const SlackMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', 'aria-hidden': true },
   h('path', { d: 'M7.6 4.4v11.2M12.4 4.4v11.2M4.4 7.6h11.2M4.4 12.4h11.2' }))
 
-// Everything the connector cards need per service: the mark, what it is for, and where its
-// token comes from. A service without an entry still draws its row, just without a mark.
-const MARKS = { github: GitHubMark, vercel: VercelMark, cloudflare: CloudflareMark, notion: NotionMark, slack: SlackMark }
+// A notification connector's mark: a paper plane of our own drawing, like the others.
+export const TelegramMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('path', { d: 'M17.2 3.4 2.7 9.6l4.9 1.6 1.6 4.7 2.9-3.2 3.6 2.7z' }), h('path', { d: 'M7.6 11.2 17.2 3.4' }))
+
+// Neon's mark is a database stack of our own drawing, not its logo.
+export const NeonMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('ellipse', { cx: 10, cy: 5.4, rx: 6, ry: 2.4 }),
+  h('path', { d: 'M4 5.4v4.2c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V5.4' }),
+  h('path', { d: 'M4 9.6v4.2c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V9.6' }))
+
+// Every mark the cards can name, by the `glyph` a connector declares. A host that does not
+// declare one yet falls back to the service id, so the older connectors keep their marks.
+const CARD_GLYPHS = {
+  github: GitHubMark,
+  vercel: VercelMark,
+  cloudflare: CloudflareMark,
+  notion: NotionMark,
+  slack: SlackMark,
+  telegram: TelegramMark,
+  neon: NeonMark,
+}
 const ABOUT = {
   github: () => t('Repositories, issues, and pull requests'),
   vercel: () => t('Projects, deployments, and logs'),
@@ -38,15 +56,42 @@ const TOKEN_LABELS = {
   github: () => t('GitHub token'),
   vercel: () => t('Vercel token'),
 }
-// A service whose authorization page offers a read-only set and a full-access grant: the
-// card says what the two mean before the browser leaves for it, so the reader chooses.
-const SCOPE_CHOICES = { cloudflare: true }
+// A connector that declares no consent of its own keeps the wording the OAuth services used
+// before cards carried it: the authorization page offers a read-only set and a full grant.
+const GENERIC_CONSENT = {
+  title: 'Choose the access level on the authorization page',
+  body: 'Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.',
+  acknowledge: "I'll choose the access level on the authorization page",
+}
 const TOKEN_CREATE = {
   github: () => t('Create a token on GitHub'),
   vercel: () => t('Create a token on Vercel'),
 }
 const tokenLabel = id => (TOKEN_LABELS[id] ?? (() => t('Token')))()
 const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
+
+// The card data a connector declares in its view: an icon name, one line about it, where its
+// documentation is, what a read-only grant means, and the consent to show before a browser
+// leaves for its authorization page. Text arrives in English and goes through the interface
+// dictionary, so a service that changes its wording does not need a client change.
+const cardText = (connector, key) => {
+  const value = connector.card?.[key]
+  return typeof value === 'string' && value !== '' ? t(value) : null
+}
+const cardAbout = connector => cardText(connector, 'about') ?? ABOUT[connector.id]?.()
+const cardConsent = (connector) => {
+  const declared = connector.card?.consent
+  const source = declared !== null && typeof declared === 'object' && typeof declared.title === 'string'
+    ? declared
+    : GENERIC_CONSENT
+  return {
+    title: t(source.title),
+    body: typeof source.body === 'string' ? t(source.body, { service: connector.name }) : '',
+    // Only a connector whose authorization page asks the reader to choose says so in the
+    // card; without that line the consent is information, not a gate.
+    acknowledge: typeof source.acknowledge === 'string' ? t(source.acknowledge) : null,
+  }
+}
 
 // One settings section inside a connector's panel: a title, what the switch does, and the
 // switch itself. Any connector with settings renders these; the card owns the panel.
@@ -69,7 +114,7 @@ function statusText(connector) {
   if (connector.state === 'error' && connector.oauth === true) return connector.error ?? t('Could not connect')
   if (connector.state === 'error') return t('Could not connect: {error}', { error: connector.error ?? '' })
   if (connector.state === 'ready') return connector.account ? t('Connected as {account}', { account: connector.account }) : t('Connected')
-  return ABOUT[connector.id]?.() ?? (connector.oauth === true ? t('Not connected') : '')
+  return cardAbout(connector) ?? (connector.oauth === true ? t('Not connected') : '')
 }
 
 function ConnectorRow({ connector, actions }) {
@@ -81,8 +126,11 @@ function ConnectorRow({ connector, actions }) {
   // service without dynamic registration asks for first.
   const oauth = connector.oauth === true
   const manual = oauth && connector.manualClient === true
-  const scopeChoice = oauth && connector.state === 'off' && SCOPE_CHOICES[connector.id] === true
-  const [scopeAck, setScopeAck] = useState(false)
+  // A connector that declares a consent shows its own wording before the browser leaves;
+  // one that does not keeps the generic wording and its acknowledgement.
+  const consent = oauth && connector.state === 'off' ? cardConsent(connector) : null
+  const consentGate = consent !== null && consent.acknowledge !== null
+  const [consentAck, setConsentAck] = useState(false)
   const configured = typeof connector.clientId === 'string' && connector.clientId !== ''
   const [appForm, setAppForm] = useState(false)
   const [appId, setAppId] = useState('')
@@ -155,7 +203,16 @@ function ConnectorRow({ connector, actions }) {
   const actionsNoteId = toolboxOn && actionsOffered ? `bt-connector-${connector.id}-actions-note` : undefined
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
-  const Mark = MARKS[connector.id]
+  // The card names its own glyph; a host that declares none keeps the mark its id had.
+  const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id]
+  // What the connector says about itself: its docs, the words on its token field, and what a
+  // read-only grant means.
+  const readOnlyNote = cardText(connector, 'readOnlyNote')
+  const docsUrl = typeof connector.card?.docsUrl === 'string' && connector.card.docsUrl !== '' ? connector.card.docsUrl : TOKEN_URLS[connector.id]
+  // A key that is not a bare token carries its own words: "Gmail address and app password",
+  // or an example of the `clientId:apiKey` pair the service expects.
+  const tokenFieldLabel = cardText(connector, 'tokenLabel') ?? tokenLabel(connector.id)
+  const tokenFieldPlaceholder = cardText(connector, 'tokenPlaceholder') ?? undefined
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
   const mark = h('span', { className: 'bt-connector-mark' }, Mark ? h(Mark) : null)
@@ -183,20 +240,27 @@ function ConnectorRow({ connector, actions }) {
             ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
             : oauth
               ? (manual && !configured && !appForm ? null : h('button', {
-                type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || (scopeChoice && !scopeAck),
+                type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || (consentGate && !consentAck),
                 onClick: (event) => { event.stopPropagation(); void startAuthorization() },
               }, connector.state === 'error' ? t('Connect again') : t('Connect')))
               : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: (event) => { event.stopPropagation(); setForm(true) } }, t('Connect')))),
-    scopeChoice
+    // What a read-only grant means, in the connector's own words: it says before connecting
+    // what the Bots may do, and stays there once connected.
+    readOnlyNote !== null ? h('div', { className: 'bt-connector-readonly' }, readOnlyNote) : null,
+    oauth && docsUrl !== undefined ? h('div', { className: 'bt-connector-docs' },
+      h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation'))) : null,
+    consent !== null
       ? h('div', { className: 'bt-connector-scope' },
-        h('div', { className: 'bt-connector-scope-title' }, t('Choose the access level on the authorization page')),
-        h('div', { className: 'bt-connector-scope-body' }, t('Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.', { service: connector.name })),
-        h('label', { className: 'bt-connector-consent' },
-          h('input', {
-            type: 'checkbox', className: 'bt-connector-check', checked: scopeAck,
-            onChange: (event) => setScopeAck(event.target.checked),
-          }),
-          h('span', null, t("I'll choose the access level on the authorization page"))))
+        h('div', { className: 'bt-connector-scope-title' }, consent.title),
+        consent.body !== '' ? h('div', { className: 'bt-connector-scope-body' }, consent.body) : null,
+        consent.acknowledge !== null
+          ? h('label', { className: 'bt-connector-consent' },
+            h('input', {
+              type: 'checkbox', className: 'bt-connector-check', checked: consentAck,
+              onChange: (event) => setConsentAck(event.target.checked),
+            }),
+            h('span', null, consent.acknowledge))
+          : null)
       : null,
     hasOptions && details
       ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
@@ -234,9 +298,9 @@ function ConnectorRow({ connector, actions }) {
           : null)
       : null,
     !oauth && !on && form ? h('div', { className: 'bt-connector-form' },
-      h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),
+      h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenFieldLabel, placeholder: tokenFieldPlaceholder, autoFocus: true })),
       h('div', { className: 'bt-connector-form-row' },
-        TOKEN_URLS[connector.id] ? h('a', { className: 'bt-connector-link', href: TOKEN_URLS[connector.id], target: '_blank', rel: 'noopener noreferrer' }, tokenCreate(connector.id)) : null,
+        docsUrl ? h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, tokenCreate(connector.id)) : null,
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => { setForm(false); setToken(''); setError(null) } }, t('Cancel')),
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || token.trim() === '', onClick: connect }, busy ? t('Connecting…') : t('Connect')))) : null,
     // Slack has no dynamic registration: its app id and secret are typed here first, with the

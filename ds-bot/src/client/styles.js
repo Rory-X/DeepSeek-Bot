@@ -611,6 +611,9 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 @media (prefers-reduced-motion:reduce){.bt-connector-scope{animation:none}}
 .bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
+/* What a connector says about itself: a quiet panel for a read-only grant, and a docs link. */
+.bt-connector-readonly{padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-accent) 6%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 22%,transparent);font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
+.bt-connector-docs{padding-left:48px;font-size:12px;line-height:16px}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the
    shell offers them and CSS-module name suffixes elsewhere. */
