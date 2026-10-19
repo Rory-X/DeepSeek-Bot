@@ -72,6 +72,10 @@ Any bot can hand work to another bot with @. That bot does the work on its own, 
 
 Settings → **Capabilities** is a shared library of MCP servers, skills and packs. Add a capability to a Bot in its settings; it is available from that Bot's next message in its own chat and group chats. A local MCP command that a Bot adds needs your approval before it can run. While other Bots use a capability, only you or a Main Bot can change or delete it.
 
+### Connectors
+
+Settings → **Connectors** connects outside services whose tools every Bot can use. Connect GitHub (`GITHUB_TOKEN`) or Vercel (`VERCEL_TOKEN`) once: the token stays in Secrets and only the MCP connection carries it. GitHub's tools are `mcp__github__…`; Vercel is connected read-only, with tools such as `vercel_list_projects` and `vercel_get_runtime_logs`.
+
 ### Usage
 
 In **Settings** → **Usage**, you can see token usage by time, by bot and by model.
