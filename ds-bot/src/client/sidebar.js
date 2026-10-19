@@ -265,9 +265,17 @@ export function TeamSidebar(props) {
   })
   const order = useMemo(() => {
     const stamps = JSON.parse(updated)
+    // A Session's list time only moves for messages the user typed, so a Bot answering another
+    // Bot never moved its row. The team view carries the newest message in or out of each Bot
+    // and group; that is what the list moves on, with the Session time and the creation time as
+    // the floor so a missing field never sends a row to the end.
+    const activity = (item, id) => {
+      const seen = typeof item.lastActivity === 'number' ? item.lastActivity : 0
+      return Math.max(seen, stamps[id] ?? 0, item.createdAt ?? 0)
+    }
     const entries = [
-      ...roster.bots.filter(bot => bot.id !== roster.mainBotId).map(bot => ({ kind: 'bot', item: bot, at: stamps[currentPart(bot)] ?? bot.createdAt })),
-      ...roster.rooms.map(room => ({ kind: 'room', item: room, at: stamps[room.id] ?? room.createdAt })),
+      ...roster.bots.filter(bot => bot.id !== roster.mainBotId).map(bot => ({ kind: 'bot', item: bot, at: activity(bot, currentPart(bot)) })),
+      ...roster.rooms.map(room => ({ kind: 'room', item: room, at: activity(room, room.id) })),
       // The Agent sorts by its most recent Session, falling back to when it was added.
       ...(roster.agents ?? []).map(agent => ({ kind: 'agent', item: agent, at: Math.max(0, ...agent.sessions.map(id => stamps[id] ?? 0)) || agent.createdAt })),
     ]

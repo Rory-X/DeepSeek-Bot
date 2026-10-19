@@ -6116,9 +6116,13 @@ function TeamSidebar(props) {
   });
   const order = (0, import_react10.useMemo)(() => {
     const stamps = JSON.parse(updated);
+    const activity = (item, id) => {
+      const seen = typeof item.lastActivity === "number" ? item.lastActivity : 0;
+      return Math.max(seen, stamps[id] ?? 0, item.createdAt ?? 0);
+    };
     const entries2 = [
-      ...roster.bots.filter((bot) => bot.id !== roster.mainBotId).map((bot) => ({ kind: "bot", item: bot, at: stamps[currentPart(bot)] ?? bot.createdAt })),
-      ...roster.rooms.map((room2) => ({ kind: "room", item: room2, at: stamps[room2.id] ?? room2.createdAt })),
+      ...roster.bots.filter((bot) => bot.id !== roster.mainBotId).map((bot) => ({ kind: "bot", item: bot, at: activity(bot, currentPart(bot)) })),
+      ...roster.rooms.map((room2) => ({ kind: "room", item: room2, at: activity(room2, room2.id) })),
       // The Agent sorts by its most recent Session, falling back to when it was added.
       ...(roster.agents ?? []).map((agent) => ({ kind: "agent", item: agent, at: Math.max(0, ...agent.sessions.map((id) => stamps[id] ?? 0)) || agent.createdAt }))
     ];
