@@ -163,9 +163,11 @@ export function install(rt) {
   // A connector whose token was saved somewhere else (a secret card, a copied team) has
   // no account in the team file. Ask the service once so the page shows it and the
   // default team answers the read tools; a failed check leaves the mount to carry on.
-  const claimAccount = async (id, token) => {
+  // `replace`: the token changed under the mount, so the stored account may be another
+  // account's and is read again even when one is already there.
+  const claimAccount = async (id, token, replace = false) => {
     const connector = options[id]
-    if (state.connectors?.[id]?.[connector.accountField] !== undefined) return
+    if (!replace && state.connectors?.[id]?.[connector.accountField] !== undefined) return
     try {
       const account = await signIn(id, token, { api: connector.api })
       state.connectors = { ...state.connectors, [id]: { ...account, connectedAt: Date.now() } }
@@ -200,8 +202,10 @@ export function install(rt) {
 
   async function reconcile(id, force) {
     const connector = options[id]
+    const previous = mounts.get(id)?.token
     const token = !stopped ? rt.secretValue(connector.tokenSecret) : undefined
-    if (!force && mounts.get(id)?.token === token) return
+    if (!force && previous === token) return
+    const replaced = previous !== undefined && previous !== token
     await unmount(id)
     if (token === undefined) {
       statuses.set(id, { state: 'off' })
@@ -216,7 +220,7 @@ export function install(rt) {
     const attempt = { token }
     mounts.set(id, attempt)
     if (connector.mode === 'read-tools') {
-      await claimAccount(id, token)
+      await claimAccount(id, token, replaced)
       if (stopped || mounts.get(id) !== attempt) return
     }
     const loader = ctx.get?.('loader')
