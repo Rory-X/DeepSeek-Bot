@@ -109,13 +109,17 @@ function useSettled(state) {
 export function BotAvatar({ bot, size, state = 'idle', main, admin, badge = true, live = true, gaze = false, pokeable = false }) {
   const settled = useSettled(state)
   if (bot === undefined) return h(BotMark, { size })
-  const badgeKind = !badge ? null : state === 'alert' ? 'alert' : state !== 'idle' && state !== 'waiting' ? 'working' : admin ? 'admin' : main ? 'main' : null
+  const working = state !== 'idle' && state !== 'waiting'
+  const badgeKind = !badge ? null : state === 'alert' ? 'alert' : working ? 'working' : admin ? 'admin' : main ? 'main' : null
+  // A Main Bot's star is its identity, so a working one keeps it: the working dot moves to
+  // the other corner rather than displacing it.
+  const keepsMain = main && working
   return h('span', { className: 'bt-mark', style: { width: size, height: size, '--bt-size': `${size}px` } },
     h(BotMark, { bot, size, state: settled ? 'done' : state, live, gaze, pokeable }),
-    badgeKind === 'working' ? h('span', { className: 'bt-badge bt-badge-working', 'aria-label': t('Working'), role: 'img' }) : null,
+    badgeKind === 'working' ? h('span', { className: `bt-badge bt-badge-working${keepsMain ? ' bt-badge-working-kept' : ''}`, 'aria-label': t('Working'), role: 'img' }) : null,
     badgeKind === 'alert' ? h('span', { className: 'bt-badge bt-badge-alert', 'aria-label': t('Waiting for your answer'), role: 'img' }, '?') : null,
     badgeKind === 'admin' ? h('span', { className: 'bt-badge bt-badge-admin', 'aria-label': t('Admin'), role: 'img' }, h(StarIcon)) : null,
-    badgeKind === 'main' ? h('span', { className: 'bt-badge bt-badge-main', 'aria-label': t('Main Bot'), role: 'img' }, h(MainStar)) : null)
+    keepsMain || badgeKind === 'main' ? h('span', { className: 'bt-badge bt-badge-main', 'aria-label': t('Main Bot'), role: 'img' }, h(MainStar)) : null)
 }
 
 // A group avatar seats its members' characters in the frame: two on a

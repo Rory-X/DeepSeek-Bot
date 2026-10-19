@@ -81,9 +81,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
     },
     h(BotAvatar, { bot, size: 60, state, main: true }),
     h('span', { className: 'bt-tile-name' }, bot.name),
-    bot.role ? h('span', { className: 'bt-chip' }, bot.role) : null,
-    // While the Main Bot works, its card says so: the rows' own line at the card's size.
-    busy ? workStateLine({ ...busy, className: 'bt-member-state bt-tile-state' }) : null))
+    bot.role ? h('span', { className: 'bt-chip' }, bot.role) : null))
   }
   return h('button', {
     type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,

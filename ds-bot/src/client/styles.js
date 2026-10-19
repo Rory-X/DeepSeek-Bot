@@ -109,6 +109,14 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 /* A reader who asked for less motion gets none: not only the page changes, but the short
    tints and slides a tap would otherwise set off. */
 @media (prefers-reduced-motion:reduce){.bt-row,.bt-tile,.bt-round,.bt-icon-btn,.bt-soft,.bt-settings-item,.bt-menu button,.bt-tool,.bt-brand,.bt-chief-bar{animation:none!important;transition:none!important}}
+/* A working Main Bot keeps its star; the working dot takes the free corner, so the card
+   reads both who it is and that it works. */
+.bt-badge-working-kept{top:1px;bottom:auto}
+/* The Main Bot's card says "working" without taking room: a halo breathing around its mark
+   instead of a line of text, so the card is the same size whether it works or not. */
+@keyframes bt-work-halo{0%,100%{opacity:.5;scale:1}50%{opacity:.16;scale:1.16}}
+.bt-tile:has(.bt-badge-working)>.bt-mark::after{content:'';position:absolute;inset:-8%;border-radius:50%;box-shadow:0 0 0 2px color-mix(in srgb,var(--bt-green) 70%,transparent);pointer-events:none;animation:bt-work-halo 1.7s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.bt-tile:has(.bt-badge-working)>.bt-mark::after{animation:none;opacity:.45}}
 .bt-badge{position:absolute;right:0;bottom:0;width:12px;height:12px;border-radius:50%;corner-shape:round;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.5px var(--bt-sidebar)}
 .bt-badge-admin{background:color-mix(in srgb,var(--bt-star) 82%,var(--bt-sidebar))}
 .bt-badge-admin svg{width:7px;height:7px}
@@ -139,8 +147,6 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-tile[aria-current=page]{background:var(--bt-active)}
 .bt-tile-name{font-size:13px;line-height:18px;font-weight:400;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-chip{font-size:11px;line-height:16px;padding:1px 4px;border-radius:4px;background:var(--bt-hover);border:1px solid var(--bt-line);color:var(--bt-ink-2);white-space:nowrap;max-width:84px;overflow:hidden;text-overflow:ellipsis}
-/* The Main Bot's card while it works: the rows' own line, at the card's width. */
-.bt-tile-state{font-size:11px;line-height:16px;max-width:84px;overflow:hidden}
 .bt-row{display:flex;align-items:center;gap:8px;min-height:54px;padding:8px;border:0;border-radius:10px;background:transparent;color:var(--bt-ink);text-align:left;cursor:pointer;width:100%;box-sizing:border-box;font-family:inherit;transition:background-color .12s ease}
 .bt-row:hover{background:var(--bt-hover)}
 .bt-row[aria-current=page]{background:var(--bt-active)}

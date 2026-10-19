@@ -2384,6 +2384,14 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 /* A reader who asked for less motion gets none: not only the page changes, but the short
    tints and slides a tap would otherwise set off. */
 @media (prefers-reduced-motion:reduce){.bt-row,.bt-tile,.bt-round,.bt-icon-btn,.bt-soft,.bt-settings-item,.bt-menu button,.bt-tool,.bt-brand,.bt-chief-bar{animation:none!important;transition:none!important}}
+/* A working Main Bot keeps its star; the working dot takes the free corner, so the card
+   reads both who it is and that it works. */
+.bt-badge-working-kept{top:1px;bottom:auto}
+/* The Main Bot's card says "working" without taking room: a halo breathing around its mark
+   instead of a line of text, so the card is the same size whether it works or not. */
+@keyframes bt-work-halo{0%,100%{opacity:.5;scale:1}50%{opacity:.16;scale:1.16}}
+.bt-tile:has(.bt-badge-working)>.bt-mark::after{content:'';position:absolute;inset:-8%;border-radius:50%;box-shadow:0 0 0 2px color-mix(in srgb,var(--bt-green) 70%,transparent);pointer-events:none;animation:bt-work-halo 1.7s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.bt-tile:has(.bt-badge-working)>.bt-mark::after{animation:none;opacity:.45}}
 .bt-badge{position:absolute;right:0;bottom:0;width:12px;height:12px;border-radius:50%;corner-shape:round;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.5px var(--bt-sidebar)}
 .bt-badge-admin{background:color-mix(in srgb,var(--bt-star) 82%,var(--bt-sidebar))}
 .bt-badge-admin svg{width:7px;height:7px}
@@ -2414,8 +2422,6 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-tile[aria-current=page]{background:var(--bt-active)}
 .bt-tile-name{font-size:13px;line-height:18px;font-weight:400;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-chip{font-size:11px;line-height:16px;padding:1px 4px;border-radius:4px;background:var(--bt-hover);border:1px solid var(--bt-line);color:var(--bt-ink-2);white-space:nowrap;max-width:84px;overflow:hidden;text-overflow:ellipsis}
-/* The Main Bot's card while it works: the rows' own line, at the card's width. */
-.bt-tile-state{font-size:11px;line-height:16px;max-width:84px;overflow:hidden}
 .bt-row{display:flex;align-items:center;gap:8px;min-height:54px;padding:8px;border:0;border-radius:10px;background:transparent;color:var(--bt-ink);text-align:left;cursor:pointer;width:100%;box-sizing:border-box;font-family:inherit;transition:background-color .12s ease}
 .bt-row:hover{background:var(--bt-hover)}
 .bt-row[aria-current=page]{background:var(--bt-active)}
@@ -3588,15 +3594,17 @@ function useSettled(state) {
 function BotAvatar({ bot, size, state = "idle", main, admin, badge = true, live = true, gaze = false, pokeable = false }) {
   const settled = useSettled(state);
   if (bot === void 0) return (0, import_react2.createElement)(BotMark, { size });
-  const badgeKind = !badge ? null : state === "alert" ? "alert" : state !== "idle" && state !== "waiting" ? "working" : admin ? "admin" : main ? "main" : null;
+  const working = state !== "idle" && state !== "waiting";
+  const badgeKind = !badge ? null : state === "alert" ? "alert" : working ? "working" : admin ? "admin" : main ? "main" : null;
+  const keepsMain = main && working;
   return (0, import_react2.createElement)(
     "span",
     { className: "bt-mark", style: { width: size, height: size, "--bt-size": `${size}px` } },
     (0, import_react2.createElement)(BotMark, { bot, size, state: settled ? "done" : state, live, gaze, pokeable }),
-    badgeKind === "working" ? (0, import_react2.createElement)("span", { className: "bt-badge bt-badge-working", "aria-label": t("Working"), role: "img" }) : null,
+    badgeKind === "working" ? (0, import_react2.createElement)("span", { className: `bt-badge bt-badge-working${keepsMain ? " bt-badge-working-kept" : ""}`, "aria-label": t("Working"), role: "img" }) : null,
     badgeKind === "alert" ? (0, import_react2.createElement)("span", { className: "bt-badge bt-badge-alert", "aria-label": t("Waiting for your answer"), role: "img" }, "?") : null,
     badgeKind === "admin" ? (0, import_react2.createElement)("span", { className: "bt-badge bt-badge-admin", "aria-label": t("Admin"), role: "img" }, (0, import_react2.createElement)(StarIcon)) : null,
-    badgeKind === "main" ? (0, import_react2.createElement)("span", { className: "bt-badge bt-badge-main", "aria-label": t("Main Bot"), role: "img" }, (0, import_react2.createElement)(MainStar)) : null
+    keepsMain || badgeKind === "main" ? (0, import_react2.createElement)("span", { className: "bt-badge bt-badge-main", "aria-label": t("Main Bot"), role: "img" }, (0, import_react2.createElement)(MainStar)) : null
   );
 }
 function clusterSeats(count, frame) {
@@ -5802,9 +5810,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
       },
       (0, import_react10.createElement)(BotAvatar, { bot, size: 60, state, main: true }),
       (0, import_react10.createElement)("span", { className: "bt-tile-name" }, bot.name),
-      bot.role ? (0, import_react10.createElement)("span", { className: "bt-chip" }, bot.role) : null,
-      // While the Main Bot works, its card says so: the rows' own line at the card's size.
-      busy ? workStateLine({ ...busy, className: "bt-member-state bt-tile-state" }) : null
+      bot.role ? (0, import_react10.createElement)("span", { className: "bt-chip" }, bot.role) : null
     ));
   }
   return (0, import_react10.createElement)(
