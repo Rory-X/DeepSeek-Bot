@@ -563,19 +563,23 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
 .bt-connector-actions{flex:none;display:flex;gap:6px}
 .bt-connector-options{display:flex;flex-direction:column;padding-top:10px;border-top:1px solid var(--bt-line)}
-.bt-connector-options-toggle{display:flex;align-items:center;gap:8px;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
+.bt-connector-options-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:24px;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
 .bt-connector-options-toggle:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
 .bt-connector-options-label{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-options-summary{margin-left:auto;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
 .bt-connector-options-summary[data-tone=on]{color:var(--bt-accent);font-weight:500}
+.bt-connector-options-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere;margin-top:2px}
+.bt-connector-options[data-locked] .bt-connector-options-label,.bt-connector-options[data-locked] .bt-connector-options-summary{color:var(--bt-ink-3)}
 .bt-connector-options-chevron{flex:none;display:inline-flex;color:var(--bt-ink-3);transition:transform .15s ease}
 .bt-connector-options[data-open] .bt-connector-options-chevron{transform:rotate(90deg)}
+@media (prefers-reduced-motion:reduce){.bt-connector-options-chevron{transition:none}}
 .bt-connector-options-body{display:flex;flex-direction:column;gap:8px;padding-top:10px}
 .bt-connector-action-row{display:flex;align-items:center;gap:12px}
 .bt-connector-action-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 .bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
+.bt-connector-action-row[data-locked] .bt-connector-action-title,.bt-connector-action-row[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}

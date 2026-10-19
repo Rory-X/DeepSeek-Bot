@@ -146,6 +146,10 @@ var ZH = {
   Actions: "执行操作",
   Off: "关闭",
   On: "开启",
+  "Full capabilities": "完整能力",
+  "Allow every tool": "允许使用全部工具",
+  "Let the Bots use every tool the server offers, not only the read ones": "允许 Bot 使用服务器提供的全部工具，而不只限于只读工具",
+  "With Full capabilities on, actions go through vercel_call and ask for approval one by one": "完整能力开启时，动作经 vercel_call 逐次批准",
   "Allow actions": "允许执行操作",
   "Each run asks for your approval": "每次执行都会弹出审批",
   "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
@@ -1710,6 +1714,7 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     connectorDisconnect: (id) => after(call2("connector-disconnect", { id })),
     connectorRetry: (id) => after(call2("connector-retry", { id })),
     connectorSetActions: (id, enabled) => after(call2("connector-set-actions", { id, enabled })),
+    connectorSetToolbox: (id, enabled) => after(call2("connector-set-toolbox", { id, enabled })),
     saveCapability: (capability) => after(call2("capability-save", capability)),
     deleteCapability: (name) => after(call2("capability-delete", { name })),
     approveCapability: (name) => after(call2("capability-approve", { name })),
@@ -2911,19 +2916,23 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
 .bt-connector-actions{flex:none;display:flex;gap:6px}
 .bt-connector-options{display:flex;flex-direction:column;padding-top:10px;border-top:1px solid var(--bt-line)}
-.bt-connector-options-toggle{display:flex;align-items:center;gap:8px;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
+.bt-connector-options-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:24px;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
 .bt-connector-options-toggle:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
 .bt-connector-options-label{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-options-summary{margin-left:auto;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
 .bt-connector-options-summary[data-tone=on]{color:var(--bt-accent);font-weight:500}
+.bt-connector-options-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere;margin-top:2px}
+.bt-connector-options[data-locked] .bt-connector-options-label,.bt-connector-options[data-locked] .bt-connector-options-summary{color:var(--bt-ink-3)}
 .bt-connector-options-chevron{flex:none;display:inline-flex;color:var(--bt-ink-3);transition:transform .15s ease}
 .bt-connector-options[data-open] .bt-connector-options-chevron{transform:rotate(90deg)}
+@media (prefers-reduced-motion:reduce){.bt-connector-options-chevron{transition:none}}
 .bt-connector-options-body{display:flex;flex-direction:column;gap:8px;padding-top:10px}
 .bt-connector-action-row{display:flex;align-items:center;gap:12px}
 .bt-connector-action-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 .bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
+.bt-connector-action-row[data-locked] .bt-connector-action-title,.bt-connector-action-row[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
@@ -11876,24 +11885,28 @@ var TOKEN_CREATE = {
 };
 var tokenLabel = (id) => (TOKEN_LABELS[id] ?? (() => t("Token")))();
 var tokenCreate = (id) => (TOKEN_CREATE[id] ?? (() => t("Create a token")))();
-function ConnectorOptions({ summary, tone = "off", children }) {
+function ConnectorOptions({ id, label = t("Actions"), summary, tone = "off", note, noteId, locked = false, children }) {
   const [open, setOpen] = (0, import_react30.useState)(false);
+  const bodyId = id ? `bt-connector-options-${id}` : void 0;
   return (0, import_react30.createElement)(
     "div",
-    { className: "bt-connector-options", "data-open": open || void 0 },
+    { className: "bt-connector-options", "data-open": open || void 0, "data-locked": locked || void 0 },
     (0, import_react30.createElement)(
       "button",
       {
         type: "button",
         className: "bt-connector-options-toggle",
         "aria-expanded": open,
+        // The body is only in the tree while it is open, so the reference is too.
+        ...open && bodyId ? { "aria-controls": bodyId } : {},
         onClick: () => setOpen((value) => !value)
       },
-      (0, import_react30.createElement)("span", { className: "bt-connector-options-label" }, t("Actions")),
+      (0, import_react30.createElement)("span", { className: "bt-connector-options-label" }, label),
       (0, import_react30.createElement)("span", { className: "bt-connector-options-summary", "data-tone": tone }, summary),
       (0, import_react30.createElement)("span", { className: "bt-connector-options-chevron", "aria-hidden": true }, (0, import_react30.createElement)(ChevronRightIcon))
     ),
-    open ? (0, import_react30.createElement)("div", { className: "bt-connector-options-body" }, children) : null
+    note ? (0, import_react30.createElement)("div", { className: "bt-connector-options-note", id: noteId }, note) : null,
+    open ? (0, import_react30.createElement)("div", { className: "bt-connector-options-body", id: bodyId, role: "group", "aria-label": label }, children) : null
   );
 }
 function statusText2(connector) {
@@ -11923,6 +11936,8 @@ function ConnectorRow({ connector, actions }) {
   };
   const on = connector.state !== "off";
   const actionsOn = connector.actions === true;
+  const toolboxOn = connector.toolbox === true;
+  const actionsNoteId = toolboxOn ? `bt-connector-${connector.id}-actions-note` : void 0;
   const Mark = MARKS[connector.id];
   const row = (0, import_react30.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
@@ -11946,12 +11961,51 @@ function ConnectorRow({ connector, actions }) {
         on ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => void run(actions.connectorDisconnect(connector.id)) }, t("Disconnect")) : form ? null : (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: () => setForm(true) }, t("Connect"))
       )
     ),
-    on && typeof connector.actions === "boolean" ? (0, import_react30.createElement)(
+    on && typeof connector.toolbox === "boolean" ? (0, import_react30.createElement)(
       ConnectorOptions,
-      { summary: actionsOn ? t("On") : t("Off"), tone: actionsOn ? "on" : "off" },
+      {
+        id: `${connector.id}-toolbox`,
+        label: t("Full capabilities"),
+        summary: toolboxOn ? t("On") : t("Off"),
+        tone: toolboxOn ? "on" : "off"
+      },
       (0, import_react30.createElement)(
         "div",
-        { className: "bt-connector-action-row", "data-on": actionsOn || void 0 },
+        { className: "bt-connector-action-row", "data-on": toolboxOn || void 0 },
+        (0, import_react30.createElement)(
+          "div",
+          { className: "bt-connector-action-text" },
+          (0, import_react30.createElement)("div", { className: "bt-connector-action-title" }, t("Allow every tool")),
+          (0, import_react30.createElement)("div", { className: "bt-connector-action-note" }, toolboxOn ? t("Each run asks for your approval") : t("Let the Bots use every tool the server offers, not only the read ones"))
+        ),
+        (0, import_react30.createElement)("button", {
+          type: "button",
+          role: "switch",
+          className: "bt-switch",
+          "aria-checked": toolboxOn,
+          "aria-label": t("Allow every tool"),
+          disabled: busy,
+          onClick: (event) => {
+            event.stopPropagation();
+            void run(actions.connectorSetToolbox(connector.id, !toolboxOn));
+          }
+        }, (0, import_react30.createElement)("span", { className: "bt-switch-knob", "aria-hidden": true }))
+      )
+    ) : null,
+    on && typeof connector.actions === "boolean" ? (0, import_react30.createElement)(
+      ConnectorOptions,
+      {
+        id: `${connector.id}-actions`,
+        label: t("Actions"),
+        summary: actionsOn ? t("On") : t("Off"),
+        tone: actionsOn ? "on" : "off",
+        locked: toolboxOn,
+        note: toolboxOn ? t("With Full capabilities on, actions go through vercel_call and ask for approval one by one") : null,
+        noteId: actionsNoteId
+      },
+      (0, import_react30.createElement)(
+        "div",
+        { className: "bt-connector-action-row", "data-on": actionsOn || void 0, "data-locked": toolboxOn || void 0 },
         (0, import_react30.createElement)(
           "div",
           { className: "bt-connector-action-text" },
@@ -11964,7 +12018,8 @@ function ConnectorRow({ connector, actions }) {
           className: "bt-switch",
           "aria-checked": actionsOn,
           "aria-label": t("Allow actions"),
-          disabled: busy,
+          disabled: busy || toolboxOn,
+          ...toolboxOn ? { "aria-describedby": actionsNoteId } : {},
           onClick: (event) => {
             event.stopPropagation();
             void run(actions.connectorSetActions(connector.id, !actionsOn));

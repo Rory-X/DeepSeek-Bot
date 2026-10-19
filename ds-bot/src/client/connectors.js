@@ -36,18 +36,23 @@ const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
 
 // A connector's secondary options stay folded under its main line: the row names them and
 // carries their current summary, and the details open only when asked. Reused by any
-// connector that grows options later.
-export function ConnectorOptions({ summary, tone = 'off', children }) {
+// connector that grows options later. `note` sits under the folded row, so the reason the
+// options are not in effect can be read without opening them.
+export function ConnectorOptions({ id, label = t('Actions'), summary, tone = 'off', note, noteId, locked = false, children }) {
   const [open, setOpen] = useState(false)
-  return h('div', { className: 'bt-connector-options', 'data-open': open || undefined },
+  const bodyId = id ? `bt-connector-options-${id}` : undefined
+  return h('div', { className: 'bt-connector-options', 'data-open': open || undefined, 'data-locked': locked || undefined },
     h('button', {
       type: 'button', className: 'bt-connector-options-toggle', 'aria-expanded': open,
+      // The body is only in the tree while it is open, so the reference is too.
+      ...(open && bodyId ? { 'aria-controls': bodyId } : {}),
       onClick: () => setOpen(value => !value),
     },
-    h('span', { className: 'bt-connector-options-label' }, t('Actions')),
+    h('span', { className: 'bt-connector-options-label' }, label),
     h('span', { className: 'bt-connector-options-summary', 'data-tone': tone }, summary),
     h('span', { className: 'bt-connector-options-chevron', 'aria-hidden': true }, h(ChevronRightIcon))),
-  open ? h('div', { className: 'bt-connector-options-body' }, children) : null)
+    note ? h('div', { className: 'bt-connector-options-note', id: noteId }, note) : null,
+    open ? h('div', { className: 'bt-connector-options-body', id: bodyId, role: 'group', 'aria-label': label }, children) : null)
 }
 
 function statusText(connector) {
@@ -75,6 +80,12 @@ function ConnectorRow({ connector, actions }) {
   // `actions` is absent for a connector without write actions; a boolean says whether the
   // Bot may run them, and every run asks the user first.
   const actionsOn = connector.actions === true
+  // `toolbox` is absent for a connector that cannot offer its whole toolset. With it on,
+  // the named action tools are not registered: every action goes through the server's own
+  // call tool, which asks for approval by itself, so the actions switch has nothing to do.
+  const toolboxOn = connector.toolbox === true
+  // Shown under the folded actions row, so the reason its switch is off stays readable.
+  const actionsNoteId = toolboxOn ? `bt-connector-${connector.id}-actions-note` : undefined
   const Mark = MARKS[connector.id]
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
@@ -89,9 +100,36 @@ function ConnectorRow({ connector, actions }) {
         on
           ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => void run(actions.connectorDisconnect(connector.id)) }, t('Disconnect'))
           : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => setForm(true) }, t('Connect')))),
+    on && typeof connector.toolbox === 'boolean'
+      ? h(ConnectorOptions, {
+        id: `${connector.id}-toolbox`,
+        label: t('Full capabilities'),
+        summary: toolboxOn ? t('On') : t('Off'),
+        tone: toolboxOn ? 'on' : 'off',
+      },
+        h('div', { className: 'bt-connector-action-row', 'data-on': toolboxOn || undefined },
+          h('div', { className: 'bt-connector-action-text' },
+            h('div', { className: 'bt-connector-action-title' }, t('Allow every tool')),
+            h('div', { className: 'bt-connector-action-note' }, toolboxOn
+              ? t('Each run asks for your approval')
+              : t('Let the Bots use every tool the server offers, not only the read ones'))),
+          h('button', {
+            type: 'button', role: 'switch', className: 'bt-switch', 'aria-checked': toolboxOn, 'aria-label': t('Allow every tool'),
+            disabled: busy,
+            onClick: (event) => { event.stopPropagation(); void run(actions.connectorSetToolbox(connector.id, !toolboxOn)) },
+          }, h('span', { className: 'bt-switch-knob', 'aria-hidden': true }))))
+      : null,
     on && typeof connector.actions === 'boolean'
-      ? h(ConnectorOptions, { summary: actionsOn ? t('On') : t('Off'), tone: actionsOn ? 'on' : 'off' },
-        h('div', { className: 'bt-connector-action-row', 'data-on': actionsOn || undefined },
+      ? h(ConnectorOptions, {
+        id: `${connector.id}-actions`,
+        label: t('Actions'),
+        summary: actionsOn ? t('On') : t('Off'),
+        tone: actionsOn ? 'on' : 'off',
+        locked: toolboxOn,
+        note: toolboxOn ? t('With Full capabilities on, actions go through vercel_call and ask for approval one by one') : null,
+        noteId: actionsNoteId,
+      },
+        h('div', { className: 'bt-connector-action-row', 'data-on': actionsOn || undefined, 'data-locked': toolboxOn || undefined },
           h('div', { className: 'bt-connector-action-text' },
             h('div', { className: 'bt-connector-action-title' }, t('Allow actions')),
             h('div', { className: 'bt-connector-action-note' }, actionsOn
@@ -99,7 +137,8 @@ function ConnectorRow({ connector, actions }) {
               : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'))),
           h('button', {
             type: 'button', role: 'switch', className: 'bt-switch', 'aria-checked': actionsOn, 'aria-label': t('Allow actions'),
-            disabled: busy,
+            disabled: busy || toolboxOn,
+            ...(toolboxOn ? { 'aria-describedby': actionsNoteId } : {}),
             onClick: (event) => { event.stopPropagation(); void run(actions.connectorSetActions(connector.id, !actionsOn)) },
           }, h('span', { className: 'bt-switch-knob', 'aria-hidden': true }))))
       : null,
