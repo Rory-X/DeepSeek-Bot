@@ -176,7 +176,7 @@ test('an envelope unwraps the payload and turns a bad status code into an error'
   assert.equal(await ok[0].execute({ q: 'x' }), '{"notes":2}')
 
   const ima = createRestTools('ima', enveloped({ ok: 'code', success: 0, data: 'data', error: 'msg', errors: { 20002: 'ima is rate limited; try again later.', 20004: 'ima did not accept this API key.' } }), { output })
-  for (const [code, pattern] of [[20002, /rate limited/], [20004, /did not accept this API key/], [210001, /answered code 210001: something broke/]]) {
+  for (const [code, pattern] of [[20002, /rate limited/], [20004, /did not accept this API key/], [210001, /Enveloped: something broke/]]) {
     const [tool] = createRestTools('ima', enveloped({ ok: 'code', success: 0, data: 'data', error: 'msg', errors: { 20002: 'ima is rate limited; try again later.', 20004: 'ima did not accept this API key.' } }), { output, fetch: async () => answer(200, { code, msg: 'something broke', data: {} }) })
     await assert.rejects(tool.execute({ q: 'x' }), pattern, String(code))
   }
@@ -223,4 +223,44 @@ test('an answer hook may format or refuse a successful response', async () => {
   // HTTP errors are mapped before the envelope sees anything.
   const http = createRestTools('env', enveloped({ ok: 'code', success: 0 }), { output, fetch: async () => answer(429, { code: 0 }) })
   await assert.rejects(http[0].execute({ q: 'x' }), /rate limited/)
+})
+
+// WeRead: success carries no errcode (only /_list sends errcode 0), a business error is HTTP
+// 499 with errcode/errmsg, and the status code alone would hide the service's own words.
+const wereadEnvelope = { ok: 'errcode', success: 0, allowAbsent: true, data: 'data', error: 'errmsg', errors: { '-2013': 'WeRead did not accept this API key.' } }
+const weread = (envelope = wereadEnvelope) => ({
+  displayName: 'WeRead',
+  api: 'https://weread.test',
+  auth: () => ({ Authorization: 'Bearer key' }),
+  envelope,
+  restTools: [{ name: 'sync', method: 'POST', readOnly: true, path: '/shelf/sync', body: {}, parameters: { type: 'object', properties: {} } }],
+})
+
+test('an envelope may treat an absent status field as success', async () => {
+  const [ok] = createRestTools('weread', weread(), { output, fetch: async () => answer(200, { data: { notes: 1 } }) })
+  assert.equal(await ok.execute({}), '{"notes":1}')
+  const [zero] = createRestTools('weread', weread(), { output, fetch: async () => answer(200, { errcode: 0, data: [1] }) })
+  assert.equal(await zero.execute({}), '[1]')
+})
+
+test('a business error in a non-2xx body keeps the service message, without its trace id', async () => {
+  const [tool] = createRestTools('weread', weread(), {
+    output,
+    fetch: async () => answer(499, { errcode: -2003, errmsg: '参数格式错误', errlog: 'CDQ34Je' }),
+  })
+  await assert.rejects(tool.execute({}), (error) => {
+    assert.match(error.message, /^WeRead: 参数格式错误$/)
+    assert.ok(!error.message.includes('CDQ34Je'))
+    assert.ok(!error.message.includes('499'))
+    return true
+  })
+  const [auth] = createRestTools('weread', weread(), { output, fetch: async () => answer(401, { errcode: -2013, errmsg: '鉴权失败' }) })
+  await assert.rejects(auth.execute({}), /did not accept this API key/)
+})
+
+test('a cut JSON answer says the JSON is incomplete', async () => {
+  const [tool] = createRestTools('weread', weread(), { output, fetch: async () => answer(200, { data: { notes: 'z'.repeat(REST_RESULT_MAX + 100) } }) })
+  const text = await tool.execute({})
+  assert.match(text, /no longer complete/)
+  assert.match(text, /result cut: \d+ characters in all/)
 })

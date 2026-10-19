@@ -21,10 +21,13 @@ const METHODS = new Set(['GET', 'POST'])
 const SCALAR = new Set(['string', 'number', 'boolean'])
 
 const safeName = (id, name) => `${id}_${String(name).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64)
-const cut = (text, redact) => {
+const cut = (text, redact, wasJson = false, limit = REST_RESULT_MAX) => {
   const safe = redact(String(text))
-  if (safe.length <= REST_RESULT_MAX) return safe
-  return `${safe.slice(0, REST_RESULT_MAX)}\n… (result cut: ${safe.length} characters in all; narrow the request with fewer or smaller parameters)`
+  if (safe.length <= limit) return safe
+  const note = wasJson
+    ? `result cut: ${safe.length} characters in all; this JSON is no longer complete, so ask for less (a smaller limit or a narrower query)`
+    : `result cut: ${safe.length} characters in all; narrow the request with fewer or smaller parameters`
+  return `${safe.slice(0, limit)}\n… (${note})`
 }
 
 function errorText(connector, response) {
@@ -98,8 +101,8 @@ function validate(connector, definition) {
   if (method === 'POST') {
     if (definition.readOnly !== true) throw new Error(`${connector.displayName} REST tool "${definition.name}" POST must declare readOnly: true`)
     const body = definition.body
-    if (body === null || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length === 0) {
-      throw new Error(`${connector.displayName} REST tool "${definition.name}" POST needs an explicit body mapping`)
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      throw new Error(`${connector.displayName} REST tool "${definition.name}" POST needs an explicit body mapping (it may be empty)`)
     }
   }
   if (typeof definition.path !== 'string' || !definition.path.startsWith('/')) {
@@ -117,7 +120,8 @@ function unwrap(connector, envelope, body) {
   }
   const code = body[envelope.ok]
   const success = envelope.success === undefined ? 0 : envelope.success
-  const ok = envelope.successTrue === true ? code === true : code === success
+  // WeRead omits its errcode on success, so a connector may say an absent status is fine.
+  const ok = envelope.successTrue === true ? code === true : (code === success || (envelope.allowAbsent === true && code === undefined))
   if (ok) {
     const payload = envelope.data === undefined ? body : body[envelope.data]
     return payload === undefined ? 'null' : JSON.stringify(payload)
@@ -125,8 +129,8 @@ function unwrap(connector, envelope, body) {
   const mapped = envelope.errors !== null && typeof envelope.errors === 'object' ? envelope.errors[String(code)] : undefined
   if (typeof mapped === 'string' && mapped !== '') throw new Error(mapped)
   const detail = envelope.error === undefined ? undefined : body[envelope.error]
-  const said = typeof detail === 'string' && detail !== '' ? `: ${detail.slice(0, 160)}` : ''
-  throw new Error(`${connector.displayName} answered code ${String(code)}${said}`)
+  if (typeof detail === 'string' && detail !== '') throw new Error(`${connector.displayName}: ${detail.slice(0, 160)}`)
+  throw new Error(`${connector.displayName} answered code ${String(code)}`)
 }
 
 // Builds the connector's tools. `definition.parameters` is the model-facing JSON schema;
@@ -163,7 +167,6 @@ export function createRestTools(id, connector, { token, secrets = {}, output, re
         } catch {
           throw new Error(`Could not reach ${connector.displayName}`)
         }
-        if (!response.ok) throw new Error(errorText(connector, response))
         const text = await response.text()
         let parsed
         try {
@@ -173,18 +176,29 @@ export function createRestTools(id, connector, { token, secrets = {}, output, re
         }
         const envelope = definition.envelope ?? connector.envelope
         const hook = definition.answer ?? connector.answer
-        if (typeof hook === 'function') {
-          const answer = await hook({ body: parsed, status: response.status })
-          return cut(typeof answer === 'string' ? answer : JSON.stringify(answer), redact)
-        }
-        if (envelope !== undefined) {
+        // A service may answer its business error with a non-2xx status (WeRead uses 499);
+        // its own envelope explains it better than "answered 499", so it is checked first
+        // whenever the body parses as one.
+        if (envelope !== undefined && parsed !== undefined) {
+          let answer
           try {
-            return cut(unwrap(connector, envelope, parsed), redact)
+            answer = unwrap(connector, envelope, parsed)
           } catch (error) {
             throw new Error(redact(String(error?.message ?? error)).slice(0, REST_ERROR_MAX))
           }
+          // The envelope speaks for the body; a non-2xx status still means the call itself
+          // failed (auth, rate limit, transport), so it is not reported as success.
+          if (!response.ok) throw new Error(errorText(connector, response))
+          return cut(answer, redact, true)
         }
-        return cut(parsed === undefined ? text : JSON.stringify(parsed), redact)
+        if (envelope !== undefined) throw new Error(`${connector.displayName} answered something this connector cannot read.`)
+        if (!response.ok) throw new Error(errorText(connector, response))
+        const limit = definition.resultMax ?? REST_RESULT_MAX
+        if (typeof hook === 'function') {
+          const answer = await hook({ body: parsed, status: response.status })
+          return cut(typeof answer === 'string' ? answer : JSON.stringify(answer), redact, parsed !== undefined, limit)
+        }
+        return cut(parsed === undefined ? text : JSON.stringify(parsed), redact, parsed !== undefined, limit)
       },
     }
   })
