@@ -5784,7 +5784,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   const away = !running && groups.length > 0;
   const own = workKeys(useWork ? useWork((work) => JSON.stringify(work.bots?.[id] ?? null)) : "null");
   const state = botState(running || away, doing, alert);
-  const busy = running && own !== null && own.roomId === void 0 ? { doing: own, where: t("in its own chat") } : away ? { doing: groups[0], where: t("in {name}", { name: roster.roomsById[groups[0].id]?.name ?? t("a group chat") }) } : null;
+  const busy = running && own !== null && own.roomId === void 0 ? { doing: own, where: "" } : away ? { doing: groups[0], where: `· ${roster.roomsById[groups[0].id]?.name ?? t("a group chat")}` } : null;
   const busyLine = busy ? workStateLine({ ...busy, className: "bt-member-state bt-row-state" }) : null;
   const waits = workKeys(useWork ? useWork((work) => JSON.stringify(work.waiting?.[id] ?? null)) : "null");
   const waitsFor = state === "waiting" ? waitingFor(roster, waits) : "";

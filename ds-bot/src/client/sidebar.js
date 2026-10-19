@@ -61,9 +61,11 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   // over a group there, so an entry that carries a room is the group's line.
   const own = workKeys(useWork ? useWork(work => JSON.stringify(work.bots?.[id] ?? null)) : 'null')
   const state = botState(running || away, doing, alert)
+  // The row is the Bot, so its own chat needs no place named; a group is named without a
+  // joining word, and a long name is cut by the line's own ellipsis.
   const busy = running && own !== null && own.roomId === undefined
-    ? { doing: own, where: t('in its own chat') }
-    : away ? { doing: groups[0], where: t('in {name}', { name: roster.roomsById[groups[0].id]?.name ?? t('a group chat') }) } : null
+    ? { doing: own, where: '' }
+    : away ? { doing: groups[0], where: `· ${roster.roomsById[groups[0].id]?.name ?? t('a group chat')}` } : null
   const busyLine = busy ? workStateLine({ ...busy, className: 'bt-member-state bt-row-state' }) : null
   const waits = workKeys(useWork ? useWork(work => JSON.stringify(work.waiting?.[id] ?? null)) : 'null')
   const waitsFor = state === 'waiting' ? waitingFor(roster, waits) : ''
