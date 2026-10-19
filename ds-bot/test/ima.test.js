@@ -1,20 +1,21 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import connector, {
-  IMA_API_KEY_SECRET,
   IMA_BASE,
-  IMA_CLIENT_ID_SECRET,
   IMA_ENVELOPE,
   IMA_REST_TOOLS,
+  IMA_TOKEN_SECRET,
   IMA_WRITE_PATHS,
   auth,
   imaError,
+  parseCredentials,
   verifyIma,
 } from '../src/host/connectors/ima.js'
 
 const CLIENT_ID = 'client_id_for_ima_test'
 const API_KEY = 'api_key_for_ima_test'
-const SECRETS = { [IMA_CLIENT_ID_SECRET]: CLIENT_ID, [IMA_API_KEY_SECRET]: API_KEY }
+const TOKEN = `${CLIENT_ID}:${API_KEY}`
+const SECRETS = { [IMA_TOKEN_SECRET]: TOKEN }
 
 const answer = (status, body) => ({
   status,
@@ -31,10 +32,11 @@ test('the module is a rest-tools connector the registry can load by its default 
   assert.equal(connector.restTools, IMA_REST_TOOLS)
   assert.equal(connector.verify, verifyIma)
   assert.equal(typeof connector.auth, 'function')
-  assert.deepEqual(connector.credentials, [
-    { name: IMA_CLIENT_ID_SECRET, label: 'Client ID' },
-    { name: IMA_API_KEY_SECRET, label: 'API key' },
-  ])
+  // One packed token, as the host connect form sends it.
+  assert.equal(connector.tokenSecret, IMA_TOKEN_SECRET)
+  assert.equal(connector.credentials, undefined)
+  assert.equal(connector.credentialPlaceholder, 'clientId:apiKey')
+  assert.match(connector.credentialLabel, /Client ID and API key/)
 })
 
 test('the declaration covers exactly the nine read calls, all POST and read-only', () => {
@@ -98,14 +100,30 @@ test('the search call nests query_info under its argument without widening the b
   assert.deepEqual(search.parameters.required, ['query', 'start', 'end'])
 })
 
+test('the packed token splits at the first colon and trims both sides', () => {
+  assert.deepEqual(parseCredentials(`${CLIENT_ID}:${API_KEY}`), { clientId: CLIENT_ID, apiKey: API_KEY })
+  assert.deepEqual(parseCredentials(`  ${CLIENT_ID}  :  ${API_KEY}  `), { clientId: CLIENT_ID, apiKey: API_KEY })
+  // A second colon belongs to the API key, not to a new separator.
+  assert.deepEqual(parseCredentials(`${CLIENT_ID}:key:with:colons`), { clientId: CLIENT_ID, apiKey: 'key:with:colons' })
+  assert.throws(() => parseCredentials(CLIENT_ID), /colon is missing/)
+  assert.throws(() => parseCredentials(''), /colon is missing/)
+  assert.throws(() => parseCredentials(`:${API_KEY}`), /both sides of the colon/)
+  assert.throws(() => parseCredentials(`${CLIENT_ID}:`), /both sides of the colon/)
+  assert.throws(() => parseCredentials(`  :  `), /both sides of the colon/)
+  assert.throws(() => parseCredentials(undefined), /colon is missing/)
+})
+
 test('the two credential headers and the skill context travel on every call', () => {
-  const headers = auth({ secrets: SECRETS })
+  const headers = auth({ token: TOKEN })
   assert.equal(headers['ima-openapi-clientid'], CLIENT_ID)
   assert.equal(headers['ima-openapi-apikey'], API_KEY)
   assert.equal(headers['ima-openapi-ctx'], 'skill_version=1.1.10')
-  // A missing credential is left out instead of sent as the string "undefined".
+  // The saved secret answers when the host does not pass a token.
+  assert.deepEqual(auth({ secrets: SECRETS }), headers)
+  // A malformed pair never puts a half-empty header on the wire.
+  assert.deepEqual(auth({ token: 'no colon' }), { 'ima-openapi-ctx': 'skill_version=1.1.10' })
+  assert.deepEqual(auth({ token: `${CLIENT_ID}:` }), { 'ima-openapi-ctx': 'skill_version=1.1.10' })
   assert.deepEqual(auth({}), { 'ima-openapi-ctx': 'skill_version=1.1.10' })
-  assert.deepEqual(auth({ secrets: { [IMA_CLIENT_ID_SECRET]: CLIENT_ID } }), { 'ima-openapi-clientid': CLIENT_ID, 'ima-openapi-ctx': 'skill_version=1.1.10' })
 })
 
 test('the envelope names ima\'s own status fields and maps the refusal codes', () => {
@@ -124,7 +142,7 @@ test('the envelope names ima\'s own status fields and maps the refusal codes', (
 test('verify confirms the pair with one empty knowledge base search', async () => {
   const seen = []
   const ok = await verifyIma({
-    secrets: SECRETS,
+    token: TOKEN,
     fetch: async (url, init) => {
       seen.push([url, init])
       return answer(200, envelope({ info_list: [], is_end: true }))
@@ -138,18 +156,22 @@ test('verify confirms the pair with one empty knowledge base search', async () =
   assert.equal(init.headers['ima-openapi-apikey'], API_KEY)
   assert.equal(init.headers['content-type'], 'application/json')
   assert.deepEqual(JSON.parse(init.body), { query: '', cursor: '', limit: 1 })
+
+  // A verify call with no explicit token reads the saved secret.
+  const fromSecret = await verifyIma({ secrets: SECRETS, fetch: async () => answer(200, envelope({})) })
+  assert.deepEqual(fromSecret, { ok: true })
 })
 
 test('verify turns a refusal, a timeout and a dead network into clear errors', async () => {
-  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(401, { code: 200002, msg: 'skill auth failed' }) }), /did not accept this client id or API key/)
-  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => { const error = new Error('timed out'); error.name = 'TimeoutError'; throw error } }), /did not answer in time/)
-  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => { throw new Error('offline') } }), /Could not reach ima/)
-  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(500, {}) }), /ima answered 500/)
-  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(200, { code: 20004, msg: 'auth failed', data: {} }) }), /did not accept this client id or API key/)
-  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(200, { code: 210001, msg: '参数非法', data: {} }) }), /ima answered code 210001: 参数非法/)
+  await assert.rejects(verifyIma({ token: TOKEN, fetch: async () => answer(401, { code: 200002, msg: 'skill auth failed' }) }), /did not accept this client id or API key/)
+  await assert.rejects(verifyIma({ token: TOKEN, fetch: async () => { const error = new Error('timed out'); error.name = 'TimeoutError'; throw error } }), /did not answer in time/)
+  await assert.rejects(verifyIma({ token: TOKEN, fetch: async () => { throw new Error('offline') } }), /Could not reach ima/)
+  await assert.rejects(verifyIma({ token: TOKEN, fetch: async () => answer(500, {}) }), /ima answered 500/)
+  await assert.rejects(verifyIma({ token: TOKEN, fetch: async () => answer(200, { code: 20004, msg: 'auth failed', data: {} }) }), /did not accept this client id or API key/)
+  await assert.rejects(verifyIma({ token: TOKEN, fetch: async () => answer(200, { code: 210001, msg: '参数非法', data: {} }) }), /ima answered code 210001: 参数非法/)
   // The credentials never appear in an error message.
   try {
-    await verifyIma({ secrets: SECRETS, fetch: async () => answer(401, {}) })
+    await verifyIma({ token: TOKEN, fetch: async () => answer(401, {}) })
     assert.fail('should have failed')
   } catch (error) {
     assert.equal(String(error.message).includes(API_KEY), false)
@@ -157,12 +179,13 @@ test('verify turns a refusal, a timeout and a dead network into clear errors', a
   }
 })
 
-test('verify refuses a half-filled card without a request', async () => {
+test('verify refuses a malformed card without a request', async () => {
   let asked = false
   const fetch = async () => { asked = true; return answer(200, envelope({})) }
-  await assert.rejects(verifyIma({ secrets: { [IMA_API_KEY_SECRET]: API_KEY }, fetch }), /missing IMA_OPENAPI_CLIENTID/)
-  await assert.rejects(verifyIma({ secrets: { [IMA_CLIENT_ID_SECRET]: CLIENT_ID }, fetch }), /missing IMA_OPENAPI_APIKEY/)
-  await assert.rejects(verifyIma({ fetch }), /missing IMA_OPENAPI_CLIENTID and IMA_OPENAPI_APIKEY/)
+  await assert.rejects(verifyIma({ fetch }), /colon is missing/)
+  await assert.rejects(verifyIma({ token: CLIENT_ID, fetch }), /colon is missing/)
+  await assert.rejects(verifyIma({ token: `${CLIENT_ID}:   `, fetch }), /both sides of the colon/)
+  await assert.rejects(verifyIma({ token: `   :${API_KEY}`, fetch }), /both sides of the colon/)
   assert.equal(asked, false)
 })
 
