@@ -1,0 +1,265 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { McpHttpClient, mcpResultText } from '../src/host/mcp.js'
+import { createOAuthFlow, OAUTH_PREFIX } from '../src/host/oauth/flow.js'
+import { OAuthError } from '../src/host/oauth/client.js'
+import neon, { configure, neonAccount, neonTools, neonUrl } from '../src/host/connectors/neon.js'
+import { fakeContext } from './fake-ctx.js'
+import { fakeCredentials, fakeOAuthServer, fakeResponse, fakeWebServer } from './oauth-fakes.js'
+
+// What `https://mcp.neon.tech/api/list-tools?readonly=true` publishes for the categories this
+// connector asks for (2026-10-20): 30 tools, every one a read.
+const SERVER_READ_ONLY = [
+  'list_organizations', 'run_sql', 'describe_table_schema', 'get_database_tables', 'describe_branch',
+  'explain_sql_statement', 'list_slow_queries', 'inspect_database', 'search', 'fetch', 'send_feedback',
+  'list_projects', 'describe_project', 'list_project_permissions', 'list_project_members', 'list_regions',
+  'list_operations', 'get_operation', 'list_branches', 'get_branch', 'get_default_branch',
+  'compare_database_schema', 'list_postgres_roles', 'get_postgres_role', 'list_postgres_databases',
+  'get_postgres_database', 'list_postgres_endpoints', 'list_branch_computes', 'get_postgres_endpoint',
+  'list_credentials',
+]
+// The families the server drops in read-only mode; none may be registered here.
+const SERVER_WRITES = [
+  'create_project', 'delete_project', 'create_branch', 'delete_branch', 'reset_from_parent',
+  'run_sql_transaction', 'get_connection_string', 'prepare_database_migration', 'complete_database_migration',
+  'prepare_query_tuning', 'complete_query_tuning', 'create_postgres_database', 'create_postgres_role',
+  'create_snapshot', 'restore_snapshot', 'update_auth_config', 'create_auth_user', 'deploy_function',
+]
+
+const ADDRESS = neon.mcpUrl
+// The flow and the mount read `url`; the registry turns the module's `mcpUrl` into it.
+const mounted = () => ({ ...neon, url: ADDRESS })
+
+const tool = name => ({ name, description: `Neon ${name}`, inputSchema: { type: 'object', properties: {} } })
+const mcpAnswer = (id, value) => ({
+  status: 200,
+  ok: true,
+  headers: { get: () => 'application/json' },
+  text: async () => JSON.stringify({ jsonrpc: '2.0', id, result: value }),
+})
+const emptyAnswer = () => ({ status: 202, ok: true, headers: { get: () => null }, text: async () => '' })
+const unauthorized = () => ({ status: 401, ok: false, headers: { get: () => null }, text: async () => '' })
+const forbidden = () => ({ status: 403, ok: false, headers: { get: () => null }, text: async () => '' })
+
+// One fake Neon MCP server: initialize, tools/list and tools/call, recording what arrived.
+function neonServer({ listed = [...neon.readTools, ...SERVER_WRITES].map(tool), refuse = () => undefined } = {}) {
+  const calls = []
+  const fetch = async (url, init = {}) => {
+    assert.equal(String(url), ADDRESS)
+    const body = JSON.parse(init.body)
+    calls.push({ method: body.method, name: body.params?.name, args: body.params?.arguments, headers: init.headers })
+    const refused = refuse(body, calls.length)
+    if (refused !== undefined) return refused
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Neon MCP', version: '1' } })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: listed })
+    if (body.method === 'tools/call') {
+      return mcpAnswer(body.id, { content: [{ type: 'text', text: `ran ${body.params.arguments.sql ?? body.params.name}` }] })
+    }
+    throw new Error(`unexpected method ${body.method}`)
+  }
+  return { calls, fetch }
+}
+
+test('Neon is a read-only OAuth connector: read scope, read-only address, read tools only', () => {
+  assert.deepEqual([neon.id, neon.displayName, neon.mode], ['neon', 'Neon', 'oauth-mcp'])
+  const url = new URL(ADDRESS)
+  assert.equal(url.origin + url.pathname, 'https://mcp.neon.tech/mcp')
+  assert.equal(url.searchParams.get('readonly'), 'true')
+  assert.deepEqual(url.searchParams.getAll('category'), ['projects', 'branches', 'endpoints', 'schema', 'querying'])
+  assert.deepEqual(neon.oauth.scopes, ['read'])
+  assert.equal(neon.accountTool, 'list_organizations')
+  // Everything exposed is a tool Neon itself calls read-only; no write family is named.
+  for (const name of neon.readTools) assert.ok(SERVER_READ_ONLY.includes(name), name)
+  for (const name of SERVER_WRITES) assert.ok(!neon.readTools.includes(name), name)
+  assert.equal(neon.readTools.includes('run_sql'), true)
+})
+
+test('a configured Neon address cannot turn read-only off', () => {
+  const pinned = configure({ url: 'https://mcp.neon.tech/mcp?readonly=false&projectId=proj-1' })
+  const url = new URL(pinned.url)
+  assert.equal(url.searchParams.get('readonly'), 'true')
+  assert.equal(url.searchParams.get('projectId'), 'proj-1')
+
+  const scoped = new URL(configure({ url: neonUrl({ projectId: 'proj_2', roleName: 'app_reader' }) }).url)
+  assert.deepEqual(
+    [scoped.searchParams.get('readonly'), scoped.searchParams.get('projectId'), scoped.searchParams.get('roleName')],
+    ['true', 'proj_2', 'app_reader'],
+  )
+  // A pinned role takes the same read-only grant with it.
+  assert.equal(new URL(neonUrl({ roleName: 'app_reader' })).searchParams.get('roleName'), 'app_reader')
+  // A value Neon would reject is dropped rather than sent.
+  assert.equal(new URL(neonUrl({ roleName: 'drop table users;' })).searchParams.get('roleName'), null)
+  assert.throws(() => configure({ url: 'http://mcp.neon.tech/mcp' }), /plain https:\/\//)
+  assert.throws(() => configure({ url: 'https://user:pass@mcp.neon.tech/mcp' }), /plain https:\/\//)
+  assert.throws(() => configure({ url: 'mcp.neon.tech/mcp' }), /plain https:\/\//)
+  // The whitelist, the scope and the mode survive an override of their own.
+  const forced = configure({ url: ADDRESS, mode: 'read-tools', readTools: ['create_project'], oauth: { scopes: ['read', 'write'] } })
+  assert.deepEqual([forced.mode, forced.readTools, forced.oauth.scopes], ['oauth-mcp', neon.readTools, ['read']])
+})
+
+test('a Neon mount can register only the read whitelist, and run_sql answers', async () => {
+  const server = neonServer()
+  const client = new McpHttpClient(ADDRESS, 'access-1', { fetch: server.fetch })
+  await client.open()
+  const picked = neonTools(await client.listTools())
+  // The server lists its write tools too (a different grant, a proxy in front); none mounts.
+  assert.deepEqual(picked.map(entry => entry.name), neon.readTools)
+  assert.equal(picked.length, 16)
+  for (const name of SERVER_WRITES) assert.ok(!picked.some(entry => entry.name === name), name)
+
+  const answer = mcpResultText(await client.callTool('run_sql', { sql: 'select count(*) from users' }))
+  assert.equal(answer, 'ran select count(*) from users')
+  assert.deepEqual(server.calls.at(-1).args, { sql: 'select count(*) from users' })
+  assert.equal(server.calls.at(-1).headers.authorization, 'Bearer access-1')
+})
+
+test('a 401 on a mounted Neon tool refreshes the grant once and sends the call again', async () => {
+  let refused = true
+  const server = neonServer({
+    refuse: (body) => {
+      if (body.method !== 'initialize' || !refused) return undefined
+      refused = false
+      return unauthorized()
+    },
+  })
+  const refreshed = []
+  const client = new McpHttpClient(ADDRESS, 'old-token', {
+    fetch: server.fetch,
+    refresh: async () => {
+      refreshed.push('once')
+      return 'new-token'
+    },
+  })
+  await client.open()
+  assert.deepEqual(refreshed, ['once'])
+  assert.equal(server.calls.at(-1).headers.authorization, 'Bearer new-token')
+  // The refused session is not reused: the retry opened a fresh one.
+  assert.equal(server.calls.filter(call => call.method === 'initialize').length, 2)
+})
+
+test('a 403 is reported, and a refresh that cannot renew the grant asks for a reconnect', async () => {
+  const refusedAlways = neonServer({ refuse: () => forbidden() })
+  let refreshes = 0
+  const client = new McpHttpClient(ADDRESS, 'old-token', {
+    fetch: refusedAlways.fetch,
+    refresh: async () => {
+      refreshes += 1
+      return 'new-token'
+    },
+  })
+  await assert.rejects(client.open(), /answered 403/)
+  assert.equal(refreshes, 1)
+
+  const dead = new McpHttpClient(ADDRESS, 'old-token', {
+    fetch: neonServer({ refuse: () => unauthorized() }).fetch,
+    refresh: async () => { throw new OAuthError('The authorization expired; connect again', 'reconnect') },
+  })
+  await assert.rejects(dead.open(), error => error.code === 'oauth/reconnect' && /connect again/.test(error.message))
+})
+
+test('a Neon server that never answers is reported as unreachable, not as a dead grant', async () => {
+  const client = new McpHttpClient(ADDRESS, 'access-1', {
+    fetch: async () => {
+      throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })
+    },
+  })
+  await assert.rejects(client.open(), /Could not reach the MCP server: The operation was aborted due to timeout/)
+})
+
+test('a query the read-only server refuses reaches the model as a tool error', async () => {
+  const server = neonServer({
+    refuse: (body) => {
+      if (body.method !== 'tools/call') return undefined
+      return mcpAnswer(body.id, { isError: true, content: [{ type: 'text', text: 'cannot execute INSERT in a read-only transaction' }] })
+    },
+  })
+  const client = new McpHttpClient(ADDRESS, 'access-1', { fetch: server.fetch })
+  await client.open()
+  await assert.rejects(async () => mcpResultText(await client.callTool('run_sql', { sql: 'insert into users default values' })), /read-only transaction/)
+})
+
+test('Neon authorizes with the read-only address and the read scope only', async () => {
+  const oauth = fakeOAuthServer({
+    resource: ADDRESS,
+    issuer: 'https://mcp.neon.tech',
+    // Neon's metadata names the endpoint without the grant query, as Cloudflare's does.
+    declaredResource: 'https://mcp.neon.tech/mcp',
+    scopes: ['read', 'write'],
+    challengeScope: 'read write',
+  })
+  const credentials = fakeCredentials()
+  const webServer = fakeWebServer()
+  const ctx = fakeContext({ services: { credentials, webServer } })
+  const authorized = []
+  const flow = createOAuthFlow({
+    ctx,
+    connectorOf: () => mounted(),
+    request: oauth.fetch,
+    warn: () => {},
+    redact: text => text,
+    onAuthorized: id => { authorized.push(id) },
+  })
+
+  const started = await flow.start('neon', { origin: 'https://dsh.test' })
+  const authorizeUrl = new URL(started.authorizeUrl)
+  assert.equal(authorizeUrl.origin + authorizeUrl.pathname, oauth.metadata.authorization_endpoint)
+  assert.equal(authorizeUrl.searchParams.get('scope'), 'read')
+  assert.equal(authorizeUrl.searchParams.get('resource'), ADDRESS)
+  assert.equal(authorizeUrl.searchParams.get('redirect_uri'), 'https://dsh.test/oauth/ds-bot/neon')
+  assert.equal(authorizeUrl.searchParams.get('code_challenge_method'), 'S256')
+
+  const { res, done } = fakeResponse()
+  webServer.routes[0].handler({ method: 'GET', url: `${OAUTH_PREFIX}/neon?code=auth-code&state=${encodeURIComponent(authorizeUrl.searchParams.get('state'))}` }, res)
+  const page = await done
+  assert.equal(page.statusCode, 200, page.body)
+  assert.match(page.body, /Neon is connected/)
+  assert.deepEqual(authorized, ['neon'])
+
+  const grant = credentials.records.get('ds-bot/connector-neon').payload
+  assert.equal(grant.resource, ADDRESS)
+  assert.deepEqual(grant.scopes, ['read'])
+  assert.equal(new URLSearchParams(oauth.tokenRequests()[0].body).get('resource'), ADDRESS)
+})
+
+test('a Neon grant the provider will not refresh asks for a reconnect and is deleted', async () => {
+  const oauth = fakeOAuthServer({
+    resource: ADDRESS,
+    issuer: 'https://mcp.neon.tech',
+    declaredResource: 'https://mcp.neon.tech/mcp',
+    tokenHandler: () => ({
+      status: 400,
+      ok: false,
+      headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ error: 'invalid_grant' }),
+    }),
+  })
+  const credentials = fakeCredentials()
+  credentials.records.set('ds-bot/connector-neon', {
+    kind: 'grant',
+    payload: {
+      version: 1,
+      issuer: 'https://mcp.neon.tech',
+      resource: ADDRESS,
+      client: { id: 'client-1', tokenAuth: 'none', redirectUri: 'https://dsh.test/oauth/ds-bot/neon' },
+      tokens: { access: 'access-1', refresh: 'refresh-1', expiresAt: 1, tokenType: 'Bearer' },
+      scopes: ['read'],
+      authorizedAt: 1,
+    },
+  })
+  const ctx = fakeContext({ services: { credentials, webServer: fakeWebServer() } })
+  const flow = createOAuthFlow({ ctx, connectorOf: () => mounted(), request: oauth.fetch, warn: () => {}, redact: text => text })
+  await assert.rejects(flow.token('neon'), error => error.code === 'oauth/reconnect' && /connect again/.test(error.message))
+  assert.equal(credentials.records.has('ds-bot/connector-neon'), false)
+})
+
+test('the connected account is the organization list Neon answers', () => {
+  assert.equal(neonAccount({ organizations: [{ name: 'Acme' }] }), 'Acme')
+  assert.equal(neonAccount({ organizations: [{ name: 'Acme' }, { name: 'Labs' }] }), 'Acme and 1 more')
+  assert.equal(neonAccount([{ name: 'Acme' }]), 'Acme')
+  assert.equal(neonAccount({ email: 'dev@example.com' }), 'dev@example.com')
+  assert.equal(neonAccount({ organizations: [] }), undefined)
+  assert.equal(neonAccount(undefined), undefined)
+  assert.equal(neon.accountOf({ organizations: [{ name: 'Acme' }] }), 'Acme')
+  assert.deepEqual(neonTools(undefined), [])
+})
