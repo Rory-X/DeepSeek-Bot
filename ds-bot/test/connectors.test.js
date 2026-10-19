@@ -7,6 +7,7 @@ import { test } from 'node:test'
 import { apply } from '../index.js'
 import { signIn } from '../src/host/connectors.js'
 import { fakeContext } from './fake-ctx.js'
+import { fakeCredentials, fakeOAuthServer, fakeResponse, fakeWebServer } from './oauth-fakes.js'
 
 const fresh = () => `tok_${randomBytes(16).toString('hex')}`
 const answer = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
@@ -60,7 +61,7 @@ const teamHome = (state = TEAM) => {
 }
 
 // A loader that hands out a fake MCP client and records each mount.
-function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, secrets = [], state = TEAM } = {}) {
+function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, secrets = [], state = TEAM, services = {} } = {}) {
   const home = teamHome(state)
   if (secrets.length > 0) {
     writeFileSync(join(home, 'secrets.json'), JSON.stringify({
@@ -76,7 +77,7 @@ function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { a
     import: async name => { assert.equal(name, '@deepseek-ai/dsh-mcp-client'); return { default: plugin } },
     unwrapExports: exports => exports.default,
   }
-  const ctx = fakeContext({ services: { loader } })
+  const ctx = fakeContext({ services: { loader, ...services } })
   ctx.plugin = (given, config) => {
     assert.equal(given, plugin)
     const mount = { config, disposed: false }
@@ -116,8 +117,8 @@ function capture(ctx) {
 }
 
 // Calls the /api/bot route the way the client does.
-async function call(ctx, endpoint, payload) {
-  const response = await ctx.route.fetch(new Request('http://localhost/api/bot', { method: 'POST', body: JSON.stringify({ endpoint, payload }) }))
+async function call(ctx, endpoint, payload, headers = {}) {
+  const response = await ctx.route.fetch(new Request('http://localhost/api/bot', { method: 'POST', headers, body: JSON.stringify({ endpoint, payload }) }))
   return response.json()
 }
 
@@ -631,4 +632,118 @@ test('an unknown connector is refused', async (t) => {
   const result = await call(ctx, 'connector-connect', { id: 'nowhere', token: fresh() })
   assert.equal(result.ok, false)
   assert.match(result.error.message, /No such connector/)
+})
+
+// A connector in OAuth mode: no pasted token, one browser authorization, tools mounted from
+// the grant. The Vercel entry is put in `oauth-mcp` mode through its profile config, which
+// is the same override mechanism that names another server address.
+const oauthVercel = { mode: 'oauth-mcp', oauth: { scopes: ['user:read', 'account:read'] }, url: 'https://mcp.vercel.test/mcp', api: 'https://vercel.test' }
+
+test('an OAuth connector connects in the browser, mounts its read tools and refreshes a refused call once', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const oauth = fakeOAuthServer({ resource: 'https://mcp.vercel.test/mcp', issuer: 'https://mcp.vercel.test' })
+  const mcpCalls = []
+  let refused = false
+  globalThis.fetch = async (url, init = {}) => {
+    const address = String(url)
+    if (address !== 'https://mcp.vercel.test/mcp' || init.headers?.authorization === undefined) return oauth.fetch(url, init)
+    const body = JSON.parse(init.body)
+    mcpCalls.push({ method: body.method, authorization: init.headers.authorization })
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Fake', version: '1' } }, { 'mcp-session-id': 'session-1' })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: VERCEL_TOOLS })
+    if (body.method === 'tools/call') {
+      if (!refused) {
+        refused = true
+        return { status: 401, ok: false, headers: { get: () => null }, text: async () => '' }
+      }
+      return mcpAnswer(body.id, { content: [{ type: 'text', text: `called ${body.params.name} with ${init.headers.authorization}` }] })
+    }
+    throw new Error(`unexpected method ${body.method}`)
+  }
+  const credentials = fakeCredentials()
+  const webServer = fakeWebServer()
+  const { ctx, home, registered, disposed } = setup({ vercel: oauthVercel, services: { credentials, webServer } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  // Before the authorization the card is off, and it announces OAuth instead of a token form.
+  const before = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'vercel')
+  assert.deepEqual([before.state, before.oauth, before.account], ['off', true, null])
+  assert.equal((await call(ctx, 'connector-connect', { id: 'vercel', token: fresh() })).error.message, 'Vercel connects with OAuth, not a token')
+
+  // Starting returns the provider URL; the browser follows it back to the callback route.
+  const started = await call(ctx, 'connector-oauth-start', { id: 'vercel' }, { origin: 'https://dsh.test' })
+  assert.equal(started.ok, true, JSON.stringify(started))
+  const authorizeUrl = new URL(started.value.authorizeUrl)
+  assert.equal(authorizeUrl.searchParams.get('redirect_uri'), 'https://dsh.test/oauth/ds-bot/vercel')
+  assert.equal(authorizeUrl.searchParams.get('scope'), 'user:read account:read')
+  const state = authorizeUrl.searchParams.get('state')
+  const { res, done } = fakeResponse()
+  webServer.routes[0].handler({ method: 'GET', url: `/oauth/ds-bot/vercel?code=auth-code&state=${encodeURIComponent(state)}` }, res)
+  const page = await done
+  assert.equal(page.statusCode, 200)
+  assert.match(page.body, /Vercel is connected/)
+
+  await until(async () => (registered.includes('vercel_list_projects') ? true : undefined), 'the OAuth mount')
+  // Only the read whitelist is mounted: the action tools need the switch, which is off.
+  assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
+  const ready = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'vercel')
+  assert.deepEqual([ready.state, ready.oauth, ready.account], ['ready', true, null])
+  assert.equal(credentials.records.get('ds-bot/connector-vercel').payload.tokens.access, 'access-1')
+  // The grant stays out of the team file and every view.
+  assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes('access-1'))
+  assert.ok(!JSON.stringify(await call(ctx, 'state', {})).includes('access-1'))
+
+  // A refused tool call refreshes the grant once and retries with the new token.
+  const output = await ctx.registeredTools.get('vercel_list_projects').execute({})
+  assert.match(output, /called list_projects with Bearer access-2/)
+  assert.equal(oauth.tokenRequests().filter(request => new URLSearchParams(request.body).get('grant_type') === 'refresh_token').length, 1)
+  assert.equal(mcpCalls.filter(entry => entry.method === 'tools/call').length, 2)
+
+  // Disconnecting revokes the grant, deletes it and unmounts the tools.
+  const disconnected = await call(ctx, 'connector-disconnect', { id: 'vercel' })
+  assert.equal(disconnected.ok, true)
+  assert.equal(disconnected.value.find(connector => connector.id === 'vercel').state, 'off')
+  assert.equal(credentials.records.has('ds-bot/connector-vercel'), false)
+  await until(async () => (disposed.includes('vercel_list_projects') ? true : undefined), 'the unmount')
+})
+
+test('an OAuth connector mounts by itself from a saved grant', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const oauth = fakeOAuthServer({ resource: 'https://mcp.vercel.test/mcp', issuer: 'https://mcp.vercel.test' })
+  globalThis.fetch = async (url, init = {}) => {
+    const address = String(url)
+    if (address !== 'https://mcp.vercel.test/mcp' || init.headers?.authorization === undefined) return oauth.fetch(url, init)
+    const body = JSON.parse(init.body)
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Fake', version: '1' } })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: VERCEL_TOOLS })
+    throw new Error(`unexpected method ${body.method}`)
+  }
+  // The grant a previous run's callback would have written, in DSH's credential store.
+  const credentials = fakeCredentials()
+  credentials.records.set('ds-bot/connector-vercel', {
+    kind: 'grant',
+    payload: {
+      version: 1,
+      issuer: 'https://mcp.vercel.test',
+      resource: 'https://mcp.vercel.test/mcp',
+      client: { id: 'client-1', tokenAuth: 'none', redirectUri: 'https://dsh.test/oauth/ds-bot/vercel' },
+      tokens: { access: 'access-1', refresh: 'refresh-1', expiresAt: Date.now() + 3_600_000, tokenType: 'Bearer' },
+      scopes: ['user:read', 'account:read'],
+      authorizedAt: 1,
+    },
+  })
+  const saved = { ...TEAM, connectors: { vercel: { authorizedAt: 1 } } }
+  const { ctx, home, registered } = setup({ vercel: oauthVercel, state: saved, services: { credentials, webServer: fakeWebServer() } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const ready = await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'vercel')
+    return item?.state === 'ready' ? item : undefined
+  }, 'the saved grant to mount')
+  assert.deepEqual([ready.oauth, ready.account], [true, null])
+  assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
 })
