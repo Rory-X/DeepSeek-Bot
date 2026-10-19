@@ -31,7 +31,11 @@ if [ -z "${DSH_HARNESS:-}" ]; then
   [ -d "$DSH_HARNESS" ] || DSH_HARNESS="$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)")/deepseek-harness"
 fi
 
-alive() { [ -f "$HOME_DIR/$1.pid" ] && kill -0 "-$(cat "$HOME_DIR/$1.pid")" 2>/dev/null; }
+alive() {
+  [ -f "$HOME_DIR/$1.pid" ] || return 1
+  pid=$(cat "$HOME_DIR/$1.pid")
+  kill -0 "-$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null
+}
 
 # Each process runs in its own session (setsid), so its pid is also its process group, which
 # outlives it: pnpm exits before the dsh it started. dash's kill takes no `--`.
@@ -39,7 +43,7 @@ stop_one() {
   file="$HOME_DIR/$1.pid"
   [ -f "$file" ] || return 0
   pid=$(cat "$file")
-  kill -TERM "-$pid" 2>/dev/null || true
+  kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
   i=0
   while kill -0 "-$pid" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
   kill -KILL "-$pid" 2>/dev/null || true
@@ -79,20 +83,41 @@ write_overlay() {
   fi
 }
 
+# Start one command in a session of its own and record the pid of that session's leader. The pid
+# of the wrapper is not the program's pid — setsid forks when it has to — while alive/stop_one
+# speak process groups, so the file has to name the group the program runs in. `sh -c` writes its
+# own $$ first and then execs the program, which keeps that pid for the life of the process.
+start_detached() { # <pid file> <log> <dir> <command...>
+  pidfile=$1
+  log=$2
+  dir=$3
+  shift 3
+  setsid sh -c 'echo $$ >"$1"; cd "$2" || exit 1; shift 2; exec "$@"' sh "$pidfile" "$dir" "$@" \
+    </dev/null >"$log" 2>&1 &
+}
+
 start() {
   mkdir -p "$HOME_DIR"
   ensure_profile
   write_overlay
   if ! alive mock; then
-    (cd "$PLUGIN" && MOCK_PORT="$MOCK_PORT" MOCK_DELAY_MS="${MOCK_DELAY_MS:-300}" MOCK_LOG="$HOME_DIR/mock.jsonl" \
-      setsid node dev/mock-llm.mjs "$HOME_DIR" </dev/null >"$HOME_DIR/mock.out" 2>&1 & echo $! >"$HOME_DIR/mock.pid")
+    MOCK_PORT="$MOCK_PORT" MOCK_DELAY_MS="${MOCK_DELAY_MS:-300}" MOCK_LOG="$HOME_DIR/mock.jsonl" \
+      start_detached "$HOME_DIR/mock.pid" "$HOME_DIR/mock.out" "$PLUGIN" node dev/mock-llm.mjs "$HOME_DIR"
   fi
   if ! alive web; then
     log="$HOME_DIR/web.log"
     rm -f "$log"
-    (cd "$DSH_HARNESS" && DSH_HOME="$HOME_DIR" DEEPSEEK_BASE_URL="http://127.0.0.1:$MOCK_PORT/v1" DEEPSEEK_API_KEY=mock-key \
-      setsid pnpm -s dsh --profile web --patch apps/web/tests/pin-browse-picker.overlay.yml --patch "$HOME_DIR/bench.patch.yml" \
-      --no-open --port "$WEB_PORT" </dev/null >"$log" 2>&1 & echo $! >"$HOME_DIR/web.pid")
+    # The browse-picker pin is a file of the harness *source* checkout; a DSH installed from
+    # npm has no apps/ directory, so it is only passed when it is there.
+    set -- --profile web
+    [ -f "$DSH_HARNESS/apps/web/tests/pin-browse-picker.overlay.yml" ] && \
+      set -- "$@" --patch apps/web/tests/pin-browse-picker.overlay.yml
+    set -- "$@" --patch "$HOME_DIR/bench.patch.yml" --no-open --port "$WEB_PORT"
+    DSH_HOME="$HOME_DIR" DEEPSEEK_BASE_URL="http://127.0.0.1:$MOCK_PORT/v1" DEEPSEEK_API_KEY=mock-key \
+      start_detached "$HOME_DIR/web.pid" "$log" "$DSH_HARNESS" pnpm -s dsh "$@"
+    # The pid file is written by the child; give it a moment before the loop treats a missing
+    # file as a dead process.
+    sleep 1
     i=0
     until grep -q "dsh web: http" "$log" 2>/dev/null; do
       i=$((i + 1))
