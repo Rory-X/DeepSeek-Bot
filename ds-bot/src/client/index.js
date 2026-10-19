@@ -928,11 +928,11 @@ export function apply(ctx) {
     const quote = { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, target: target instanceof Element ? target : null, token: Date.now(), inserted: false }
     ui.set(state => ({ ...state, quotes: { ...state.quotes, [sessionId]: quote } }))
   }
-  actions.quoteInsert = (token, span) => {
+  actions.quoteInsert = (token, span, quiet = false) => {
     const quote = quoteOf(token)
-    if (quote === undefined || span === undefined) return
+    if (quote === undefined || span === undefined) return false
     const facade = quoteFacade(quote.sessionId)
-    if (facade === undefined) return
+    if (facade === undefined) return false
     let inserted = false
     try {
       inserted = facade.insertReference({ source: QUOTE_SOURCE, ref: quote.ref, label: quote.label, appearance: 'session', clipboardText: quote.clipboardText }, span) === true
@@ -940,11 +940,14 @@ export function apply(ctx) {
       actions.reportError(error, 'quote-reference')
     }
     if (!inserted) {
-      facade.notify?.('error', t('Could not quote this message'))
-      setQuote(token, () => null)
-      return
+      if (!quiet) {
+        facade.notify?.('error', t('Could not quote this message'))
+        setQuote(token, () => null)
+      }
+      return false
     }
     setQuote(token, entry => ({ ...entry, inserted: true }))
+    return true
   }
   // Cancel takes the quoted line out of the draft, keeping whatever the reader typed around it.
   actions.quoteCancel = (token) => {
@@ -961,7 +964,29 @@ export function apply(ctx) {
     setQuote(token, () => null)
   }
   // The bar asks for this when the draft it quoted in no longer holds the quote.
-  actions.clearQuote = token => setQuote(token, () => null);
+  actions.clearQuote = token => setQuote(token, () => null)
+  // A restored draft is plain text: these let the composer rebuild the chip and put the
+  // reader's own words back after it, or fall back to the text when the chip is refused.
+  actions.quoteDraft = (sessionId) => {
+    const facade = quoteFacade(sessionId)
+    if (facade === undefined) return null
+    const state = facade.state.getSnapshot()
+    return { draft: state.draft, occurrences: state.occurrences ?? [] }
+  }
+  actions.quoteTakeText = (sessionId, clipboardText) => {
+    const facade = quoteFacade(sessionId)
+    if (facade === undefined) return null
+    const draft = facade.state.getSnapshot().draft
+    const at = draft.indexOf(clipboardText)
+    if (at < 0) return null
+    const rest = `${draft.slice(0, at)}${draft.slice(at + clipboardText.length)}`.replace(/^\s+/, '')
+    facade.setDraft('')
+    return rest
+  }
+  actions.quotePutText = (sessionId, text) => {
+    const facade = quoteFacade(sessionId)
+    if (facade !== undefined) facade.setDraft(text)
+  };
   actions.canReferenceChat = () => atMenu !== null
   actions.referenceChat = (sessionId, span) => {
     const controller = atMenu?.controllerOf(sessionId)

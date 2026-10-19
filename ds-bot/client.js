@@ -4033,6 +4033,28 @@ function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, ac
     if (quote === null || quote.inserted !== false || inputActions === void 0) return;
     actions.quoteInsert(quote.token, inputActions.captureInsertion());
   }, [quote?.token, quote?.inserted]);
+  const rebuilt = (0, import_react4.useRef)(null);
+  (0, import_react4.useEffect)(() => {
+    if (quote === null || quote.inserted !== true || inputActions === void 0) return void 0;
+    if (rebuilt.current === quote.token) return void 0;
+    const state = actions.quoteDraft(quote.sessionId);
+    if (state === null) return void 0;
+    if ((state.occurrences ?? []).some((row) => row.source === QUOTE_SOURCE)) return void 0;
+    if (!state.draft.includes(quote.clipboardText)) return void 0;
+    const timer = setTimeout(() => {
+      rebuilt.current = quote.token;
+      const rest = actions.quoteTakeText(quote.sessionId, quote.clipboardText);
+      if (rest === null) return;
+      const span = inputActions.captureInsertion();
+      if (actions.quoteInsert(quote.token, span, true) !== true) {
+        actions.quotePutText(quote.sessionId, `${quote.clipboardText}${rest}`);
+        return;
+      }
+      const after = inputActions.captureInsertion();
+      if (rest !== "") inputActions.insertText(rest, after);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [draft, quote?.token, quote?.inserted]);
   const draftNow = (0, import_react4.useRef)(draft);
   draftNow.current = draft;
   (0, import_react4.useEffect)(() => {
@@ -15842,11 +15864,11 @@ function apply(ctx) {
     const quote = { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, target: target instanceof Element ? target : null, token: Date.now(), inserted: false };
     ui2.set((state) => ({ ...state, quotes: { ...state.quotes, [sessionId]: quote } }));
   };
-  actions.quoteInsert = (token, span) => {
+  actions.quoteInsert = (token, span, quiet = false) => {
     const quote = quoteOf(token);
-    if (quote === void 0 || span === void 0) return;
+    if (quote === void 0 || span === void 0) return false;
     const facade = quoteFacade(quote.sessionId);
-    if (facade === void 0) return;
+    if (facade === void 0) return false;
     let inserted = false;
     try {
       inserted = facade.insertReference({ source: QUOTE_SOURCE, ref: quote.ref, label: quote.label, appearance: "session", clipboardText: quote.clipboardText }, span) === true;
@@ -15854,11 +15876,14 @@ function apply(ctx) {
       actions.reportError(error, "quote-reference");
     }
     if (!inserted) {
-      facade.notify?.("error", t("Could not quote this message"));
-      setQuote(token, () => null);
-      return;
+      if (!quiet) {
+        facade.notify?.("error", t("Could not quote this message"));
+        setQuote(token, () => null);
+      }
+      return false;
     }
     setQuote(token, (entry) => ({ ...entry, inserted: true }));
+    return true;
   };
   actions.quoteCancel = (token) => {
     const quote = quoteOf(token);
@@ -15874,6 +15899,26 @@ function apply(ctx) {
     setQuote(token, () => null);
   };
   actions.clearQuote = (token) => setQuote(token, () => null);
+  actions.quoteDraft = (sessionId) => {
+    const facade = quoteFacade(sessionId);
+    if (facade === void 0) return null;
+    const state = facade.state.getSnapshot();
+    return { draft: state.draft, occurrences: state.occurrences ?? [] };
+  };
+  actions.quoteTakeText = (sessionId, clipboardText) => {
+    const facade = quoteFacade(sessionId);
+    if (facade === void 0) return null;
+    const draft = facade.state.getSnapshot().draft;
+    const at = draft.indexOf(clipboardText);
+    if (at < 0) return null;
+    const rest = `${draft.slice(0, at)}${draft.slice(at + clipboardText.length)}`.replace(/^\s+/, "");
+    facade.setDraft("");
+    return rest;
+  };
+  actions.quotePutText = (sessionId, text) => {
+    const facade = quoteFacade(sessionId);
+    if (facade !== void 0) facade.setDraft(text);
+  };
   actions.canReferenceChat = () => atMenu !== null;
   actions.referenceChat = (sessionId, span) => {
     const controller = atMenu?.controllerOf(sessionId);

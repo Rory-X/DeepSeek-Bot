@@ -136,6 +136,31 @@ export function ComposerQuote({ sessionId, inputActions, useInput, useRoster, us
     if (quote === null || quote.inserted !== false || inputActions === undefined) return
     actions.quoteInsert(quote.token, inputActions.captureInsertion())
   }, [quote?.token, quote?.inserted])
+  // The shell restores a draft as plain text. When this composer comes back to a Session whose
+  // reply is still pending, the quoted line is turned back into the chip once, and the reader's
+  // own words stay after it; a refused chip keeps the text as it was.
+  const rebuilt = useRef(null)
+  useEffect(() => {
+    if (quote === null || quote.inserted !== true || inputActions === undefined) return undefined
+    if (rebuilt.current === quote.token) return undefined
+    const state = actions.quoteDraft(quote.sessionId)
+    if (state === null) return undefined
+    if ((state.occurrences ?? []).some(row => row.source === QUOTE_SOURCE)) return undefined
+    if (!state.draft.includes(quote.clipboardText)) return undefined
+    const timer = setTimeout(() => {
+      rebuilt.current = quote.token
+      const rest = actions.quoteTakeText(quote.sessionId, quote.clipboardText)
+      if (rest === null) return
+      const span = inputActions.captureInsertion()
+      if (actions.quoteInsert(quote.token, span, true) !== true) {
+        actions.quotePutText(quote.sessionId, `${quote.clipboardText}${rest}`)
+        return
+      }
+      const after = inputActions.captureInsertion()
+      if (rest !== '') inputActions.insertText(rest, after)
+    }, 220)
+    return () => clearTimeout(timer)
+  }, [draft, quote?.token, quote?.inserted])
   // The bar leaves only when the draft settled without the quote while this composer watched
   // it — sent, or the line deleted. A Session switch unmounts the bar before that, and the
   // draft the shell restores on the way back still holds the quote.
