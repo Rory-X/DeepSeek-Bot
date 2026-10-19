@@ -12,9 +12,20 @@ export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 
 export const VercelMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'currentColor', 'aria-hidden': true },
   h('path', { d: 'M10 2.8 18.6 17.6H1.4z' }))
 
+// The OAuth services carry a plain glyph of our own drawing — a cloud, a bracketed N, a hash —
+// rather than any brand artwork.
+export const CloudflareMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', 'aria-hidden': true },
+  h('path', { d: 'M6.2 15h7.4a3.2 3.2 0 0 0 .4-6.4 4.6 4.6 0 0 0-8.8-1.1A3.7 3.7 0 0 0 6.2 15z' }))
+
+export const NotionMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('rect', { x: 3.2, y: 3.2, width: 13.6, height: 13.6, rx: 2.6 }), h('path', { d: 'M7.2 13.2V6.8l5.6 6.4V6.8' }))
+
+export const SlackMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', 'aria-hidden': true },
+  h('path', { d: 'M7.6 4.4v11.2M12.4 4.4v11.2M4.4 7.6h11.2M4.4 12.4h11.2' }))
+
 // Everything the connector cards need per service: the mark, what it is for, and where its
 // token comes from. A service without an entry still draws its row, just without a mark.
-const MARKS = { github: GitHubMark, vercel: VercelMark }
+const MARKS = { github: GitHubMark, vercel: VercelMark, cloudflare: CloudflareMark, notion: NotionMark, slack: SlackMark }
 const ABOUT = {
   github: () => t('Repositories, issues, and pull requests'),
   vercel: () => t('Projects, deployments, and logs'),
@@ -50,10 +61,12 @@ export function ConnectorOption({ title, note, checked, disabled = false, descri
 }
 
 function statusText(connector) {
-  if (connector.state === 'connecting') return t('Connecting…')
+  if (connector.state === 'connecting') return connector.oauth === true ? t('Waiting for the browser…') : t('Connecting…')
+  // The host writes an OAuth failure as a sentence; it is shown as it came.
+  if (connector.state === 'error' && connector.oauth === true) return connector.error ?? t('Could not connect')
   if (connector.state === 'error') return t('Could not connect: {error}', { error: connector.error ?? '' })
   if (connector.state === 'ready') return connector.account ? t('Connected as {account}', { account: connector.account }) : t('Connected')
-  return ABOUT[connector.id]?.() ?? ''
+  return ABOUT[connector.id]?.() ?? (connector.oauth === true ? t('Not connected') : '')
 }
 
 function ConnectorRow({ connector, actions }) {
@@ -61,6 +74,52 @@ function ConnectorRow({ connector, actions }) {
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  // OAuth connectors: the browser tab that finishes the sign-in, and the app fields a
+  // service without dynamic registration asks for first.
+  const oauth = connector.oauth === true
+  const manual = oauth && connector.manualClient === true
+  const configured = typeof connector.clientId === 'string' && connector.clientId !== ''
+  const [appForm, setAppForm] = useState(false)
+  const [appId, setAppId] = useState('')
+  const [appSecret, setAppSecret] = useState('')
+  const [authorizeUrl, setAuthorizeUrl] = useState(null)
+  const startAuthorization = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    // Opened before the request so a popup blocker sees the reader's own press.
+    const tab = window.open('about:blank', '_blank')
+    try {
+      const result = await actions.connectorOauthStart(connector.id)
+      const url = typeof result?.authorizeUrl === 'string' ? result.authorizeUrl : ''
+      if (url === '') throw new Error(t('The authorization page could not be opened'))
+      setAuthorizeUrl(url)
+      if (tab !== null) {
+        try { tab.location.href = url } catch { /* the link below stays the way in */ }
+        tab.focus?.()
+      }
+    } catch (failure) {
+      try { tab?.close?.() } catch { /* a blocked or closed tab needs nothing */ }
+      setError(failure?.message ?? String(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const saveApp = async () => {
+    if (busy || appId.trim() === '' || appSecret.trim() === '') return
+    setBusy(true)
+    setError(null)
+    try {
+      await actions.connectorOauthApp(connector.id, appId.trim(), appSecret)
+      setAppSecret('')
+      setAppForm(false)
+      await startAuthorization()
+    } catch (failure) {
+      setError(failure?.message ?? String(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
   const run = (task, after) => {
     setBusy(true)
     setError(null)
@@ -105,10 +164,21 @@ function ConnectorRow({ connector, actions }) {
         }, mark, text, h('span', { className: 'bt-connector-chevron', 'aria-hidden': true }, h(ChevronRightIcon)))
         : h('div', { className: 'bt-connector-main' }, mark, text),
       h('span', { className: 'bt-connector-actions' },
-        connector.state === 'error' ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorRetry(connector.id)) } }, t('Try again')) : null,
-        on
+        connector.state === 'error' && !oauth ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorRetry(connector.id)) } }, t('Try again')) : null,
+        connector.state === 'error' && oauth ? h('button', {
+          type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy,
+          onClick: (event) => { event.stopPropagation(); void startAuthorization() },
+        }, t('Connect again'))
+          : on && connector.state !== 'connecting'
           ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(connector.id)) } }, t('Disconnect'))
-          : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: (event) => { event.stopPropagation(); setForm(true) } }, t('Connect')))),
+          : connector.state === 'connecting'
+            ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
+            : oauth
+              ? (manual && !configured && !appForm ? null : h('button', {
+                type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy,
+                onClick: (event) => { event.stopPropagation(); void startAuthorization() },
+              }, connector.state === 'error' ? t('Connect again') : t('Connect')))
+              : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: (event) => { event.stopPropagation(); setForm(true) } }, t('Connect')))),
     hasOptions && details
       ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
         toolboxOffered
@@ -139,12 +209,32 @@ function ConnectorRow({ connector, actions }) {
               : null)
           : null)
       : null,
-    !on && form ? h('div', { className: 'bt-connector-form' },
+    !oauth && !on && form ? h('div', { className: 'bt-connector-form' },
       h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),
       h('div', { className: 'bt-connector-form-row' },
         TOKEN_URLS[connector.id] ? h('a', { className: 'bt-connector-link', href: TOKEN_URLS[connector.id], target: '_blank', rel: 'noopener noreferrer' }, tokenCreate(connector.id)) : null,
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => { setForm(false); setToken(''); setError(null) } }, t('Cancel')),
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || token.trim() === '', onClick: connect }, busy ? t('Connecting…') : t('Connect')))) : null,
+    // Slack has no dynamic registration: its app id and secret are typed here first, with the
+    // redirect URL the app has to carry.
+    manual && !on && (!configured || appForm) ? h('div', { className: 'bt-connector-form' },
+      h('label', { className: 'bt-q-field' }, h('input', {
+        className: 'bt-connector-input', value: appId, placeholder: t('Client ID'), 'aria-label': t('Client ID'),
+        autoComplete: 'off', spellCheck: false,
+        onChange: (event) => setAppId(event.target.value),
+        onKeyDown: (event) => { if (event.key === 'Enter') void saveApp() },
+      })),
+      h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: appSecret, onChange: setAppSecret, onEnter: () => void saveApp(), label: t('Client secret') })),
+      h('div', { className: 'bt-connector-hint' }, t('In the app settings, set the redirect URL to {url}', { url: `${location.origin}/oauth/ds-bot/slack` })),
+      h('div', { className: 'bt-connector-form-row' },
+        configured ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => { setAppForm(false); setAppSecret('') } }, t('Cancel')) : null,
+        h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || appId.trim() === '' || appSecret.trim() === '', onClick: () => void saveApp() }, busy ? t('Connecting…') : t('Save and connect'))))
+      : null,
+    // A tab the browser refused to open still has a way in.
+    oauth && !on && authorizeUrl !== null && connector.state !== 'connecting' ? h('div', { className: 'bt-connector-form-row' },
+      h('a', { className: 'bt-connector-link', href: authorizeUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Open the authorization page'))) : null,
+    manual && configured && !on && !appForm ? h('div', { className: 'bt-connector-form-row' },
+      h('button', { type: 'button', className: 'bt-connector-link bt-connector-link-btn', onClick: () => { setAppForm(true); setAppId(connector.clientId ?? '') } }, t('Use a different app'))) : null,
     error ? h('div', { className: 'bt-connector-error', role: 'alert' }, error) : null)
 }
 
