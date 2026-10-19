@@ -73,13 +73,49 @@ function quotedBot(quote, roster) {
     ?? roster.bots.find(bot => bot.name.toLowerCase() === quote.name.toLowerCase())
 }
 
+// How much of the quoted excerpt identifies its message when the card is pressed.
+const QUOTE_MATCH_CHARS = 40
+const squeeze = text => String(text ?? '').replace(/\s+/g, ' ').trim()
+
+// The message a quote card quotes: the sent bubble keeps only the text, so the card walks the
+// transcript backwards from its own message and takes the last one that carries the excerpt.
+function quotedSource(card) {
+  const here = card.closest('.bt-umsg, .bt-msg, .bt-urow')
+  if (here === null) return null
+  const rows = [...document.querySelectorAll('.bt-umsg, .bt-msg, .bt-urow')]
+  const at = rows.indexOf(here)
+  if (at < 0) return null
+  const needle = squeeze(card.querySelector('.bt-quote-text')?.textContent).slice(0, QUOTE_MATCH_CHARS)
+  if (needle === '') return null
+  for (let index = at - 1; index >= 0; index -= 1) {
+    if (squeeze(rows[index].innerText).includes(needle)) return rows[index]
+  }
+  return null
+}
+
 export function QuoteCard({ quote, roster }) {
   const bot = quotedBot(quote, roster)
-  return h('div', { className: 'bt-quote', 'data-compact': bot ? undefined : true },
-    bot ? h('div', { className: 'bt-quote-who' },
-      h(BotMark, { bot, size: 16 }),
-      h('span', { className: 'bt-quote-name', style: { color: inkText(colorOf(bot)) } }, bot.name)) : null,
-    h('div', { className: 'bt-quote-text' }, quote.text))
+  const card = useRef(null)
+  // Pressing the card finds the message it quotes, scrolls it into view and flashes it once.
+  const jump = (event) => {
+    event.stopPropagation()
+    const target = card.current === null ? null : quotedSource(card.current)
+    if (target === null) return
+    target.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' })
+    target.classList.add('bt-quote-target')
+    setTimeout(() => target.classList.remove('bt-quote-target'), 1200)
+  }
+  return h('div', {
+    ref: card, className: 'bt-quote', role: 'button', tabIndex: 0,
+    'aria-label': t('Go to the quoted message'), title: t('Go to the quoted message'),
+    'data-compact': bot ? undefined : true,
+    onClick: jump,
+    onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); jump(event) } },
+  },
+  bot ? h('div', { className: 'bt-quote-who' },
+    h(BotMark, { bot, size: 16 }),
+    h('span', { className: 'bt-quote-name', style: { color: inkText(colorOf(bot)) } }, bot.name)) : null,
+  h('div', { className: 'bt-quote-text' }, quote.text))
 }
 
 // The bar above the composer: who the reply answers, the quoted line, and a way out. It

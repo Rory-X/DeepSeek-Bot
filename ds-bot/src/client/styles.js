@@ -1191,6 +1191,12 @@ div:has(> nav [class*="_marks"]){display:none!important}
 /* The message a quote points at flashes once when the quote bar is pressed. */
 @keyframes bt-quote-target{from{background-color:color-mix(in srgb,var(--bt-accent) 18%,transparent)}to{background-color:transparent}}
 .bt-quote-target{border-radius:18px;animation:bt-quote-target 1.2s ease-out}
+/* A quote card is a link back to its message: it points, it answers a hover, and its text can
+   still be selected and copied. */
+.bt-quote[role=button]{cursor:pointer;transition:background-color .12s ease}
+.bt-quote[role=button]:hover{background:var(--bt-active)}
+.bt-quote[role=button]:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-ubody .bt-quote[role=button]:hover{background:color-mix(in srgb,var(--bt-user-ink) 22%,transparent)}
 @media (prefers-reduced-motion:reduce){.bt-quote-target{animation:none;background-color:color-mix(in srgb,var(--bt-accent) 12%,transparent)}}
 .bt-uimages{display:block;font-size:12px;opacity:.7}
 .bt-earlier .bt-event{margin:4px 0}

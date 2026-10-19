@@ -3538,6 +3538,12 @@ div:has(> nav [class*="_marks"]){display:none!important}
 /* The message a quote points at flashes once when the quote bar is pressed. */
 @keyframes bt-quote-target{from{background-color:color-mix(in srgb,var(--bt-accent) 18%,transparent)}to{background-color:transparent}}
 .bt-quote-target{border-radius:18px;animation:bt-quote-target 1.2s ease-out}
+/* A quote card is a link back to its message: it points, it answers a hover, and its text can
+   still be selected and copied. */
+.bt-quote[role=button]{cursor:pointer;transition:background-color .12s ease}
+.bt-quote[role=button]:hover{background:var(--bt-active)}
+.bt-quote[role=button]:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-ubody .bt-quote[role=button]:hover{background:color-mix(in srgb,var(--bt-user-ink) 22%,transparent)}
 @media (prefers-reduced-motion:reduce){.bt-quote-target{animation:none;background-color:color-mix(in srgb,var(--bt-accent) 12%,transparent)}}
 .bt-uimages{display:block;font-size:12px;opacity:.7}
 .bt-earlier .bt-event{margin:4px 0}
@@ -3962,11 +3968,50 @@ function quotedBot(quote, roster) {
   if (quote.name === null || quote.name === "") return void 0;
   return roster.byId[quote.name] ?? roster.bots.find((bot) => bot.name === quote.name) ?? roster.bots.find((bot) => bot.name.toLowerCase() === quote.name.toLowerCase());
 }
+var QUOTE_MATCH_CHARS = 40;
+var squeeze = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+function quotedSource(card) {
+  const here = card.closest(".bt-umsg, .bt-msg, .bt-urow");
+  if (here === null) return null;
+  const rows = [...document.querySelectorAll(".bt-umsg, .bt-msg, .bt-urow")];
+  const at = rows.indexOf(here);
+  if (at < 0) return null;
+  const needle = squeeze(card.querySelector(".bt-quote-text")?.textContent).slice(0, QUOTE_MATCH_CHARS);
+  if (needle === "") return null;
+  for (let index = at - 1; index >= 0; index -= 1) {
+    if (squeeze(rows[index].innerText).includes(needle)) return rows[index];
+  }
+  return null;
+}
 function QuoteCard({ quote, roster }) {
   const bot = quotedBot(quote, roster);
+  const card = (0, import_react4.useRef)(null);
+  const jump = (event) => {
+    event.stopPropagation();
+    const target = card.current === null ? null : quotedSource(card.current);
+    if (target === null) return;
+    target.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+    target.classList.add("bt-quote-target");
+    setTimeout(() => target.classList.remove("bt-quote-target"), 1200);
+  };
   return (0, import_react4.createElement)(
     "div",
-    { className: "bt-quote", "data-compact": bot ? void 0 : true },
+    {
+      ref: card,
+      className: "bt-quote",
+      role: "button",
+      tabIndex: 0,
+      "aria-label": t("Go to the quoted message"),
+      title: t("Go to the quoted message"),
+      "data-compact": bot ? void 0 : true,
+      onClick: jump,
+      onKeyDown: (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          jump(event);
+        }
+      }
+    },
     bot ? (0, import_react4.createElement)(
       "div",
       { className: "bt-quote-who" },
