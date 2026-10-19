@@ -16,8 +16,9 @@ const TEAM = {
   },
   rooms: {},
   exchanges: [],
-  // Chief's turn 7 answers another Bot, so the chat does not show it.
+  // A turn with no work of its own (the acknowledgement of being stopped) stays hidden.
   exchangeTurns: { m1c: [7] },
+  exchangeTurnsCleared: true,
   questions: {},
 }
 

@@ -59,15 +59,24 @@ async function start() {
 
 const text = value => [{ type: 'text', text: value }]
 
-test('a card asked in a hidden Bot-to-Bot turn goes to the dock, without its call', async (t) => {
+test('a card asked in a hidden turn goes to the dock, without its call', async (t) => {
+  const { emit, ask, questions, stop } = await start()
+  t.after(stop)
+  emit('writer', 'turn/start', { turn: 1 })
+  emit('writer', 'user/message', { content: text('[Stopped by Chief]\nwhy'), source: { kind: 'bot', role: 'stopped', senderSessionId: 'chief', senderName: 'Chief', exchangeId: 'x1', hop: 0 } })
+  await ask('writer', 'call-1')
+  const asked = (await questions()).writer
+  assert.equal(asked.question, 'Which name?')
+  assert.equal(asked.callId, undefined)
+})
+
+test('a card asked in a turn that answers another Bot stays at its call', async (t) => {
   const { emit, ask, questions, stop } = await start()
   t.after(stop)
   emit('writer', 'turn/start', { turn: 1 })
   emit('writer', 'user/message', { content: text('[Message from Chief]\nThe user wants a new Bot; ask them for its name'), source: { kind: 'bot', role: 'request', senderSessionId: 'chief', senderName: 'Chief', exchangeId: 'x1', hop: 0 } })
   await ask('writer', 'call-1')
-  const asked = (await questions()).writer
-  assert.equal(asked.question, 'Which name?')
-  assert.equal(asked.callId, undefined)
+  assert.equal((await questions()).writer.callId, 'call-1')
 })
 
 test('a card asked in a visible turn stays at its call', async (t) => {

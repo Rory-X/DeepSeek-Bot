@@ -14,10 +14,26 @@ import { currentColor, headOf, normalize, unquote } from './text.js'
 // Object.prototype.
 export const own = (table, key) => (table != null && Object.hasOwn(table, key) ? table[key] : undefined)
 
+// Older releases hid every turn that answered another Bot; only turns without work are
+// hidden now (see turns.js). Clear their marks once: keep a whole copy of the team file
+// first, then empty the table. The caller records `exchangeTurnsCleared` in the team, so
+// a later start does not clear the marks this release writes. Returns what it cleared.
+export async function clearLegacyExchangeTurns(state, { home, statePath, warn, now = () => new Date() }) {
+  if (state.exchangeTurns === null || typeof state.exchangeTurns !== 'object' || Array.isArray(state.exchangeTurns)) state.exchangeTurns = {}
+  const sessions = Object.keys(state.exchangeTurns)
+  const marks = sessions.reduce((sum, id) => sum + (Array.isArray(state.exchangeTurns[id]) ? state.exchangeTurns[id].length : 0), 0)
+  if (marks === 0) return { sessions: 0, marks: 0 }
+  const backup = join(home, `state.json.bak.exchange-turns-${now().toISOString().replace(/[:.]/g, '-')}`)
+  await copyFile(statePath, backup)
+  state.exchangeTurns = {}
+  warn('ds-bot: cleared %d exchange-turn marks in %d Sessions; the team file before the clear is %s', marks, sessions.length, backup)
+  return { sessions: sessions.length, marks, backup }
+}
+
 export function install(rt) {
   const { ctx, home, statePath } = rt
 
-  /** @type {{version:1, workspaceId?:string, mainBotIds:string[], bots:Record<string,any>, rooms:Record<string,any>, agents:Record<string,any>, capabilities:{items:Record<string,any>}, exchanges:any[], exchangeTurns:Record<string,number[]>, revision:number}} */
+  /** @type {{version:1, workspaceId?:string, mainBotIds:string[], bots:Record<string,any>, rooms:Record<string,any>, agents:Record<string,any>, capabilities:{items:Record<string,any>}, exchanges:any[], exchangeTurns:Record<string,number[]>, exchangeTurnsCleared?:true, revision:number}} */
   const state = { version: 1, mainBotIds: [], bots: {}, rooms: {}, agents: {}, capabilities: { items: {} }, exchanges: [], exchangeTurns: {}, works: {}, questions: {}, prefs: {}, switching: {}, revision: 0 }
   let loaded = null
   let writing = Promise.resolve()
@@ -208,12 +224,31 @@ export function install(rt) {
     return { migrated: migrated || stale.length > 0, stale }
   }
 
+  // Clear the marks an older release left for turns that answered another Bot. Runs
+  // once: `exchangeTurnsCleared` records it in the team file, so the marks this release
+  // writes are kept.
+  const clearOldExchangeTurns = async () => {
+    if (state.exchangeTurnsCleared === true) return false
+    if (holder !== undefined || stuck !== undefined) return false
+    let cleared
+    try {
+      cleared = await clearLegacyExchangeTurns(state, { home, statePath, warn })
+    } catch (error) {
+      // Without the copy the marks stay, and the next start tries again.
+      warn('ds-bot: keeping the old exchange-turn marks: the team file could not be backed up: %s', error)
+      return false
+    }
+    state.exchangeTurnsCleared = true
+    return cleared.marks > 0
+  }
+
   const load = () => loaded ??= (async () => {
     claimLock()
     if (holder !== undefined) warn('ds-bot: %s', readOnly())
     const { migrated, stale } = adopt(await readFileState())
     if (holder !== undefined) return
-    if (migrated && stuck === undefined) {
+    const cleared = await clearOldExchangeTurns()
+    if ((migrated || cleared) && stuck === undefined) {
       // A failed write must not poison `loaded`: the migrated state stays in
       // memory and the next save() writes it.
       try {
@@ -229,13 +264,24 @@ export function install(rt) {
   // A reading host follows the file and takes over once the other host has gone.
   const refresh = async () => {
     await load()
+    // Taking over a team an older release saved clears its old exchange-turn marks.
+    const takenOver = async () => {
+      adopt(await readFileState())
+      if (await clearOldExchangeTurns()) {
+        try {
+          await save()
+        } catch (error) {
+          warn('ds-bot: saving the cleared exchange-turn marks failed: %s', error)
+        }
+      }
+    }
     const hadHolder = holder !== undefined
     if (hadHolder) {
       claimLock()
       if (holder === undefined) {
         warn('ds-bot: the other dsh has closed; this one now saves the Bot team')
         warnedReadOnly = false
-        adopt(await readFileState())
+        await takenOver()
         return
       }
     } else if (!lockBroken && !lock.owns()) {
@@ -248,7 +294,7 @@ export function install(rt) {
         // The lock was free: still the writer, but the file may carry changes
         // written while no host held it.
         warnedReadOnly = false
-        adopt(await readFileState())
+        await takenOver()
         return
       }
       warn('ds-bot: %s', readOnly())
