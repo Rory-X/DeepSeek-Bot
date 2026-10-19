@@ -186,6 +186,9 @@ export function install(rt) {
     })
   }
 
+  // One informational line (an approval, a decision) for the diagnostics report.
+  const record = ({ source = 'host', ...fields }) => note({ level: 'info', source, ...fields })
+
   const entries = async () => {
     const old = (await earlier).filter(entry => entry.time > cleared)
     return [...old, ...fresh].slice(-KEEP).map(entry => ({
@@ -253,5 +256,5 @@ export function install(rt) {
     await writing
   }
 
-  Object.assign(rt, { warn, noteFailure: note, diagnostics: { report, logText, clear, entries } })
+  Object.assign(rt, { warn, noteFailure: note, diagnostics: { report, logText, clear, entries, record } })
 }

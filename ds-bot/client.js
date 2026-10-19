@@ -296,8 +296,27 @@ var ZH = {
   Actions: "执行操作",
   Off: "关闭",
   On: "开启",
+  "Full capabilities": "完整能力",
+  "Let the Bots use every tool the server offers, not only the read ones": "允许 Bot 使用服务器提供的全部工具，而不只限于只读工具",
+  "With Full capabilities on, actions go through {tool} and ask for approval one by one": "完整能力开启时，动作经 {tool} 逐次批准",
+  "Each run goes through {tool}": "每次执行都经 {tool}",
+  "Full access can change your {service} account; every write asks for your approval first.": "Full access 允许改动你的 {service} 账号；每次写操作都会先请求你批准。",
   "Allow actions": "允许执行操作",
   "Connector settings": "连接器设置",
+  "Waiting for the browser…": "正在浏览器里等待…",
+  "Not connected": "未连接",
+  "Could not connect": "连接失败",
+  "Connect again": "重新连接",
+  "The authorization page could not be opened": "授权页面打不开",
+  "Client ID": "Client ID",
+  "Client secret": "Client secret",
+  "In the app settings, set the redirect URL to {url}": "在应用后台把 Redirect URL 填成 {url}",
+  "Save and connect": "保存并连接",
+  "Open the authorization page": "打开授权页面",
+  "Use a different app": "换一个应用",
+  "Choose the access level on the authorization page": "在授权页选择权限范围",
+  "Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.": "Requested scopes 是只读权限，也是这个连接器申请的权限。Full access 允许 Bot 修改你的 {service} 账号，每次写操作仍会先请求你批准。",
+  "I'll choose the access level on the authorization page": "我会在授权页自行选择权限范围",
   "Each run asks for your approval": "每次执行都会弹出审批",
   "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
   "Projects, deployments, and logs": "项目、部署和日志",
@@ -1906,6 +1925,9 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     connectorDisconnect: (id) => after(call2("connector-disconnect", { id })),
     connectorRetry: (id) => after(call2("connector-retry", { id })),
     connectorSetActions: (id, enabled) => after(call2("connector-set-actions", { id, enabled })),
+    connectorSetToolbox: (id, enabled) => after(call2("connector-set-toolbox", { id, enabled })),
+    connectorOauthStart: (id) => after(call2("connector-oauth-start", { id })),
+    connectorOauthApp: (id, clientId, clientSecret) => after(call2("connector-oauth-app", { id, clientId, clientSecret })),
     saveCapability: (capability) => after(call2("capability-save", capability)),
     deleteCapability: (name) => after(call2("capability-delete", { name })),
     approveCapability: (name) => after(call2("capability-approve", { name })),
@@ -3120,9 +3142,24 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 .bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
+/* The actions section has nothing to control while the toolbox is on, so it folds dim; the
+   line under it says where actions went. */
+.bt-connector-setting{display:flex;flex-direction:column;gap:6px}
+.bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
+.bt-connector-input{flex:1 1 auto;min-width:0;border:0;background:none;color:inherit;font:inherit;font-size:13px;outline:none;padding:0}
+.bt-connector-hint{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+/* The access choice on the authorization page: a quiet accent panel under the card's row,
+   with the acknowledgement that arms the first Connect press. */
+.bt-connector-scope{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--bt-accent) 7%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 26%,transparent);animation:bt-veil-in .18s ease-out}
+.bt-connector-scope-title{font-size:12px;line-height:17px;font-weight:600}
+.bt-connector-scope-body{font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
+.bt-connector-consent{display:flex;align-items:flex-start;gap:8px;min-height:32px;padding:3px 0 1px;font-size:12px;line-height:17px;cursor:pointer}
+.bt-connector-check{flex:none;width:16px;height:16px;margin:0.5px 0 0;accent-color:var(--bt-accent);cursor:pointer}
+@media (prefers-reduced-motion:reduce){.bt-connector-scope{animation:none}}
+.bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the
@@ -3615,12 +3652,25 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 [data-composer-card] [class*="_tools"]{order:1!important;flex:none!important;align-self:flex-end!important;margin:0!important}
 [data-composer-card]>[data-input-scroll]{order:2!important;flex:1 1 0!important;min-width:0!important;padding:0 8px!important;margin:0!important}
 [data-composer-card] [class*="_trailing"]{order:3!important;flex:none!important;align-self:flex-end!important;margin:0!important}
-[data-composer-card]>[data-slot="conversation.input.attachments"]{order:0!important;flex-basis:100%!important}
+/* The shell renders the attachments slot with display:contents, so the rail inside it is
+   the real flex item: left inline, one 240px file card takes the text row's width and the
+   send button wraps away from the input. The rail takes a line of its own and scrolls there. */
+[data-composer-card]>[data-slot="conversation.input.attachments"]{order:-1!important}
+[data-composer-card]>[data-slot="conversation.input.attachments"]>*{order:-1!important;flex:0 0 100%!important;min-width:0!important;max-width:100%!important;margin-bottom:2px!important;box-sizing:border-box}
 [data-composer-card] [data-composer-input]{min-height:24px!important;padding:2px 0!important}
 [data-composer-card] [data-composer-placeholder]{left:0!important;top:2px!important}
 [data-composer-placeholder]{font-size:0!important;line-height:0!important}
 /* The name sits on ::before so that ::after stays free for other composer skins. */
 [data-composer-placeholder]::before{content:var(--bt-placeholder,"Message")!important;display:block!important;font-size:14px!important;line-height:24px!important;color:color-mix(in srgb,var(--bt-ink) 36%,transparent)!important}
+/* The shell drops its placeholder while the draft holds an attachment, so an empty text
+   row under the rail reads as a composer that lost its input. Keep the same quiet hint. */
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]:empty)::after,
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]>p:only-child:empty)::after,
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]>p:only-child>br:only-child)::after{content:var(--bt-placeholder,"Message");position:absolute;top:2px;left:0;right:0;color:color-mix(in srgb,var(--bt-ink) 36%,transparent);font-size:var(--dsh-content-font-size,14px);line-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+/* With the rail above it, the text row keeps a real tap target instead of a hairline. */
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-composer-input]{min-height:32px!important}
+/* A very long draft scrolls inside five lines on a touch screen instead of eating the page. */
+@media (max-width:700px),(pointer:coarse){[data-composer-card]{--dsh-composer-text-max-height:min(140px,38vh)}}
 /* The team's "+" (ComposerPlus) takes the seat of the shell's command-menu button. */
 [data-composer-card] button[class*="_add"]{display:none!important}
 .bt-plus{flex:none;width:28px;height:28px;padding:0;border:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--bt-ink) 5%,transparent);box-shadow:inset 0 0 0 .5px var(--bt-line);color:var(--bt-ink-2);cursor:pointer;transition:background-color .15s ease,color .15s ease,${spring(SPRING_TAP, "scale")}}
@@ -12755,7 +12805,23 @@ var VercelMark = () => (0, import_react31.createElement)(
   { width: 20, height: 20, viewBox: "0 0 20 20", fill: "currentColor", "aria-hidden": true },
   (0, import_react31.createElement)("path", { d: "M10 2.8 18.6 17.6H1.4z" })
 );
-var MARKS = { github: GitHubMark, vercel: VercelMark };
+var CloudflareMark = () => (0, import_react31.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", "aria-hidden": true },
+  (0, import_react31.createElement)("path", { d: "M6.2 15h7.4a3.2 3.2 0 0 0 .4-6.4 4.6 4.6 0 0 0-8.8-1.1A3.7 3.7 0 0 0 6.2 15z" })
+);
+var NotionMark = () => (0, import_react31.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react31.createElement)("rect", { x: 3.2, y: 3.2, width: 13.6, height: 13.6, rx: 2.6 }),
+  (0, import_react31.createElement)("path", { d: "M7.2 13.2V6.8l5.6 6.4V6.8" })
+);
+var SlackMark = () => (0, import_react31.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", "aria-hidden": true },
+  (0, import_react31.createElement)("path", { d: "M7.6 4.4v11.2M12.4 4.4v11.2M4.4 7.6h11.2M4.4 12.4h11.2" })
+);
+var MARKS = { github: GitHubMark, vercel: VercelMark, cloudflare: CloudflareMark, notion: NotionMark, slack: SlackMark };
 var ABOUT = {
   github: () => t("Repositories, issues, and pull requests"),
   vercel: () => t("Projects, deployments, and logs")
@@ -12768,6 +12834,7 @@ var TOKEN_LABELS = {
   github: () => t("GitHub token"),
   vercel: () => t("Vercel token")
 };
+var SCOPE_CHOICES = { cloudflare: true };
 var TOKEN_CREATE = {
   github: () => t("Create a token on GitHub"),
   vercel: () => t("Create a token on Vercel")
@@ -12800,16 +12867,68 @@ function ConnectorOption({ title, note, checked, disabled = false, describedby, 
   );
 }
 function statusText2(connector) {
-  if (connector.state === "connecting") return t("Connecting…");
+  if (connector.state === "connecting") return connector.oauth === true ? t("Waiting for the browser…") : t("Connecting…");
+  if (connector.state === "error" && connector.oauth === true) return connector.error ?? t("Could not connect");
   if (connector.state === "error") return t("Could not connect: {error}", { error: connector.error ?? "" });
   if (connector.state === "ready") return connector.account ? t("Connected as {account}", { account: connector.account }) : t("Connected");
-  return ABOUT[connector.id]?.() ?? "";
+  return ABOUT[connector.id]?.() ?? (connector.oauth === true ? t("Not connected") : "");
 }
 function ConnectorRow({ connector, actions }) {
   const [form, setForm] = (0, import_react31.useState)(false);
   const [token, setToken] = (0, import_react31.useState)("");
   const [busy, setBusy] = (0, import_react31.useState)(false);
   const [error, setError] = (0, import_react31.useState)(null);
+  const oauth = connector.oauth === true;
+  const manual = oauth && connector.manualClient === true;
+  const scopeChoice = oauth && connector.state === "off" && SCOPE_CHOICES[connector.id] === true;
+  const [scopeAck, setScopeAck] = (0, import_react31.useState)(false);
+  const configured = typeof connector.clientId === "string" && connector.clientId !== "";
+  const [appForm, setAppForm] = (0, import_react31.useState)(false);
+  const [appId, setAppId] = (0, import_react31.useState)("");
+  const [appSecret, setAppSecret] = (0, import_react31.useState)("");
+  const [authorizeUrl, setAuthorizeUrl] = (0, import_react31.useState)(null);
+  const startAuthorization = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const tab = window.open("about:blank", "_blank");
+    try {
+      const result = await actions.connectorOauthStart(connector.id);
+      const url = typeof result?.authorizeUrl === "string" ? result.authorizeUrl : "";
+      if (url === "") throw new Error(t("The authorization page could not be opened"));
+      setAuthorizeUrl(url);
+      if (tab !== null) {
+        try {
+          tab.location.href = url;
+        } catch {
+        }
+        tab.focus?.();
+      }
+    } catch (failure) {
+      try {
+        tab?.close?.();
+      } catch {
+      }
+      setError(failure?.message ?? String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveApp = async () => {
+    if (busy || appId.trim() === "" || appSecret.trim() === "") return;
+    setBusy(true);
+    setError(null);
+    try {
+      await actions.connectorOauthApp(connector.id, appId.trim(), appSecret);
+      setAppSecret("");
+      setAppForm(false);
+      await startAuthorization();
+    } catch (failure) {
+      setError(failure?.message ?? String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
   const run = (task, after) => {
     setBusy(true);
     setError(null);
@@ -12826,7 +12945,12 @@ function ConnectorRow({ connector, actions }) {
   };
   const on = connector.state !== "off";
   const actionsOn = connector.actions === true;
-  const hasOptions = on && typeof connector.actions === "boolean";
+  const toolboxOn = connector.toolbox === true;
+  const toolboxOffered = typeof connector.toolbox === "boolean";
+  const toolboxCall = typeof connector.toolboxCall === "string" && connector.toolboxCall !== "" ? connector.toolboxCall : "vercel_call";
+  const actionsOffered = typeof connector.actions === "boolean";
+  const hasOptions = on && (actionsOffered || toolboxOffered);
+  const actionsNoteId = toolboxOn && actionsOffered ? `bt-connector-${connector.id}-actions-note` : void 0;
   const [details, setDetails] = (0, import_react31.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = MARKS[connector.id];
@@ -12855,31 +12979,83 @@ function ConnectorRow({ connector, actions }) {
       (0, import_react31.createElement)(
         "span",
         { className: "bt-connector-actions" },
-        connector.state === "error" ? (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+        connector.state === "error" && !oauth ? (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
           event.stopPropagation();
           void run(actions.connectorRetry(connector.id));
         } }, t("Try again")) : null,
-        on ? (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+        connector.state === "error" && oauth ? (0, import_react31.createElement)("button", {
+          type: "button",
+          className: "bt-soft bt-soft-sm",
+          disabled: busy,
+          onClick: (event) => {
+            event.stopPropagation();
+            void startAuthorization();
+          }
+        }, t("Connect again")) : on && connector.state !== "connecting" ? (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
           event.stopPropagation();
           void run(actions.connectorDisconnect(connector.id));
-        } }, t("Disconnect")) : form ? null : (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: (event) => {
+        } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? manual && !configured && !appForm ? null : (0, import_react31.createElement)("button", {
+          type: "button",
+          className: "bt-soft bt-soft-sm",
+          disabled: busy || scopeChoice && !scopeAck,
+          onClick: (event) => {
+            event.stopPropagation();
+            void startAuthorization();
+          }
+        }, connector.state === "error" ? t("Connect again") : t("Connect")) : form ? null : (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: (event) => {
           event.stopPropagation();
           setForm(true);
         } }, t("Connect"))
       )
     ),
+    scopeChoice ? (0, import_react31.createElement)(
+      "div",
+      { className: "bt-connector-scope" },
+      (0, import_react31.createElement)("div", { className: "bt-connector-scope-title" }, t("Choose the access level on the authorization page")),
+      (0, import_react31.createElement)("div", { className: "bt-connector-scope-body" }, t("Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.", { service: connector.name })),
+      (0, import_react31.createElement)(
+        "label",
+        { className: "bt-connector-consent" },
+        (0, import_react31.createElement)("input", {
+          type: "checkbox",
+          className: "bt-connector-check",
+          checked: scopeAck,
+          onChange: (event) => setScopeAck(event.target.checked)
+        }),
+        (0, import_react31.createElement)("span", null, t("I'll choose the access level on the authorization page"))
+      )
+    ) : null,
     hasOptions && details ? (0, import_react31.createElement)(
       "div",
       { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings") },
-      (0, import_react31.createElement)(ConnectorOption, {
-        title: t("Allow actions"),
-        note: actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"),
-        checked: actionsOn,
-        disabled: busy,
-        onChange: (next) => void run(actions.connectorSetActions(connector.id, next))
-      })
+      toolboxOffered ? (0, import_react31.createElement)(
+        "div",
+        { className: "bt-connector-setting" },
+        (0, import_react31.createElement)(ConnectorOption, {
+          title: t("Full capabilities"),
+          note: toolboxOn ? t("Each run goes through {tool}", { tool: toolboxCall }) : t("Let the Bots use every tool the server offers, not only the read ones"),
+          checked: toolboxOn,
+          disabled: busy,
+          onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next))
+        }),
+        // A full-access grant can write; say so where its toolbox is switched on.
+        connector.oauth === true && connector.id === "cloudflare" ? (0, import_react31.createElement)("div", { className: "bt-connector-action-note" }, t("Full access can change your {service} account; every write asks for your approval first.", { service: connector.name })) : null
+      ) : null,
+      actionsOffered ? (0, import_react31.createElement)(
+        "div",
+        { className: "bt-connector-setting", "data-locked": toolboxOn || void 0 },
+        (0, import_react31.createElement)(ConnectorOption, {
+          title: t("Allow actions"),
+          note: actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"),
+          checked: actionsOn,
+          disabled: busy || toolboxOn,
+          describedby: actionsNoteId,
+          onChange: (next) => void run(actions.connectorSetActions(connector.id, next))
+        }),
+        actionsNoteId ? (0, import_react31.createElement)("div", { className: "bt-connector-action-note", id: actionsNoteId }, t("With Full capabilities on, actions go through {tool} and ask for approval one by one", { tool: toolboxCall })) : null
+      ) : null
     ) : null,
-    !on && form ? (0, import_react31.createElement)(
+    !oauth && !on && form ? (0, import_react31.createElement)(
       "div",
       { className: "bt-connector-form" },
       (0, import_react31.createElement)("label", { className: "bt-q-field bt-secret-field" }, (0, import_react31.createElement)(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),
@@ -12894,6 +13070,49 @@ function ConnectorRow({ connector, actions }) {
         } }, t("Cancel")),
         (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy || token.trim() === "", onClick: connect }, busy ? t("Connecting…") : t("Connect"))
       )
+    ) : null,
+    // Slack has no dynamic registration: its app id and secret are typed here first, with the
+    // redirect URL the app has to carry.
+    manual && !on && (!configured || appForm) ? (0, import_react31.createElement)(
+      "div",
+      { className: "bt-connector-form" },
+      (0, import_react31.createElement)("label", { className: "bt-q-field" }, (0, import_react31.createElement)("input", {
+        className: "bt-connector-input",
+        value: appId,
+        placeholder: t("Client ID"),
+        "aria-label": t("Client ID"),
+        autoComplete: "off",
+        spellCheck: false,
+        onChange: (event) => setAppId(event.target.value),
+        onKeyDown: (event) => {
+          if (event.key === "Enter") void saveApp();
+        }
+      })),
+      (0, import_react31.createElement)("label", { className: "bt-q-field bt-secret-field" }, (0, import_react31.createElement)(MaskedInput, { value: appSecret, onChange: setAppSecret, onEnter: () => void saveApp(), label: t("Client secret") })),
+      (0, import_react31.createElement)("div", { className: "bt-connector-hint" }, t("In the app settings, set the redirect URL to {url}", { url: `${location.origin}/oauth/ds-bot/slack` })),
+      (0, import_react31.createElement)(
+        "div",
+        { className: "bt-connector-form-row" },
+        configured ? (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => {
+          setAppForm(false);
+          setAppSecret("");
+        } }, t("Cancel")) : null,
+        (0, import_react31.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy || appId.trim() === "" || appSecret.trim() === "", onClick: () => void saveApp() }, busy ? t("Connecting…") : t("Save and connect"))
+      )
+    ) : null,
+    // A tab the browser refused to open still has a way in.
+    oauth && !on && authorizeUrl !== null && connector.state !== "connecting" ? (0, import_react31.createElement)(
+      "div",
+      { className: "bt-connector-form-row" },
+      (0, import_react31.createElement)("a", { className: "bt-connector-link", href: authorizeUrl, target: "_blank", rel: "noopener noreferrer" }, t("Open the authorization page"))
+    ) : null,
+    manual && configured && !on && !appForm ? (0, import_react31.createElement)(
+      "div",
+      { className: "bt-connector-form-row" },
+      (0, import_react31.createElement)("button", { type: "button", className: "bt-connector-link bt-connector-link-btn", onClick: () => {
+        setAppForm(true);
+        setAppId(connector.clientId ?? "");
+      } }, t("Use a different app"))
     ) : null,
     error ? (0, import_react31.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
   );

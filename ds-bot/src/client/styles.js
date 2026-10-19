@@ -576,9 +576,24 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 .bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
+/* The actions section has nothing to control while the toolbox is on, so it folds dim; the
+   line under it says where actions went. */
+.bt-connector-setting{display:flex;flex-direction:column;gap:6px}
+.bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
+.bt-connector-input{flex:1 1 auto;min-width:0;border:0;background:none;color:inherit;font:inherit;font-size:13px;outline:none;padding:0}
+.bt-connector-hint{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+/* The access choice on the authorization page: a quiet accent panel under the card's row,
+   with the acknowledgement that arms the first Connect press. */
+.bt-connector-scope{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--bt-accent) 7%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 26%,transparent);animation:bt-veil-in .18s ease-out}
+.bt-connector-scope-title{font-size:12px;line-height:17px;font-weight:600}
+.bt-connector-scope-body{font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
+.bt-connector-consent{display:flex;align-items:flex-start;gap:8px;min-height:32px;padding:3px 0 1px;font-size:12px;line-height:17px;cursor:pointer}
+.bt-connector-check{flex:none;width:16px;height:16px;margin:0.5px 0 0;accent-color:var(--bt-accent);cursor:pointer}
+@media (prefers-reduced-motion:reduce){.bt-connector-scope{animation:none}}
+.bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the
@@ -1072,12 +1087,25 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 [data-composer-card] [class*="_tools"]{order:1!important;flex:none!important;align-self:flex-end!important;margin:0!important}
 [data-composer-card]>[data-input-scroll]{order:2!important;flex:1 1 0!important;min-width:0!important;padding:0 8px!important;margin:0!important}
 [data-composer-card] [class*="_trailing"]{order:3!important;flex:none!important;align-self:flex-end!important;margin:0!important}
-[data-composer-card]>[data-slot="conversation.input.attachments"]{order:0!important;flex-basis:100%!important}
+/* The shell renders the attachments slot with display:contents, so the rail inside it is
+   the real flex item: left inline, one 240px file card takes the text row's width and the
+   send button wraps away from the input. The rail takes a line of its own and scrolls there. */
+[data-composer-card]>[data-slot="conversation.input.attachments"]{order:-1!important}
+[data-composer-card]>[data-slot="conversation.input.attachments"]>*{order:-1!important;flex:0 0 100%!important;min-width:0!important;max-width:100%!important;margin-bottom:2px!important;box-sizing:border-box}
 [data-composer-card] [data-composer-input]{min-height:24px!important;padding:2px 0!important}
 [data-composer-card] [data-composer-placeholder]{left:0!important;top:2px!important}
 [data-composer-placeholder]{font-size:0!important;line-height:0!important}
 /* The name sits on ::before so that ::after stays free for other composer skins. */
 [data-composer-placeholder]::before{content:var(--bt-placeholder,"Message")!important;display:block!important;font-size:14px!important;line-height:24px!important;color:color-mix(in srgb,var(--bt-ink) 36%,transparent)!important}
+/* The shell drops its placeholder while the draft holds an attachment, so an empty text
+   row under the rail reads as a composer that lost its input. Keep the same quiet hint. */
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]:empty)::after,
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]>p:only-child:empty)::after,
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]>p:only-child>br:only-child)::after{content:var(--bt-placeholder,"Message");position:absolute;top:2px;left:0;right:0;color:color-mix(in srgb,var(--bt-ink) 36%,transparent);font-size:var(--dsh-content-font-size,14px);line-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+/* With the rail above it, the text row keeps a real tap target instead of a hairline. */
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-composer-input]{min-height:32px!important}
+/* A very long draft scrolls inside five lines on a touch screen instead of eating the page. */
+@media (max-width:700px),(pointer:coarse){[data-composer-card]{--dsh-composer-text-max-height:min(140px,38vh)}}
 /* The team's "+" (ComposerPlus) takes the seat of the shell's command-menu button. */
 [data-composer-card] button[class*="_add"]{display:none!important}
 .bt-plus{flex:none;width:28px;height:28px;padding:0;border:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--bt-ink) 5%,transparent);box-shadow:inset 0 0 0 .5px var(--bt-line);color:var(--bt-ink-2);cursor:pointer;transition:background-color .15s ease,color .15s ease,${spring(SPRING_TAP, 'scale')}}

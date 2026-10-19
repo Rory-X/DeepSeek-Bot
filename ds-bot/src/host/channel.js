@@ -105,7 +105,7 @@ export function install(rt) {
     return rt.save()
   }
 
-  const handle = async (endpoint, payload, signal) => {
+  const handle = async (endpoint, payload, signal, meta = {}) => {
     try {
       const body = payload ?? {}
       await rt.refresh()
@@ -280,8 +280,19 @@ export function install(rt) {
         case 'dismiss-question':
           await rt.load()
           if (rt.own(state.questions, body.sessionId) !== undefined) {
-            delete state.questions[body.sessionId]
-            await rt.save()
+            const question = rt.own(state.questions, body.sessionId)
+            // A dismissed approval card is a refusal: the waiting tool call must hear it.
+            if (question.kind === 'connector-approval') {
+              // A card left by an earlier host has no tool call behind it; dismissing it
+              // just clears it.
+              if (await rt.dismissConnectorApproval(body.sessionId, question.id) === 'stale') {
+                delete state.questions[body.sessionId]
+                await rt.save()
+              }
+            } else {
+              delete state.questions[body.sessionId]
+              await rt.save()
+            }
           }
           return ok(true)
         case 'secret-set':
@@ -295,8 +306,10 @@ export function install(rt) {
         case 'connector-disconnect':
         case 'connector-retry':
         case 'connector-set-actions':
+        case 'connector-set-toolbox':
+        case 'connector-oauth-start':
           await rt.load()
-          return ok(await rt.connectorEndpoint(endpoint, body))
+          return ok(await rt.connectorEndpoint(endpoint, body, meta))
         case 'capability-save':
         case 'capability-delete':
         case 'capability-approve':
@@ -320,6 +333,14 @@ export function install(rt) {
           const sessionId = rt.botOf(body.sessionId) ? rt.chatOf(body.sessionId) : past && past.roomId === undefined ? rt.chatOf(past.botId) : body.sessionId
           const question = rt.own(state.questions, sessionId)
           if (question === undefined || question.id !== body.questionId) return fail('This question is no longer open', 'bot/stale')
+          // A connector approval is answered in place: no message is delivered to the Bot.
+          if (question.kind === 'connector-approval') {
+            if (await rt.answerConnectorApproval(sessionId, question.id, body.answer) === 'stale') {
+              delete state.questions[sessionId]
+              await rt.save()
+            }
+            return ok(true)
+          }
           const reply = questionReply(question, body.answer)
           if (reply === undefined) return fail('Nothing to send', 'bot/invalid')
           // Claim the question before queueing so a second answer is refused.
@@ -400,7 +421,7 @@ export function install(rt) {
     fetch: async (request) => {
       let body
       try { body = await request.json() } catch { body = {} }
-      const result = await handle(String(body?.endpoint ?? ''), body?.payload, request.signal)
+      const result = await handle(String(body?.endpoint ?? ''), body?.payload, request.signal, { origin: request.headers.get('origin') ?? undefined })
       return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
     },
   }), 'ds-bot: api route')
