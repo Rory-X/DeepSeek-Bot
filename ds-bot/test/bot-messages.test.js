@@ -742,6 +742,17 @@ test('an earlier part keeps the request its Bot answered', async () => {
   const { items } = await rt.earlierPage('b2')
   assert.deepEqual(items.map(item => [item.kind, item.role ?? item.text]), [['event', 'request'], ['bot', 'Understood, I stopped.']])
   assert.equal(items[0].botId, 'a')
+  // The line names the exchange it belongs to, so the chat can open it there.
+  assert.equal(items[0].id, 'x1')
+})
+
+test('an earlier message line without an exchange id has none', async () => {
+  const rt = earlierParts([
+    { type: 'user/message', seq: 1, time: 10, data: { turn: 1, content: [{ type: 'text', text: '[Message from Chief]\nold note' }], source: { kind: SOURCE_KIND, role: 'request', senderSessionId: 'a', senderName: 'Chief' } } },
+  ])
+  const { items } = await rt.earlierPage('b2')
+  assert.equal(items[0].kind, 'event')
+  assert.equal('id' in items[0], false)
 })
 
 test('a turn the Bot answered for another Bot stays in its earlier part', async () => {
