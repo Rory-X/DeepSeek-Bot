@@ -407,10 +407,11 @@ export function install(rt) {
   // network call and a chat id added later reaches the next mount.
   function mountNotify(id, token) {
     const connector = options[id]
+    // A valid token with no chat is still a connected connector: the card then shows the
+    // chat id as missing and tells the user to write the bot once. No sending tool is
+    // registered until there is a chat to send to.
     if (connector.needsChatId === true && typeof state.connectors?.[id]?.chatId !== 'string') {
-      mounts.set(id, { token })
-      statuses.set(id, { state: 'error', error: 'Send the bot a message in Telegram first, then press Test.' })
-      return undefined
+      return { token, dispose: [] }
     }
     const dispose = []
     try {
@@ -677,6 +678,8 @@ export function install(rt) {
     },
     // Send one test message through the connector's real send path, after finding the
     // Telegram chat when none is known yet.
+    // A failed test is shown on the connector card (`error`), like a mount failure; the
+    // card's state stays ready because the token is still good.
     async 'connector-test'(body) {
       known(body.id)
       const connector = options[body.id]
@@ -684,12 +687,17 @@ export function install(rt) {
       await rt.loadSecrets()
       const token = rt.secretValue(connector.tokenSecret)
       if (token === undefined) throw new Error('Connect this connector first')
+      const tested = (error) => {
+        statuses.set(body.id, error === undefined ? { state: 'ready' } : { state: 'ready', error })
+        return connectorsView()
+      }
       try {
         if (connector.needsChatId === true && typeof state.connectors?.[body.id]?.chatId !== 'string') {
           const found = await discoverTelegramChat({ token, api: connector.api })
           if (found.chatId === undefined) {
-            if (Array.isArray(found.candidates)) throw new Error('Telegram sees several chats: type the chat id you want.')
-            throw new Error('Send the bot a message in Telegram first, then press Test again.')
+            return tested(Array.isArray(found.candidates)
+              ? 'Telegram sees several chats: type the chat id you want.'
+              : 'Send the bot a message in Telegram first, then press Test again.')
           }
           state.connectors = {
             ...state.connectors,
@@ -699,10 +707,10 @@ export function install(rt) {
           await sync(body.id, true)
         }
         await NOTIFY[body.id].send({ token, chatId: state.connectors?.[body.id]?.chatId, text: NOTIFY_TEST_TEXT, api: connector.api })
+        return tested(undefined)
       } catch (error) {
-        throw new Error(rt.redactSecrets(String(error?.message ?? error)).slice(0, 300))
+        return tested(rt.redactSecrets(String(error?.message ?? error)).slice(0, 300))
       }
-      return connectorsView()
     },
     // A manually typed Telegram chat id (or an empty string to clear it).
     async 'connector-set-chat'(body) {

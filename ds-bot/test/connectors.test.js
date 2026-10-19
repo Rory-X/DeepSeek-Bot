@@ -944,8 +944,8 @@ test('Telegram without a chat says what to do, and Test looks again after the us
 
   const connected = await call(ctx, 'connector-connect', { id: 'telegram', token: TELEGRAM_TOKEN })
   const waiting = connected.value.find(connector => connector.id === 'telegram')
-  assert.deepEqual([waiting.state, waiting.chatId, waiting.canTest], ['error', null, true])
-  assert.match(waiting.error, /Send the bot a message in Telegram first/)
+  assert.deepEqual([waiting.state, waiting.chatId, waiting.canTest, waiting.account, waiting.error], ['ready', null, true, 'ds_test_bot', undefined])
+  // No chat means no sending tool yet; the card shows the missing chat id.
   assert.deepEqual(registered.filter(name => name === 'notify_telegram'), [])
 
   // The user writes the bot now; Test discovers the chat and sends.
@@ -967,7 +967,7 @@ test('Telegram without a chat says what to do, and Test looks again after the us
   assert.match((await call(ctx, 'connector-set-chat', { id: 'telegram', chatId: 'abc' })).error.message, /chat id is a number/)
   const cleared = await call(ctx, 'connector-set-chat', { id: 'telegram', chatId: '' })
   const empty = cleared.value.find(connector => connector.id === 'telegram')
-  assert.deepEqual([empty.state, empty.chatId], ['error', null])
+  assert.deepEqual([empty.state, empty.chatId], ['ready', null])
 })
 
 test('Telegram reports chat and rate-limit failures without the token', async (t) => {
@@ -986,8 +986,10 @@ test('Telegram reports chat and rate-limit failures without the token', async (t
   assert.equal(connected.ok, true)
   await call(ctx, 'connector-set-chat', { id: 'telegram', chatId: '999' })
   const failed = await call(ctx, 'connector-test', { id: 'telegram' })
-  assert.equal(failed.ok, false)
-  assert.match(failed.error.message, /chat not found/)
+  assert.equal(failed.ok, true, JSON.stringify(failed))
+  const failedCard = failed.value.find(connector => connector.id === 'telegram')
+  assert.deepEqual([failedCard.state, failedCard.chatId], ['ready', '999'])
+  assert.match(failedCard.error, /chat not found/)
   assert.ok(!JSON.stringify(failed).includes(TELEGRAM_TOKEN))
 
   globalThis.fetch = async (url) => {
@@ -998,7 +1000,8 @@ test('Telegram reports chat and rate-limit failures without the token', async (t
   const limited = await call(ctx, 'connector-retry', { id: 'telegram' })
   assert.equal(limited.ok, true)
   const limitedTest = await call(ctx, 'connector-test', { id: 'telegram' })
-  assert.equal(limitedTest.ok, false)
-  assert.match(limitedTest.error.message, /rate-limited; try again in 9s/)
+  assert.equal(limitedTest.ok, true, JSON.stringify(limitedTest))
+  const limitedCard = limitedTest.value.find(connector => connector.id === 'telegram')
+  assert.match(limitedCard.error, /rate-limited; try again in 9s/)
   assert.ok(!JSON.stringify(limitedTest).includes(TELEGRAM_TOKEN))
 })
