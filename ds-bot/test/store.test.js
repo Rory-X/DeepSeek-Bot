@@ -5,7 +5,7 @@ import { syncBuiltinESMExports } from 'node:module'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { install } from '../src/host/store.js'
+import { clearLegacyExchangeTurns, install } from '../src/host/store.js'
 
 function patch(method, replace) {
   const original = fsp[method]
@@ -27,8 +27,7 @@ function patchSync(method, replace) {
   }
 }
 
-function runtime(t, saved) {
-  const home = fs.mkdtempSync(join(tmpdir(), 'ds-bot-store-'))
+function runtime(t, saved, home = fs.mkdtempSync(join(tmpdir(), 'ds-bot-store-'))) {
   const statePath = join(home, 'state.json')
   if (saved !== undefined) fs.writeFileSync(statePath, typeof saved === 'string' ? saved : JSON.stringify(saved))
   const warnings = []
@@ -284,4 +283,46 @@ test('dispose waits for a pending save and prevents later writes', async (t) => 
     unblock()
     restore()
   }
+})
+
+test('legacy exchange-turn marks are copied out and cleared in one call', async (t) => {
+  const home = fs.mkdtempSync(join(tmpdir(), 'ds-bot-store-'))
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }))
+  const statePath = join(home, 'state.json')
+  const saved = { version: 1, revision: 3, exchangeTurns: { s1: [1, 2], s2: [3] } }
+  fs.writeFileSync(statePath, JSON.stringify(saved))
+  const warnings = []
+  const state = JSON.parse(JSON.stringify(saved))
+  const cleared = await clearLegacyExchangeTurns(state, { home, statePath, warn: (...args) => warnings.push(args) })
+  assert.deepEqual([cleared.sessions, cleared.marks], [2, 3])
+  assert.deepEqual(state.exchangeTurns, {})
+  const backups = fs.readdirSync(home).filter(name => name.startsWith('state.json.bak.exchange-turns-'))
+  assert.equal(backups.length, 1)
+  assert.deepEqual(JSON.parse(fs.readFileSync(join(home, backups[0]), 'utf8')), saved)
+  assert.ok(warnings.some(args => /cleared %d exchange-turn marks in %d Sessions/.test(String(args[0])) && args[1] === 3 && args[2] === 2))
+})
+
+test('a team opened by this release clears the marks an older release left', async (t) => {
+  const { rt, home, statePath } = runtime(t, { version: 1, revision: 3, exchangeTurns: { s1: [1, 2], s2: [3] } })
+  await rt.load()
+  assert.deepEqual(rt.state.exchangeTurns, {})
+  const saved = JSON.parse(fs.readFileSync(statePath, 'utf8'))
+  assert.deepEqual(saved.exchangeTurns, {})
+  assert.equal(saved.exchangeTurnsCleared, true)
+  const backups = fs.readdirSync(home).filter(name => name.startsWith('state.json.bak.exchange-turns-'))
+  assert.equal(backups.length, 1)
+})
+
+test('a later start keeps the marks this release writes', async (t) => {
+  const home = fs.mkdtempSync(join(tmpdir(), 'ds-bot-store-'))
+  const first = runtime(t, { version: 1, revision: 2, exchangeTurns: { s1: [1] } }, home)
+  await first.rt.load()
+  first.rt.state.exchangeTurns = { s9: [7] }
+  await first.rt.save()
+  await first.dispose()
+  // A second host opens the same team file after the first one closed.
+  const second = runtime(t, undefined, home)
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }))
+  await second.rt.load()
+  assert.deepEqual(second.rt.state.exchangeTurns, { s9: [7] })
 })

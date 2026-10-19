@@ -56,8 +56,9 @@ export function install(rt) {
     if (event.type === 'tool/call') live()
   })
 
-  // Attempts being streamed, by id. A turn that answers another Bot is hidden from the
-  // chat (turns.js marks it before the model is called), so its text is not streamed.
+  // Attempts being streamed, by id. A turn with nothing of its own to show (a stop
+  // acknowledgement, a part's opening line) is hidden from the chat, so its text is
+  // not streamed.
   const writing = new Map()
   ctx.on('agent/assistant-stream', ({ agent, frame }) => {
     if (frame.type === 'start') {

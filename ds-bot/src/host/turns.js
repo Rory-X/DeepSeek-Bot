@@ -226,8 +226,10 @@ export function install(rt) {
     for (const [id, source] of waiting.values()) tellSender(id, source, text)
   }
 
-  // A group Session is hidden as a whole, so its turns need no marking. A handoff
-  // package that only opens a part is acknowledged with a fixed line, also hidden.
+  // A group Session is hidden as a whole, so its turns need no marking. A turn in a
+  // Bot's own chat is hidden only when it has nothing of its own to show: the
+  // acknowledgement of being stopped, and the fixed line that opens a part. A turn that
+  // answers another Bot is the Bot's work, and the user reads it in the Bot's chat.
   const claimTrigger = (sessionId, entry, info) => {
     entry.info = info
     // A turn that was stopped for a part switch brings its joined requests along.
@@ -235,7 +237,7 @@ export function install(rt) {
       entry.joined = info.joined.filter(item => item?.info !== undefined && item.info !== null)
     }
     if (rt.groupOwners.has(sessionId)) return
-    if ((expectsReply(info) && !answersUser(info)) || info.role === 'room' || (info.role === 'handoff' && info.resume !== true)) {
+    if (info.role === 'stopped' || (info.role === 'handoff' && info.resume !== true)) {
       markExchangeTurn(sessionId, entry.turn)
     }
   }
