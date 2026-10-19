@@ -36,15 +36,17 @@ export function install(rt) {
     mainBotId: state.mainBotIds[0] ?? null,
     mainBotIds: state.mainBotIds,
     // `sessionId` is the Bot's current own-chat part; `parts` its earlier ones.
+    // `lastActivity`: when its newest message came or went, in ms since the epoch.
     // `waiting`: the Bot holds its greeting until the user picks its model.
     bots: Object.values(state.bots).map(({ segments, kickoff, ...bot }) => ({
-      ...bot, sessionId: rt.chatOf(bot.id), parts: (segments ?? []).map(segment => segment.sessionId), ...(kickoff ? { waiting: true } : {}),
+      ...bot, sessionId: rt.chatOf(bot.id), parts: (segments ?? []).map(segment => segment.sessionId), lastActivity: rt.lastActivityOf(bot.id), ...(kickoff ? { waiting: true } : {}),
     })),
     // `parts`: the members' hidden group Sessions and their earlier segments, for usage.
+    // `lastActivity`: when the group's newest line or message was, in ms since the epoch.
     rooms: Object.values(state.rooms).map(({ log, seen, lateRounds, sessions, segments, ...room }) => {
       const parts = [...Object.values(sessions ?? {}), ...Object.values(segments ?? {}).flat().map(segment => segment.sessionId)]
       const last = (log ?? []).filter(line => line.kind === undefined).at(-1)
-      return { ...room, parts, ...(last ? { preview: last.who === 'User' ? last.text : `${last.who}：${last.text}` } : {}) }
+      return { ...room, parts, lastActivity: rt.roomActivityOf(room.id), ...(last ? { preview: last.who === 'User' ? last.text : `${last.who}：${last.text}` } : {}) }
     }),
     exchangeTurns: state.exchangeTurns,
     questions: state.questions,
