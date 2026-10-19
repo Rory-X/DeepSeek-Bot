@@ -93,7 +93,7 @@ Settings → Connectors connects outside services whose MCP servers every Bot an
 
 GitHub is mounted through DSH's MCP client with the toolsets `context,repos,issues,pull_requests`, so its tools are `mcp__github__<tool>`. Vercel's server lists hundreds of tools and has no server-side filter, so DS Bot does not mount it through DSH's client: it opens the session itself and registers only the read tools it exposes, named `vercel_<tool>` (`list_projects`, `get_deployment`, `get_runtime_logs`, …). Vercel's write tools are never registered, so they cannot be called and never reach a Bot's prompt. The token's default team answers the tools that need a team id.
 
-A profile can override a connector's `url` (the MCP server) and `api` (where the token is checked), or hide it with `github: false` / `vercel: false`. Both addresses must start with `https://`; a connector with another address shows an error and never sends the token. Deleting the token on the Secrets page unmounts the connector.
+Vercel is read-only by default. In Settings → Connectors you can turn on its four deployment actions (`create_deployment`, `cancel_deployment`, `request_promote`, `request_rollback`): they are registered only while that switch is on, and every call asks for your approval first. A profile can override a connector's `url` (the MCP server) and `api` (where the token is checked), or hide it with `github: false` / `vercel: false`. Both addresses must start with `https://`; a connector with another address shows an error and never sends the token. Deleting the token on the Secrets page unmounts the connector.
 
 ## Models
 
