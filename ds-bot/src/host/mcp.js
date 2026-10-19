@@ -28,6 +28,17 @@ function responseMessage(text, id) {
   return parsed
 }
 
+// One MCP tool result as the text a Bot reads. A result the server marked as an error
+// throws, so the model sees a tool error instead of a long report.
+export function mcpResultText(result) {
+  const content = Array.isArray(result?.content) ? result.content : []
+  const text = content.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('\n')
+  if (result?.isError === true) throw new Error(text || 'The tool failed')
+  if (text !== '') return text
+  if (result?.structuredContent !== undefined) return JSON.stringify(result.structuredContent)
+  return 'The tool returned nothing.'
+}
+
 export class McpHttpClient {
   constructor(url, token, { fetch: request = fetch, timeoutMs = TIMEOUT_MS } = {}) {
     this.url = url

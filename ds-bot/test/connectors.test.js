@@ -11,7 +11,7 @@ import { fakeContext } from './fake-ctx.js'
 const fresh = () => `tok_${randomBytes(16).toString('hex')}`
 const answer = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
 const off = id => ({ id, state: 'off', account: null })
-const OFF = { github: { id: 'github', name: 'GitHub', ...off('github') }, vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false } }
+const OFF = { github: { id: 'github', name: 'GitHub', ...off('github') }, vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false } }
 const statuses = view => view.map(item => [item.id, item.state, item.account])
 
 test('signIn asks GitHub who owns the token', async () => {
@@ -138,6 +138,7 @@ const VERCEL_TOOLS = [
   ...VERCEL_READ.filter(name => name !== 'list_projects' && name !== 'get_runtime_logs').map(name => vercelTool(name)),
   ...VERCEL_ACTIONS.map(name => vercelTool(name)),
   vercelTool('create_project', { name: { type: 'string' } }),
+  vercelTool('get_project_env', { projectId: { type: 'string' } }),
 ]
 const vercelNames = names => names.map(name => `vercel_${name}`)
 
@@ -257,7 +258,7 @@ test('connecting Vercel mounts only its read tools, and the default team answers
 
   const connected = await call(ctx, 'connector-connect', { id: 'vercel', token })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false }])
+  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false }])
   // The write tool is never registered, and Vercel is not mounted through DSH's client.
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts.length, 0)
@@ -287,7 +288,7 @@ test('a saved Vercel token connects on its own and fills the account and team', 
     const view = (await call(ctx, 'state', {})).value.connectors
     return view[1]?.state === 'ready' ? view : undefined
   }, 'Vercel to connect from its saved token')
-  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false })
+  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false })
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   // The account and its default team are kept in the team file, without the token.
   const savedText = readFileSync(join(home, 'state.json'), 'utf8')
@@ -312,7 +313,7 @@ test('a failed account check does not stop the saved-token mount', async (t) => 
     const view = (await call(ctx, 'state', {})).value.connectors
     return view[1]?.state === 'ready' ? view : undefined
   }, 'Vercel to mount without an account')
-  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: null, actions: false })
+  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: null, actions: false, toolbox: false })
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors?.vercel, undefined)
 })
@@ -410,6 +411,96 @@ test('a saved actions switch survives a restart', async (t) => {
   }, 'Vercel with actions to connect')
   assert.equal(ready.actions, true)
   assert.deepEqual([...registered].sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
+})
+
+const toolboxState = () => ({ ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', actions: true, toolbox: true, connectedAt: 1 } } })
+
+test('the toolbox replaces the named actions and comes back off again', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = vercelBench()
+  globalThis.fetch = bench.fetch
+  const saved = { ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', actions: true, connectedAt: 1 } } }
+  const { ctx, home, registered } = setup({ state: saved, secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const connected = await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    return item?.state === 'ready' ? item : undefined
+  }, 'Vercel with its actions to connect')
+  assert.deepEqual([connected.actions, connected.toolbox], [true, false])
+  assert.deepEqual([...registered].sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
+
+  const on = (await call(ctx, 'connector-set-toolbox', { id: 'vercel', enabled: true })).value
+  assert.deepEqual([on[1].actions, on[1].toolbox], [true, true])
+  // 13 read + the two meta tools; no named action tool is registered.
+  assert.deepEqual(registered.slice(-15).sort(), [...vercelNames(VERCEL_READ), 'vercel_search_tools', 'vercel_call'].sort())
+  // A read tool runs through vercel_call with the default team filled in.
+  const text = await ctx.registeredTools.get('vercel_call').execute({ tool: 'list_projects' }, { agent: { id: 'm1' } })
+  assert.equal(text, 'called list_projects')
+  assert.deepEqual(bench.calls.filter(entry => entry.method === 'tools/call').at(-1).params.arguments, { teamId: 'team_1' })
+
+  const off = (await call(ctx, 'connector-set-toolbox', { id: 'vercel', enabled: false })).value
+  assert.deepEqual([off[1].actions, off[1].toolbox], [true, false])
+  assert.deepEqual(registered.slice(-17).sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
+})
+
+test('vercel_call goes through the same approval gate as a named action', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = vercelBench()
+  globalThis.fetch = bench.fetch
+  const { ctx, home } = setup({ state: toolboxState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    return item?.state === 'ready' && item.toolbox === true ? item : undefined
+  }, 'the toolbox to connect')
+  const [approve] = ctx.listeners.get('tools/pre-execute')
+  let passed = 0
+  const next = () => { passed += 1; return Promise.resolve({ kind: 'allow' }) }
+
+  const asked = await approve({ name: 'vercel_call', arguments: { tool: 'create_deployment', args: { project: 'shh-do-not-show' } } }, next)
+  assert.equal(asked.kind, 'ask')
+  assert.match(asked.reason, /create_deployment/)
+  assert.ok(asked.displayReason.en.includes('create_deployment'))
+  assert.ok(!JSON.stringify(asked).includes('shh-do-not-show'))
+  assert.equal(passed, 0)
+
+  assert.deepEqual(await approve({ name: 'vercel_call', arguments: { tool: 'list_projects' } }, next), { kind: 'allow' })
+  assert.equal(passed, 1)
+
+  const denied = await approve({ name: 'vercel_call', arguments: { tool: 'get_project_env' } }, next)
+  assert.equal(denied.kind, 'deny')
+  assert.match(denied.reason, /environment values or credentials/)
+  assert.equal(passed, 1)
+
+  assert.deepEqual(await approve({ name: 'vercel_call', arguments: { tool: 'not_a_tool' } }, next), { kind: 'allow' })
+})
+
+test('a saved toolbox switch survives a restart', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = vercelBench()
+  globalThis.fetch = bench.fetch
+  const { ctx, home, registered } = setup({ state: toolboxState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const ready = await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    return item?.state === 'ready' && item.toolbox === true ? item : undefined
+  }, 'the saved toolbox to connect')
+  assert.deepEqual([ready.actions, ready.toolbox], [true, true])
+  assert.deepEqual([...registered].sort(), [...vercelNames(VERCEL_READ), 'vercel_search_tools', 'vercel_call'].sort())
+  assert.ok(!registered.includes('vercel_create_deployment'))
+})
+
+test('only a connector with a toolbox can switch it', async (t) => {
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const result = await call(ctx, 'connector-set-toolbox', { id: 'github', enabled: true })
+  assert.equal(result.ok, false)
+  assert.match(result.error.message, /no toolbox/)
 })
 
 test('a Vercel token that is refused or cannot name the account is not saved', async (t) => {
