@@ -117,3 +117,58 @@ test('an unreachable server and a closed client fail clearly', async () => {
   client.close()
   await assert.rejects(client.callTool('list_projects', {}), /connection is closed/)
 })
+
+test('a refused token is refreshed once and the request is sent again', async () => {
+  const seen = []
+  let refreshes = 0
+  const client = new McpHttpClient('https://mcp.test/', 'old-token', {
+    refresh: async () => { refreshes += 1; return 'new-token' },
+    fetch: async (url, init) => {
+      const body = JSON.parse(init.body)
+      seen.push({ method: body.method, authorization: init.headers.authorization, session: init.headers['mcp-session-id'] })
+      if (body.method === 'initialize') return response({ body: result(body.id, { serverInfo: { name: 'Test' } }), headers: { 'mcp-session-id': 's1' } })
+      if (body.method === 'notifications/initialized') return response({ status: 202 })
+      if (init.headers.authorization === 'Bearer old-token') return response({ status: 401 })
+      return response({ body: result(body.id, { content: [{ type: 'text', text: 'after refresh' }] }) })
+    },
+  })
+  await client.open()
+  assert.deepEqual(await client.callTool('list_projects', {}), { content: [{ type: 'text', text: 'after refresh' }] })
+  assert.equal(refreshes, 1)
+  const calls = seen.filter(entry => entry.method === 'tools/call')
+  assert.deepEqual(calls.map(entry => entry.authorization), ['Bearer old-token', 'Bearer new-token'])
+  // The session that answered the refused token may be dead, so the retry starts over.
+  assert.equal(calls[0].session, 's1')
+  assert.equal(calls[1].session, undefined)
+})
+
+test('a refresh that fails, or names no token, fails the call without retrying', async () => {
+  let calls = 0
+  const refusingServer = {
+    fetch: async (url, init) => {
+      const body = JSON.parse(init.body)
+      if (body.method === 'initialize') return response({ body: result(body.id, {}) })
+      if (body.method === 'notifications/initialized') return response({ status: 202 })
+      calls += 1
+      return response({ status: 403 })
+    },
+  }
+  const broken = new McpHttpClient('https://mcp.test/', 'old', {
+    ...refusingServer,
+    refresh: async () => { throw Object.assign(new Error('The authorization expired; connect again'), { code: 'oauth/reconnect' }) },
+  })
+  await broken.open()
+  await assert.rejects(broken.callTool('list_projects', {}), /connect again/)
+  assert.equal(calls, 1)
+
+  const empty = new McpHttpClient('https://mcp.test/', 'old', { ...refusingServer, refresh: async () => '' })
+  await empty.open()
+  await assert.rejects(empty.callTool('list_projects', {}), /needs a new authorization/)
+  assert.equal(calls, 2)
+
+  // The retry is refused too: one refresh per request, then the server's answer stands.
+  const refusedAgain = new McpHttpClient('https://mcp.test/', 'old', { ...refusingServer, refresh: async () => 'new' })
+  await refusedAgain.open()
+  await assert.rejects(refusedAgain.callTool('list_projects', {}), /answered 403/)
+  assert.equal(calls, 4)
+})

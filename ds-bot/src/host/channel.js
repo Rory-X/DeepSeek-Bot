@@ -104,7 +104,7 @@ export function install(rt) {
     return rt.save()
   }
 
-  const handle = async (endpoint, payload, signal) => {
+  const handle = async (endpoint, payload, signal, meta = {}) => {
     try {
       const body = payload ?? {}
       await rt.refresh()
@@ -269,8 +269,9 @@ export function install(rt) {
         case 'connector-retry':
         case 'connector-set-actions':
         case 'connector-set-toolbox':
+        case 'connector-oauth-start':
           await rt.load()
-          return ok(await rt.connectorEndpoint(endpoint, body))
+          return ok(await rt.connectorEndpoint(endpoint, body, meta))
         case 'capability-save':
         case 'capability-delete':
         case 'capability-approve':
@@ -374,7 +375,7 @@ export function install(rt) {
     fetch: async (request) => {
       let body
       try { body = await request.json() } catch { body = {} }
-      const result = await handle(String(body?.endpoint ?? ''), body?.payload, request.signal)
+      const result = await handle(String(body?.endpoint ?? ''), body?.payload, request.signal, { origin: request.headers.get('origin') ?? undefined })
       return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
     },
   }), 'ds-bot: api route')

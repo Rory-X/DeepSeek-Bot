@@ -2,16 +2,22 @@
 // plugin context, so every Bot and Session gets them.
 //
 // GitHub uses DSH's own MCP client and the toolsets GitHub's server offers. A service
-// without a server-side tool filter (Vercel) goes through `mcp.js` instead: DS Bot opens
-// the session itself and registers only the read tools the connector names, so the write
-// tools are never in a model's context and cannot be called at all.
+// without a server-side tool filter (Vercel, and the OAuth connectors) goes through
+// `mcp.js` instead: DS Bot opens the session itself and registers only the read tools the
+// connector names, so the write tools are never in a model's context and cannot be called
+// at all.
 //
-// The token is the connector's own secret (secrets.js keeps it, redacts it, and offers it
-// to the shell). It reaches the service only in the MCP request headers, built here in
-// memory, never written to the DSH profile. A new token is shared with no Bot's shell:
-// the tools do not need it there, and a Bot that reads a planted instruction in an issue
-// could send it anywhere. The Secrets page can still share it.
+// A connector with a saved token (GitHub, Vercel) keeps it in secrets.js; the token
+// reaches the service only in the MCP request headers, built here in memory, never
+// written to the DSH profile. A new token is shared with no Bot's shell: the tools do not
+// need it there, and a Bot that reads a planted instruction in an issue could send it
+// anywhere. The Secrets page can still share it.
+//
+// An OAuth connector (`mode: 'oauth-mcp'`) has no secret of its own: the user authorizes
+// once in the browser, and the grant lives in DSH's credential store (see oauth/flow.js),
+// outside the team file, the Secrets page and every shell.
 import { McpHttpClient, mcpResultText } from './mcp.js'
+import { createOAuthFlow } from './oauth/flow.js'
 import { output } from './tools.js'
 import { buildToolIndex, createCallTool, createSearchTool, TOOLBOX_TOOLS } from './vercel-toolbox.js'
 
@@ -43,9 +49,11 @@ const VERCEL_ACTION_TOOLS = ['create_deployment', 'cancel_deployment', 'request_
 // Every connector, by the id its tools and the team file use. A profile overrides `url`
 // or `api` per service, or hides it with `false`. `mode` picks how its tools are mounted:
 // `mcp-client` mounts the whole server through DSH, `read-tools` registers only
-// `readTools` through DS Bot's own client. `toolsets` is a server-side filter header;
-// `accountField` is the field signIn reads, and `accountExtra` keeps what else the answer
-// carries (Vercel's default team).
+// `readTools` through DS Bot's own client, and `oauth-mcp` does the same with a grant the
+// user gave in the browser instead of a pasted token (`oauth.scopes` narrows what the
+// server asks for). `toolsets` is a server-side filter header; `accountField` is the field
+// signIn reads, and `accountExtra` keeps what else the answer carries (Vercel's default
+// team).
 const CONNECTORS = {
   github: {
     displayName: 'GitHub',
@@ -148,7 +156,9 @@ export function install(rt) {
     if (entry.class === 'write') return askAction(options[owner].displayName, target)
     return next()
   })
-  const insecure = id => [options[id].url, options[id].api].some(address => !/^https:\/\//i.test(String(address)))
+  const insecure = id => [options[id].url, options[id].api]
+    .filter(address => address !== undefined)
+    .some(address => !/^https:\/\//i.test(String(address)))
   const insecureText = id => `${options[id].displayName} addresses must start with https://`
   // The switches a connect or an account probe must carry over instead of dropping.
   const switchesOf = (id) => {
@@ -156,6 +166,42 @@ export function install(rt) {
     return {
       ...(typeof prior.actions === 'boolean' ? { actions: prior.actions } : {}),
       ...(typeof prior.toolbox === 'boolean' ? { toolbox: prior.toolbox } : {}),
+    }
+  }
+
+  // The OAuth connectors. The flow registers its callback route on DSH's web server when
+  // the user first starts a connect, and keeps each attempt in memory for ten minutes.
+  const oauth = ids.some(id => options[id].mode === 'oauth-mcp')
+    ? createOAuthFlow({
+        ctx,
+        connectorOf: id => options[id],
+        origin: rt.config.oauthOrigin,
+        canWrite: () => rt.readOnly() === undefined,
+        warn: (template, ...args) => rt.warn(template, ...args),
+        redact: text => rt.redactSecrets(text),
+        onConnecting: (id) => {
+          if (statuses.get(id)?.state !== 'ready') statuses.set(id, { state: 'connecting' })
+        },
+        onAuthorized: async (id) => {
+          state.connectors = { ...state.connectors, [id]: { ...switchesOf(id), authorizedAt: Date.now() } }
+          await rt.save()
+          await sync(id, true)
+        },
+        onFailed: (id, message) => {
+          statuses.set(id, { state: 'error', error: message })
+        },
+        onExpired: (id) => {
+          if (statuses.get(id)?.state === 'connecting') statuses.set(id, { state: 'off' })
+        },
+      })
+    : undefined
+
+  // DSH's credential store is a service of its own; on a fresh start it can come up a
+  // moment after this plugin, and a connector mounted before then would read as broken.
+  const credentialsReady = async () => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (ctx.get?.('credentials') !== undefined || stopped) return
+      await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
 
@@ -173,6 +219,20 @@ export function install(rt) {
   const reason = (error) => {
     const text = [error, error?.cause].filter(Boolean).map(part => String(part?.message ?? part)).join(': ')
     return rt.redactSecrets(text || 'error').slice(0, 300)
+  }
+
+  // A mounted OAuth tool the server refuses (401/403) asks for one refresh. A failed
+  // refresh marks the connector for Reconnect; the tool call fails with its reason.
+  const refreshFor = id => async () => {
+    try {
+      const grant = await oauth.refresh(id, { force: true })
+      const mounted = mounts.get(id)
+      if (mounted?.client !== undefined) mounted.token = grant.tokens.access
+      return grant.tokens.access
+    } catch (error) {
+      statuses.set(id, { state: 'error', error: reason(error) })
+      throw error
+    }
   }
 
   // One read tool of a `read-tools` connector, as a ToolRuntime definition.
@@ -214,9 +274,9 @@ export function install(rt) {
     }
   }
 
-  async function mountReadTools(id, token) {
+  async function mountReadTools(id, token, { refresh } = {}) {
     const connector = options[id]
-    const client = new McpHttpClient(connector.url, token)
+    const client = new McpHttpClient(connector.url, token, refresh === undefined ? {} : { refresh })
     try {
       await client.open()
       const listed = await client.listTools()
@@ -251,7 +311,25 @@ export function install(rt) {
   async function reconcile(id, force) {
     const connector = options[id]
     const previous = mounts.get(id)?.token
-    const token = !stopped ? rt.secretValue(connector.tokenSecret) : undefined
+    const oauthConnector = connector.mode === 'oauth-mcp'
+    let token
+    if (!stopped) {
+      if (oauthConnector) {
+        try {
+          token = (await oauth.token(id))?.tokens.access
+        } catch (error) {
+          // A grant the provider no longer honors shows as Reconnect, with its reason,
+          // and whatever was mounted with the dead grant goes away.
+          await unmount(id)
+          if (stopped) return
+          mounts.set(id, { token: undefined })
+          statuses.set(id, { state: 'error', error: reason(error) })
+          return
+        }
+      } else {
+        token = rt.secretValue(connector.tokenSecret)
+      }
+    }
     if (!force && previous === token) return
     const replaced = previous !== undefined && previous !== token
     await unmount(id)
@@ -272,13 +350,13 @@ export function install(rt) {
       if (stopped || mounts.get(id) !== attempt) return
     }
     const loader = ctx.get?.('loader')
-    if (connector.mode !== 'read-tools' && (typeof loader?.import !== 'function' || typeof ctx.plugin !== 'function')) {
+    if (connector.mode === 'mcp-client' && (typeof loader?.import !== 'function' || typeof ctx.plugin !== 'function')) {
       statuses.set(id, { state: 'error', error: 'This DSH cannot load connectors' })
       return
     }
     try {
-      if (connector.mode === 'read-tools') {
-        const mounted = await mountReadTools(id, token)
+      if (connector.mode !== 'mcp-client') {
+        const mounted = await mountReadTools(id, token, { refresh: oauthConnector ? refreshFor(id) : undefined })
         if (stopped || mounts.get(id) !== attempt) {
           for (const undo of mounted.dispose) undo()
           mounted.client.close()
@@ -318,12 +396,18 @@ export function install(rt) {
   const connectorsView = () => ids.map(id => {
     const connector = options[id]
     const status = statuses.get(id) ?? { state: 'off' }
+    const oauthConnector = connector.mode === 'oauth-mcp'
     return {
       id,
       name: connector.displayName,
       state: status.state,
       ...(status.error !== undefined ? { error: status.error } : {}),
-      account: rt.secretValue(connector.tokenSecret) !== undefined ? state.connectors?.[id]?.[connector.accountField] ?? null : null,
+      // An OAuth connector has no account name to show before it is connected; the client
+      // draws Connect from `oauth`.
+      account: !oauthConnector && rt.secretValue(connector.tokenSecret) !== undefined
+        ? state.connectors?.[id]?.[connector.accountField] ?? null
+        : null,
+      ...(oauthConnector ? { oauth: true } : {}),
       ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
       ...(connector.toolbox === true ? { toolbox: state.connectors?.[id]?.toolbox === true } : {}),
     }
@@ -337,6 +421,7 @@ export function install(rt) {
     async 'connector-connect'(body) {
       known(body.id)
       const connector = options[body.id]
+      if (connector.mode === 'oauth-mcp') throw new Error(`${connector.displayName} connects with OAuth, not a token`)
       const token = typeof body.token === 'string' ? body.token.trim() : ''
       if (token === '') throw new Error('Paste a token first')
       if (insecure(body.id)) throw new Error(insecureText(body.id))
@@ -356,9 +441,27 @@ export function install(rt) {
       await sync(body.id)
       return connectorsView()
     },
+    // The browser half of an OAuth connect: DS Bot answers with the provider's authorize
+    // address, the client opens it, and the provider sends the browser back to the
+    // callback route the flow registered.
+    async 'connector-oauth-start'(body, meta) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.mode !== 'oauth-mcp' || oauth === undefined) throw new Error(`${connector.displayName} connects with a token, not OAuth`)
+      return await oauth.start(body.id, { origin: meta.origin })
+    },
     async 'connector-disconnect'(body) {
       known(body.id)
       const connector = options[body.id]
+      if (connector.mode === 'oauth-mcp') {
+        await oauth.disconnect(body.id)
+        if (state.connectors?.[body.id] !== undefined) {
+          delete state.connectors[body.id]
+          await rt.save()
+        }
+        await sync(body.id, true)
+        return connectorsView()
+      }
       await rt.loadSecrets()
       if (rt.secretValue(connector.tokenSecret) !== undefined) await rt.secretEndpoint('secret-delete', { name: connector.tokenSecret })
       if (state.connectors?.[body.id] !== undefined) {
@@ -396,13 +499,18 @@ export function install(rt) {
     },
   }
 
-  const connectorEndpoint = (endpoint, body) => endpoints[endpoint](body ?? {})
+  const connectorEndpoint = (endpoint, body, meta) => endpoints[endpoint](body ?? {}, meta ?? {})
 
   ctx.effect(() => {
     stopped = false
-    void rt.loadSecrets().then(() => { for (const id of ids) void sync(id) })
+    void rt.loadSecrets().then(async () => {
+      if (oauth !== undefined) await credentialsReady()
+      if (stopped) return
+      for (const id of ids) void sync(id)
+    })
     return () => {
       stopped = true
+      oauth?.dispose()
       for (const id of ids) void unmount(id)
     }
   }, 'ds-bot: connectors')

@@ -40,17 +40,21 @@ export function mcpResultText(result) {
 }
 
 export class McpHttpClient {
-  constructor(url, token, { fetch: request = fetch, timeoutMs = TIMEOUT_MS } = {}) {
+  // `refresh` hands back a new access token when the server refuses this one (a connector
+  // with an OAuth grant). It runs at most once per request, and the request is then sent
+  // again on a fresh session, because the refused one may no longer be alive.
+  constructor(url, token, { fetch: request = fetch, timeoutMs = TIMEOUT_MS, refresh } = {}) {
     this.url = url
     this.token = token
     this.request = request
     this.timeoutMs = timeoutMs
+    this.refresh = refresh
     this.sessionId = undefined
     this.nextId = 1
     this.closed = false
   }
 
-  async post(body, { signal } = {}) {
+  async post(body, { signal, retried = false } = {}) {
     if (this.closed) throw new Error('The MCP connection is closed')
     const headers = {
       'content-type': 'application/json',
@@ -63,6 +67,13 @@ export class McpHttpClient {
       response = await this.request(this.url, { method: 'POST', headers, body: JSON.stringify(body), signal: signal ?? AbortSignal.timeout(this.timeoutMs) })
     } catch (error) {
       throw new Error(`Could not reach the MCP server: ${String(error?.message ?? error)}`)
+    }
+    if ((response.status === 401 || response.status === 403) && this.refresh !== undefined && !retried) {
+      const token = await this.refresh()
+      if (typeof token !== 'string' || token === '') throw new Error('The connection needs a new authorization')
+      this.token = token
+      this.sessionId = undefined
+      return this.post(body, { signal, retried: true })
     }
     const sessionId = response.headers?.get?.('mcp-session-id')
     if (typeof sessionId === 'string' && sessionId !== '') this.sessionId = sessionId
