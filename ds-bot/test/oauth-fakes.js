@@ -82,6 +82,7 @@ export function fakeOAuthServer({
   tokenStatus = 200,
   tokenError = 'invalid_grant',
   expiresIn = 3600,
+  declaredResource = resource,
   extraWellKnown = {},
   tokenHandler,
 } = {}) {
@@ -103,7 +104,7 @@ export function fakeOAuthServer({
     ...extraWellKnown,
   }
   const protectedResource = {
-    resource,
+    resource: declaredResource,
     authorization_servers: [issuer],
     scopes_supported: scopes,
     bearer_methods_supported: ['header'],

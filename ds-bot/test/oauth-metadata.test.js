@@ -122,6 +122,50 @@ test('a server metadata answer for another issuer is skipped, OpenID configurati
   assert.ok(requests.includes('https://mcp.test/.well-known/openid-configuration'))
 })
 
+test('a resource with a query accepts metadata for its origin and path', async () => {
+  const requests = []
+  const request = async (url, init = {}) => {
+    const address = String(url)
+    requests.push(address)
+    if (address === 'https://mcp.test/mcp?codemode=false' && init.method === 'POST') {
+      return { status: 401, ok: false, headers: { get: () => `Bearer realm="OAuth", resource_metadata="https://mcp.test/.well-known/oauth-protected-resource/mcp"` }, text: async () => '' }
+    }
+    // Cloudflare-style metadata names the path without the query the client uses.
+    if (address === 'https://mcp.test/.well-known/oauth-protected-resource/mcp') return answer(200, protectedResource)
+    if (address === 'https://mcp.test/.well-known/oauth-authorization-server') return answer(200, authorizationServer)
+    throw new Error(`unexpected request ${address}`)
+  }
+  const found = await createDiscovery({ request }).discover('https://mcp.test/mcp?codemode=false')
+  assert.equal(found.resource, 'https://mcp.test/mcp?codemode=false')
+  // The well-known lookup ignores the query.
+  assert.equal(requests[1], 'https://mcp.test/.well-known/oauth-protected-resource/mcp')
+})
+
+test('a query on the metadata must agree with a query the client names', async () => {
+  const seen = []
+  const request = async (url) => {
+    const address = String(url)
+    seen.push(address)
+    if (address === 'https://mcp.test/mcp?codemode=false') return { status: 401, ok: false, headers: { get: () => undefined }, text: async () => '' }
+    if (address === 'https://mcp.test/.well-known/oauth-protected-resource/mcp') return answer(200, { ...protectedResource, resource: 'https://mcp.test/mcp?other=1' })
+    if (address === 'https://mcp.test/.well-known/oauth-protected-resource') return answer(200, { ...protectedResource, resource: 'https://mcp.test/mcp?other=1' })
+    throw new Error(`unexpected request ${address}`)
+  }
+  await assert.rejects(createDiscovery({ request }).discover('https://mcp.test/mcp?codemode=false'), /authorization metadata/)
+  assert.ok(seen.includes('https://mcp.test/.well-known/oauth-protected-resource/mcp'))
+})
+
+test('a resource without a query still has to match the metadata exactly', async () => {
+  const request = async (url) => {
+    const address = String(url)
+    if (address === 'https://mcp.test/mcp') return { status: 401, ok: false, headers: { get: () => undefined }, text: async () => '' }
+    if (address === 'https://mcp.test/.well-known/oauth-protected-resource/mcp') return answer(200, { ...protectedResource, resource: 'https://mcp.test/mcp?codemode=false' })
+    if (address === 'https://mcp.test/.well-known/oauth-protected-resource') return answer(200, { ...protectedResource, resource: 'https://mcp.test/mcp?codemode=false' })
+    throw new Error(`unexpected request ${address}`)
+  }
+  await assert.rejects(createDiscovery({ request }).discover('https://mcp.test/mcp'), /authorization metadata/)
+})
+
 test('a server without S256 is not usable', async () => {
   const { request } = bench({ as: { ...authorizationServer, code_challenge_methods_supported: ['plain'] } })
   await assert.rejects(createDiscovery({ request }).discover('https://mcp.test/mcp'), /Could not read the metadata/)
@@ -144,7 +188,10 @@ test('addresses must be https, except a server on this computer', () => {
   assert.equal(normalizeResource('http://127.0.0.1:8787/mcp'), 'http://127.0.0.1:8787/mcp')
   assert.throws(() => normalizeResource('http://mcp.test/mcp'), /https/)
   assert.throws(() => normalizeResource('not a url'), /valid server address/)
-  assert.throws(() => normalizeResource('https://mcp.test/mcp?x=1'), /plain URL/)
+  // A query can select a server mode; a fragment or credentials cannot.
+  assert.equal(normalizeResource('https://mcp.test/mcp?codemode=false'), 'https://mcp.test/mcp?codemode=false')
+  assert.throws(() => normalizeResource('https://mcp.test/mcp#x'), /plain URL/)
+  assert.throws(() => normalizeResource('https://user:key@mcp.test/mcp'), /plain URL/)
 })
 
 test('an authorization may come back over https or to this computer only', () => {

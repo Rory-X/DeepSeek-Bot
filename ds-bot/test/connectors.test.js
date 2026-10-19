@@ -12,7 +12,11 @@ import { fakeCredentials, fakeOAuthServer, fakeResponse, fakeWebServer } from '.
 const fresh = () => `tok_${randomBytes(16).toString('hex')}`
 const answer = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
 const off = id => ({ id, state: 'off', account: null })
-const OFF = { github: { id: 'github', name: 'GitHub', ...off('github') }, vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false } }
+const OFF = {
+  github: { id: 'github', name: 'GitHub', ...off('github') },
+  vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false },
+  cloudflare: { id: 'cloudflare', name: 'Cloudflare', ...off('cloudflare'), oauth: true },
+}
 const statuses = view => view.map(item => [item.id, item.state, item.account])
 
 test('signIn asks GitHub who owns the token', async () => {
@@ -61,7 +65,7 @@ const teamHome = (state = TEAM) => {
 }
 
 // A loader that hands out a fake MCP client and records each mount.
-function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, secrets = [], state = TEAM, services = {} } = {}) {
+function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, cloudflare, secrets = [], state = TEAM, services = {} } = {}) {
   const home = teamHome(state)
   if (secrets.length > 0) {
     writeFileSync(join(home, 'secrets.json'), JSON.stringify({
@@ -94,7 +98,7 @@ function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { a
     return () => { disposed.push(tool.name); undo() }
   }
   capture(ctx)
-  apply(ctx, { home, github, vercel })
+  apply(ctx, { home, github, vercel, ...(cloudflare === undefined ? {} : { cloudflare }) })
   // Only what a mount registers later matters here; the team tools come with apply().
   registered.length = 0
   disposed.length = 0
@@ -188,11 +192,11 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   const token = fresh()
 
   const before = await call(ctx, 'state', {})
-  assert.deepEqual(before.value.connectors, [OFF.github, OFF.vercel])
+  assert.deepEqual(before.value.connectors, [OFF.github, OFF.vercel, OFF.cloudflare])
 
   const connected = await call(ctx, 'connector-connect', { id: 'github', token: ` ${token} ` })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo' }, OFF.vercel])
+  assert.deepEqual(connected.value, [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo' }, OFF.vercel, OFF.cloudflare])
   assert.equal(mounts.length, 1)
   assert.deepEqual(mounts[0].config, githubMount(token))
   const state = await call(ctx, 'state', {})
@@ -201,7 +205,7 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes(token))
 
   const disconnected = await call(ctx, 'connector-disconnect', { id: 'github' })
-  assert.deepEqual(disconnected.value, [OFF.github, OFF.vercel])
+  assert.deepEqual(disconnected.value, [OFF.github, OFF.vercel, OFF.cloudflare])
   assert.equal(mounts[0].disposed, true)
   assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
 })
@@ -245,7 +249,7 @@ test('deleting GITHUB_TOKEN on the Secrets page unmounts GitHub', async (t) => {
   await call(ctx, 'secret-delete', { name: 'GITHUB_TOKEN' })
   const state = await call(ctx, 'state', {})
   assert.equal(mounts[0].disposed, true)
-  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null]])
+  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['cloudflare', 'off', null]])
 })
 
 test('connecting Vercel mounts only its read tools, and the default team answers what needs one', async (t) => {
@@ -259,7 +263,7 @@ test('connecting Vercel mounts only its read tools, and the default team answers
 
   const connected = await call(ctx, 'connector-connect', { id: 'vercel', token })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false }])
+  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false }, OFF.cloudflare])
   // The write tool is never registered, and Vercel is not mounted through DSH's client.
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts.length, 0)
@@ -557,7 +561,7 @@ test('deleting VERCEL_TOKEN on the Secrets page unmounts Vercel and its tools', 
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   await call(ctx, 'secret-delete', { name: 'VERCEL_TOKEN' })
   const state = await call(ctx, 'state', {})
-  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null]])
+  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['cloudflare', 'off', null]])
   assert.deepEqual([...disposed].sort(), vercelNames(VERCEL_READ).sort())
 })
 
@@ -573,12 +577,12 @@ test('each connector mounts and unmounts on its own', async (t) => {
   await call(ctx, 'connector-connect', { id: 'vercel', token: fresh() })
   assert.equal(mounts.length, 1)
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
-  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'ready', 'acme']])
+  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'ready', 'acme'], ['cloudflare', 'off', null]])
 
   await call(ctx, 'connector-disconnect', { id: 'vercel' })
   assert.deepEqual([...disposed].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts[0].disposed, false)
-  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'off', null]])
+  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'off', null], ['cloudflare', 'off', null]])
 
   await call(ctx, 'connector-disconnect', { id: 'github' })
   assert.equal(mounts[0].disposed, true)
@@ -587,13 +591,13 @@ test('each connector mounts and unmounts on its own', async (t) => {
 test('github: false hides only the GitHub connector', async (t) => {
   const { ctx, home } = setup({ github: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.vercel])
+  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.vercel, OFF.cloudflare])
 })
 
 test('vercel: false hides only the Vercel connector', async (t) => {
   const { ctx, home } = setup({ vercel: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.github])
+  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.github, OFF.cloudflare])
 })
 
 test('a GitHub address without https refuses to send the token', async (t) => {
@@ -746,4 +750,116 @@ test('an OAuth connector mounts by itself from a saved grant', async (t) => {
   }, 'the saved grant to mount')
   assert.deepEqual([ready.oauth, ready.account], [true, null])
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
+})
+
+// Cloudflare's API server in endpoint mode, addressed with a query. The connector's whole
+// point is a strict read whitelist: nothing else the server lists may be registered.
+const CLOUDFLARE_READ = [
+  'whoami',
+  'get_accounts',
+  'get_zones',
+  'get_zones_by_zone_id',
+  'get_zones_dns_records',
+  'get_zones_dns_records_by_dns_record_id',
+  'get_zones_dns_analytics_report',
+  'get_zones_dns_analytics_report_bytime',
+  'get_zones_analytics_latency',
+  'get_zones_rate_limit_analytics',
+  'get_zones_workers_routes',
+  'get_zones_workers_routes_by_route_id',
+  'get_accounts_workers_scripts',
+  'get_accounts_workers_scripts_by_script_name',
+]
+const CLOUDFLARE_SCOPES = ['user:read', 'account:read', 'zone.read', 'dns.read', 'analytics.read', 'workers-routes.read', 'workers-scripts.read', 'offline_access']
+const CLOUDFLARE_ADDRESS = 'https://mcp.cloudflare.test/mcp?codemode=false'
+
+test('Cloudflare connects read-only, mounts exactly its whitelist, names the account and reconnects on a dead grant', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const oauth = fakeOAuthServer({
+    resource: CLOUDFLARE_ADDRESS,
+    issuer: 'https://mcp.cloudflare.test',
+    // The server's metadata names the path without the mode query, as Cloudflare's does.
+    declaredResource: 'https://mcp.cloudflare.test/mcp',
+  })
+  // The server lists far more than DS Bot exposes; none of it may reach a model.
+  const listedTools = [
+    ...CLOUDFLARE_READ.map(name => vercelTool(name)),
+    vercelTool('post_zones_dns_records'),
+    vercelTool('patch_zones_dns_records_by_dns_record_id'),
+    vercelTool('delete_zones_by_zone_id'),
+    vercelTool('post_graphql'),
+    vercelTool('docs'),
+    vercelTool('search'),
+    vercelTool('execute'),
+  ]
+  let deadGrant = false
+  globalThis.fetch = async (url, init = {}) => {
+    const address = String(url)
+    if (deadGrant && address === 'https://mcp.cloudflare.test/token' && init.method === 'POST') {
+      return { status: 400, ok: false, headers: { get: () => 'application/json' }, text: async () => JSON.stringify({ error: 'invalid_grant' }) }
+    }
+    if (address !== CLOUDFLARE_ADDRESS || init.headers?.authorization === undefined) return oauth.fetch(url, init)
+    const body = JSON.parse(init.body)
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Fake', version: '1' } })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: listedTools })
+    if (body.method === 'tools/call') {
+      if (deadGrant) return { status: 401, ok: false, headers: { get: () => null }, text: async () => '' }
+      if (body.params.name === 'whoami') return mcpAnswer(body.id, { content: [{ type: 'text', text: JSON.stringify({ id: 'user:abc', email: 'dev@example.com' }) }] })
+      return mcpAnswer(body.id, { content: [{ type: 'text', text: `called ${body.params.name}` }] })
+    }
+    throw new Error(`unexpected method ${body.method}`)
+  }
+  const credentials = fakeCredentials()
+  const webServer = fakeWebServer()
+  const { ctx, home, registered } = setup({ cloudflare: { url: CLOUDFLARE_ADDRESS }, services: { credentials, webServer } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  // Off, and OAuth rather than a token form, before the authorization.
+  const before = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'cloudflare')
+  assert.deepEqual([before.state, before.oauth, before.account], ['off', true, null])
+  assert.equal((await call(ctx, 'connector-connect', { id: 'cloudflare', token: fresh() })).error.message, 'Cloudflare connects with OAuth, not a token')
+
+  // The authorization names the endpoint-mode resource and exactly the read scopes.
+  const started = await call(ctx, 'connector-oauth-start', { id: 'cloudflare' }, { origin: 'https://dsh.test' })
+  assert.equal(started.ok, true, JSON.stringify(started))
+  const authorizeUrl = new URL(started.value.authorizeUrl)
+  assert.equal(authorizeUrl.origin + authorizeUrl.pathname, 'https://mcp.cloudflare.test/authorize')
+  assert.equal(authorizeUrl.searchParams.get('resource'), CLOUDFLARE_ADDRESS)
+  assert.equal(authorizeUrl.searchParams.get('scope'), CLOUDFLARE_SCOPES.join(' '))
+  assert.equal(authorizeUrl.searchParams.get('redirect_uri'), 'https://dsh.test/oauth/ds-bot/cloudflare')
+  assert.equal((await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'cloudflare').state, 'connecting')
+
+  const state = authorizeUrl.searchParams.get('state')
+  const { res, done } = fakeResponse()
+  webServer.routes[0].handler({ method: 'GET', url: `/oauth/ds-bot/cloudflare?code=auth-code&state=${encodeURIComponent(state)}` }, res)
+  const page = await done
+  assert.equal(page.statusCode, 200)
+  assert.match(page.body, /Cloudflare is connected/)
+
+  await until(async () => (registered.includes('cloudflare_whoami') ? true : undefined), 'the Cloudflare mount')
+  // Exactly the whitelist: no write endpoint tool, no code-mode tool, nothing else.
+  assert.deepEqual([...registered].sort(), CLOUDFLARE_READ.map(name => `cloudflare_${name}`).sort())
+  assert.equal(registered.filter(name => name.startsWith('cloudflare_')).length, 14)
+  const ready = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'cloudflare')
+  assert.deepEqual([ready.state, ready.oauth, ready.account], ['ready', true, 'dev@example.com'])
+  // The token exchange carries the whole resource URL, query included.
+  assert.equal(new URLSearchParams(oauth.tokenRequests()[0].body).get('resource'), CLOUDFLARE_ADDRESS)
+  // The account is kept; no token text reaches the team file or the view.
+  const savedText = readFileSync(join(home, 'state.json'), 'utf8')
+  assert.match(savedText, /dev@example\.com/)
+  assert.ok(!savedText.includes('access-1'))
+  assert.ok(!JSON.stringify(await call(ctx, 'state', {})).includes('access-1'))
+  assert.deepEqual(credentials.records.get('ds-bot/connector-cloudflare').payload.scopes, CLOUDFLARE_SCOPES)
+
+  // The provider rejects the refresh token: the grant goes, the card asks to reconnect.
+  deadGrant = true
+  await assert.rejects(ctx.registeredTools.get('cloudflare_get_zones').execute({}), /connect again/)
+  const broken = await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'cloudflare')
+    return item?.state === 'error' ? item : undefined
+  }, 'the connector to ask for a reconnect')
+  assert.match(broken.error, /connect again/)
+  assert.equal(credentials.records.has('ds-bot/connector-cloudflare'), false)
 })

@@ -46,14 +46,48 @@ const VERCEL_READ_TOOLS = [
 // so they are registered only when the user turns them on, and every call asks first.
 const VERCEL_ACTION_TOOLS = ['create_deployment', 'cancel_deployment', 'request_promote', 'request_rollback']
 
+// Cloudflare's API server in its endpoint mode (`?codemode=false`): one tool per API
+// endpoint, no code execution. Only these read endpoints are registered; every write
+// endpoint, and the code-mode tools (`docs`, `search`, `execute`), stay unregistered.
+const CLOUDFLARE_READ_TOOLS = [
+  'whoami',
+  'get_accounts',
+  'get_zones',
+  'get_zones_by_zone_id',
+  'get_zones_dns_records',
+  'get_zones_dns_records_by_dns_record_id',
+  'get_zones_dns_analytics_report',
+  'get_zones_dns_analytics_report_bytime',
+  'get_zones_analytics_latency',
+  'get_zones_rate_limit_analytics',
+  'get_zones_workers_routes',
+  'get_zones_workers_routes_by_route_id',
+  'get_accounts_workers_scripts',
+  'get_accounts_workers_scripts_by_script_name',
+]
+
+// The scopes Cloudflare needs: the identity baseline its server requires (including
+// `offline_access` for a refresh token) plus one read scope per endpoint family above.
+// No write scope is ever requested.
+const CLOUDFLARE_READ_SCOPES = [
+  'user:read',
+  'account:read',
+  'zone.read',
+  'dns.read',
+  'analytics.read',
+  'workers-routes.read',
+  'workers-scripts.read',
+  'offline_access',
+]
+
 // Every connector, by the id its tools and the team file use. A profile overrides `url`
 // or `api` per service, or hides it with `false`. `mode` picks how its tools are mounted:
 // `mcp-client` mounts the whole server through DSH, `read-tools` registers only
 // `readTools` through DS Bot's own client, and `oauth-mcp` does the same with a grant the
-// user gave in the browser instead of a pasted token (`oauth.scopes` narrows what the
-// server asks for). `toolsets` is a server-side filter header; `accountField` is the field
-// signIn reads, and `accountExtra` keeps what else the answer carries (Vercel's default
-// team).
+// user gave in the browser instead of a pasted token (`oauth.scopes` names the scopes to
+// ask for). `toolsets` is a server-side filter header; `accountField` is the field signIn
+// reads, and `accountExtra` keeps what else the answer carries (Vercel's default team).
+// `accountTool` is a read tool that names the connected account after an OAuth mount.
 const CONNECTORS = {
   github: {
     displayName: 'GitHub',
@@ -81,6 +115,14 @@ const CONNECTORS = {
     checkHeaders: token => ({ Authorization: `Bearer ${token}` }),
     accountOf: body => body?.user?.username,
     accountExtra: body => (typeof body?.user?.defaultTeamId === 'string' ? { teamId: body.user.defaultTeamId } : {}),
+  },
+  cloudflare: {
+    displayName: 'Cloudflare',
+    mode: 'oauth-mcp',
+    mcpUrl: 'https://mcp.cloudflare.com/mcp?codemode=false',
+    readTools: CLOUDFLARE_READ_TOOLS,
+    oauth: { scopes: CLOUDFLARE_READ_SCOPES },
+    accountTool: 'whoami',
   },
 }
 
@@ -197,12 +239,18 @@ export function install(rt) {
     : undefined
 
   // DSH's credential store is a service of its own; on a fresh start it can come up a
-  // moment after this plugin, and a connector mounted before then would read as broken.
-  const credentialsReady = async () => {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (ctx.get?.('credentials') !== undefined || stopped) return
-      await new Promise(resolve => setTimeout(resolve, 100))
-    }
+  // moment after this plugin. An OAuth connector that finds none waits as off and is
+  // tried again, instead of reporting a dead authorization it never read.
+  const storeAttempts = new Map()
+  const retryWithoutStore = (id) => {
+    if (stopped) return
+    const count = storeAttempts.get(id) ?? 0
+    if (count >= 5) return
+    storeAttempts.set(id, count + 1)
+    const timer = setTimeout(() => {
+      if (!stopped) void sync(id)
+    }, 500 * (count + 1))
+    timer.unref?.()
   }
 
   const unmount = async (id) => {
@@ -274,6 +322,34 @@ export function install(rt) {
     }
   }
 
+  // An OAuth connector has no token to ask who it belongs to; its server's own read tool
+  // does. One call, once per authorization, fills the card's account line.
+  const claimOAuthAccount = async (id, client) => {
+    const connector = options[id]
+    if (connector.accountTool === undefined || state.connectors?.[id]?.account !== undefined) return
+    try {
+      const text = mcpResultText(await client.callTool(connector.accountTool, {}))
+      let identity
+      try {
+        identity = JSON.parse(text)
+      } catch {
+        identity = undefined
+      }
+      const account = typeof identity?.email === 'string' && identity.email !== ''
+        ? identity.email
+        : typeof identity?.name === 'string' && identity.name !== '' ? identity.name : undefined
+      const accountId = typeof identity?.id === 'string' && identity.id !== '' ? identity.id : undefined
+      if (account === undefined && accountId === undefined) return
+      state.connectors = {
+        ...state.connectors,
+        [id]: { ...state.connectors?.[id], ...(account === undefined ? {} : { account }), ...(accountId === undefined ? {} : { accountId }) },
+      }
+      await rt.save()
+    } catch (error) {
+      rt.warn('ds-bot: could not read the %s account: %s', connector.displayName, reason(error))
+    }
+  }
+
   async function mountReadTools(id, token, { refresh } = {}) {
     const connector = options[id]
     const client = new McpHttpClient(connector.url, token, refresh === undefined ? {} : { refresh })
@@ -323,6 +399,14 @@ export function install(rt) {
           await unmount(id)
           if (stopped) return
           mounts.set(id, { token: undefined })
+          if (error?.code === 'oauth/store') {
+            // DSH's credential store came up after this plugin, or this DSH has none: the
+            // connector waits as off until the store answers, rather than reporting a
+            // failed authorization it never read.
+            statuses.set(id, { state: 'off' })
+            retryWithoutStore(id)
+            return
+          }
           statuses.set(id, { state: 'error', error: reason(error) })
           return
         }
@@ -363,6 +447,13 @@ export function install(rt) {
           return
         }
         mounts.set(id, mounted)
+        if (oauthConnector) await claimOAuthAccount(id, mounted.client)
+        if (stopped || mounts.get(id) !== mounted) {
+          for (const undo of mounted.dispose) undo()
+          mounted.client.close()
+          return
+        }
+        storeAttempts.delete(id)
         statuses.set(id, { state: 'ready' })
         return
       }
@@ -393,6 +484,15 @@ export function install(rt) {
     return queue
   }
 
+  // A token connector shows the account signIn read; an OAuth connector shows what its
+  // own account tool answered after the mount.
+  const accountOf = (id) => {
+    const connector = options[id]
+    if (connector.mode === 'oauth-mcp') return state.connectors?.[id]?.account ?? null
+    if (rt.secretValue(connector.tokenSecret) === undefined) return null
+    return state.connectors?.[id]?.[connector.accountField] ?? null
+  }
+
   const connectorsView = () => ids.map(id => {
     const connector = options[id]
     const status = statuses.get(id) ?? { state: 'off' }
@@ -402,11 +502,9 @@ export function install(rt) {
       name: connector.displayName,
       state: status.state,
       ...(status.error !== undefined ? { error: status.error } : {}),
-      // An OAuth connector has no account name to show before it is connected; the client
-      // draws Connect from `oauth`.
-      account: !oauthConnector && rt.secretValue(connector.tokenSecret) !== undefined
-        ? state.connectors?.[id]?.[connector.accountField] ?? null
-        : null,
+      // An OAuth connector has no account before it is connected; the client draws
+      // Connect from `oauth` and shows `account` once the server named it.
+      account: accountOf(id),
       ...(oauthConnector ? { oauth: true } : {}),
       ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
       ...(connector.toolbox === true ? { toolbox: state.connectors?.[id]?.toolbox === true } : {}),
@@ -503,11 +601,7 @@ export function install(rt) {
 
   ctx.effect(() => {
     stopped = false
-    void rt.loadSecrets().then(async () => {
-      if (oauth !== undefined) await credentialsReady()
-      if (stopped) return
-      for (const id of ids) void sync(id)
-    })
+    void rt.loadSecrets().then(() => { for (const id of ids) void sync(id) })
     return () => {
       stopped = true
       oauth?.dispose()
