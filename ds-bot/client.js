@@ -146,6 +146,9 @@ var ZH = {
   Actions: "执行操作",
   Off: "关闭",
   On: "开启",
+  "Full capabilities": "完整能力",
+  "Let the Bots use every tool the server offers, not only the read ones": "允许 Bot 使用服务器提供的全部工具，而不只限于只读工具",
+  "With Full capabilities on, actions go through vercel_call and ask for approval one by one": "完整能力开启时，动作经 vercel_call 逐次批准",
   "Allow actions": "允许执行操作",
   "Connector settings": "连接器设置",
   "Each run asks for your approval": "每次执行都会弹出审批",
@@ -1711,6 +1714,7 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     connectorDisconnect: (id) => after(call2("connector-disconnect", { id })),
     connectorRetry: (id) => after(call2("connector-retry", { id })),
     connectorSetActions: (id, enabled) => after(call2("connector-set-actions", { id, enabled })),
+    connectorSetToolbox: (id, enabled) => after(call2("connector-set-toolbox", { id, enabled })),
     saveCapability: (capability) => after(call2("capability-save", capability)),
     deleteCapability: (name) => after(call2("capability-delete", { name })),
     approveCapability: (name) => after(call2("capability-approve", { name })),
@@ -2925,6 +2929,10 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 .bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
+/* The actions section has nothing to control while the toolbox is on, so it folds dim; the
+   line under it says where actions went. */
+.bt-connector-setting{display:flex;flex-direction:column;gap:6px}
+.bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
@@ -11974,7 +11982,11 @@ function ConnectorRow({ connector, actions }) {
   };
   const on = connector.state !== "off";
   const actionsOn = connector.actions === true;
-  const hasOptions = on && typeof connector.actions === "boolean";
+  const toolboxOn = connector.toolbox === true;
+  const toolboxOffered = typeof connector.toolbox === "boolean";
+  const actionsOffered = typeof connector.actions === "boolean";
+  const hasOptions = on && (actionsOffered || toolboxOffered);
+  const actionsNoteId = toolboxOn && actionsOffered ? `bt-connector-${connector.id}-actions-note` : void 0;
   const [details, setDetails] = (0, import_react30.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = MARKS[connector.id];
@@ -12019,13 +12031,26 @@ function ConnectorRow({ connector, actions }) {
     hasOptions && details ? (0, import_react30.createElement)(
       "div",
       { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings") },
-      (0, import_react30.createElement)(ConnectorOption, {
-        title: t("Allow actions"),
-        note: actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"),
-        checked: actionsOn,
+      toolboxOffered ? (0, import_react30.createElement)(ConnectorOption, {
+        title: t("Full capabilities"),
+        note: toolboxOn ? t("Each run asks for your approval") : t("Let the Bots use every tool the server offers, not only the read ones"),
+        checked: toolboxOn,
         disabled: busy,
-        onChange: (next) => void run(actions.connectorSetActions(connector.id, next))
-      })
+        onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next))
+      }) : null,
+      actionsOffered ? (0, import_react30.createElement)(
+        "div",
+        { className: "bt-connector-setting", "data-locked": toolboxOn || void 0 },
+        (0, import_react30.createElement)(ConnectorOption, {
+          title: t("Allow actions"),
+          note: actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"),
+          checked: actionsOn,
+          disabled: busy || toolboxOn,
+          describedby: actionsNoteId,
+          onChange: (next) => void run(actions.connectorSetActions(connector.id, next))
+        }),
+        actionsNoteId ? (0, import_react30.createElement)("div", { className: "bt-connector-action-note", id: actionsNoteId }, t("With Full capabilities on, actions go through vercel_call and ask for approval one by one")) : null
+      ) : null
     ) : null,
     !on && form ? (0, import_react30.createElement)(
       "div",
