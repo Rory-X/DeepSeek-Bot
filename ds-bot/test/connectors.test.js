@@ -311,6 +311,36 @@ test('a failed account check does not stop the saved-token mount', async (t) => 
   assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors?.vercel, undefined)
 })
 
+test('replacing the saved Vercel token re-reads the account and its team', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const first = vercelBench()
+  globalThis.fetch = first.fetch
+  const { ctx, home } = setup({ secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    return item?.state === 'ready' && item.account === 'acme' ? item : undefined
+  }, 'the first token to connect')
+
+  // Another account's token replaces the saved one on the Secrets page.
+  const second = vercelBench({ user: { username: 'other', defaultTeamId: 'team_2' } })
+  globalThis.fetch = second.fetch
+  await call(ctx, 'secret-set', { name: 'VERCEL_TOKEN', value: fresh(), purpose: 'replaced' })
+
+  const view = await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    return item?.account === 'other' ? item : undefined
+  }, 'the new token to bring its account')
+  assert.equal(view.state, 'ready')
+  const saved = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8'))
+  assert.deepEqual([saved.connectors.vercel.username, saved.connectors.vercel.teamId], ['other', 'team_2'])
+  // The remounted tools answer with the new default team.
+  const tool = ctx.registeredTools.get('vercel_get_runtime_logs')
+  await tool.execute({ projectId: 'p1' }, { agent: { id: 'm1' } })
+  assert.deepEqual(second.calls.filter(entry => entry.method === 'tools/call').at(-1).params.arguments, { projectId: 'p1', teamId: 'team_2' })
+})
+
 test('a Vercel token that is refused or cannot name the account is not saved', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
