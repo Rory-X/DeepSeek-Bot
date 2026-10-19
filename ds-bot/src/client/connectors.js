@@ -74,9 +74,18 @@ function ConnectorRow({ connector, actions }) {
   // `actions` is absent for a connector without write actions; a boolean says whether the
   // Bot may run them, and every run asks the user first.
   const actionsOn = connector.actions === true
+  // `toolbox` is absent for a connector that cannot offer its whole toolset. With it on,
+  // the named action tools are not registered: every action goes through the server's own
+  // call tool, which asks for approval by itself, so the actions switch has nothing to do.
+  const toolboxOn = connector.toolbox === true
+  const toolboxOffered = typeof connector.toolbox === 'boolean'
+  const actionsOffered = typeof connector.actions === 'boolean'
   // A connected connector that has settings opens them from its own row; without either
   // there is nothing to open and the row stays what it was.
-  const hasOptions = on && typeof connector.actions === 'boolean'
+  const hasOptions = on && (actionsOffered || toolboxOffered)
+  // The line saying where actions go while the toolbox is on; the disabled switch points
+  // at it, so the reason survives a reader who never focuses the switch.
+  const actionsNoteId = toolboxOn && actionsOffered ? `bt-connector-${connector.id}-actions-note` : undefined
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   const Mark = MARKS[connector.id]
@@ -102,15 +111,33 @@ function ConnectorRow({ connector, actions }) {
           : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: (event) => { event.stopPropagation(); setForm(true) } }, t('Connect')))),
     hasOptions && details
       ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
-        h(ConnectorOption, {
-          title: t('Allow actions'),
-          note: actionsOn
-            ? t('Each run asks for your approval')
-            : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'),
-          checked: actionsOn,
-          disabled: busy,
-          onChange: (next) => void run(actions.connectorSetActions(connector.id, next)),
-        }))
+        toolboxOffered
+          ? h(ConnectorOption, {
+            title: t('Full capabilities'),
+            note: toolboxOn
+              ? t('Each run asks for your approval')
+              : t('Let the Bots use every tool the server offers, not only the read ones'),
+            checked: toolboxOn,
+            disabled: busy,
+            onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next)),
+          })
+          : null,
+        actionsOffered
+          ? h('div', { className: 'bt-connector-setting', 'data-locked': toolboxOn || undefined },
+            h(ConnectorOption, {
+              title: t('Allow actions'),
+              note: actionsOn
+                ? t('Each run asks for your approval')
+                : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'),
+              checked: actionsOn,
+              disabled: busy || toolboxOn,
+              describedby: actionsNoteId,
+              onChange: (next) => void run(actions.connectorSetActions(connector.id, next)),
+            }),
+            actionsNoteId
+              ? h('div', { className: 'bt-connector-action-note', id: actionsNoteId }, t('With Full capabilities on, actions go through vercel_call and ask for approval one by one'))
+              : null)
+          : null)
       : null,
     !on && form ? h('div', { className: 'bt-connector-form' },
       h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),

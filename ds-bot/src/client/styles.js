@@ -576,6 +576,10 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 .bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
+/* The actions section has nothing to control while the toolbox is on, so it folds dim; the
+   line under it says where actions went. */
+.bt-connector-setting{display:flex;flex-direction:column;gap:6px}
+.bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
