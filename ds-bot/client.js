@@ -537,6 +537,7 @@ var ZH = {
   "Replying to {name}": "正在回复 {name}",
   "Replying to a message": "正在回复一条消息",
   "Cancel reply": "取消回复",
+  "Go to the quoted message": "跳到被引用的消息",
   "Could not quote this message": "这条消息没法引用",
   "Asked to make the tool call it wrote as text": "工具调用被写成了文字，已让它重新调用",
   "A Bot": "一个 Bot",
@@ -3461,7 +3462,9 @@ div:has(> nav [class*="_marks"]){display:none!important}
 .bt-q-inline .bt-q{margin:0;max-width:min(550px,86%);order:0}
 .bt-q-dock{width:100%;display:flex;justify-content:center}
 .bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
-.bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px}
+.bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px;margin:0;padding:0;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;border-radius:8px;transition:background-color .12s ease}
+.bt-quote-dock-main:hover{background:var(--bt-hover)}
+.bt-quote-dock-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
 .bt-quote-dock-who{font-size:12px;line-height:16px;font-weight:600;color:var(--bt-ink)}
 .bt-quote-dock-text{font-size:12px;line-height:16px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-quote-dock-x{flex:none;width:24px;height:24px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--bt-ink-3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
@@ -3511,6 +3514,10 @@ div:has(> nav [class*="_marks"]){display:none!important}
 .bt-ubody .bt-quote-text{color:color-mix(in srgb,var(--bt-user-ink) 78%,transparent)}
 .bt-quote[data-compact]{padding:5px 9px 5px 8px}
 .bt-quote[data-compact] .bt-quote-who{display:none}
+/* The message a quote points at flashes once when the quote bar is pressed. */
+@keyframes bt-quote-target{from{background-color:color-mix(in srgb,var(--bt-accent) 18%,transparent)}to{background-color:transparent}}
+.bt-quote-target{border-radius:18px;animation:bt-quote-target 1.2s ease-out}
+@media (prefers-reduced-motion:reduce){.bt-quote-target{animation:none;background-color:color-mix(in srgb,var(--bt-accent) 12%,transparent)}}
 .bt-uimages{display:block;font-size:12px;opacity:.7}
 .bt-earlier .bt-event{margin:4px 0}
 .bt-part-line{display:flex;align-items:center;gap:10px;margin:10px 0 6px;font-size:11px;line-height:14px;color:var(--bt-ink-3)}
@@ -3967,14 +3974,23 @@ function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, ac
     const node = bar.current;
     const input = document.querySelector('[class*="_centerCol"] [role=textbox][contenteditable=true], [class*="_centerCol"] textarea');
     if (node === null || input === null) return void 0;
+    const cardOf = (start) => {
+      let node2 = start.parentElement;
+      for (let depth = 0; depth < 8 && node2 !== null; depth += 1) {
+        const style = getComputedStyle(node2);
+        if (parseFloat(style.borderTopWidth) > 0 && node2.querySelectorAll("button").length >= 2) return node2;
+        node2 = node2.parentElement;
+      }
+      return start;
+    };
     const measure = () => {
-      const inputBox = input.getBoundingClientRect();
+      const cardBox = cardOf(input).getBoundingClientRect();
       node.style.marginLeft = "0px";
       node.style.left = "0px";
-      node.style.width = `${Math.round(inputBox.width)}px`;
+      node.style.width = `${Math.round(cardBox.width)}px`;
       const placed = node.getBoundingClientRect().left;
       node.style.position = "relative";
-      node.style.left = `${Math.round(inputBox.left - placed)}px`;
+      node.style.left = `${Math.round(cardBox.left - placed)}px`;
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -3986,15 +4002,28 @@ function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, ac
     };
   }, [quote !== null]);
   if (quote === null) return null;
+  const jump = () => {
+    const target = quote.target;
+    if (!(target instanceof Element) || !document.contains(target)) return;
+    target.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+    target.classList.add("bt-quote-target");
+    setTimeout(() => target.classList.remove("bt-quote-target"), 1200);
+  };
   return (0, import_react4.createElement)(
     "div",
     { ref: bar, className: "bt-quote-dock" },
     bot ? (0, import_react4.createElement)(BotMark, { bot, size: 18 }) : null,
     (0, import_react4.createElement)(
-      "div",
-      { className: "bt-quote-dock-main" },
-      (0, import_react4.createElement)("div", { className: "bt-quote-dock-who" }, bot ? t("Replying to {name}", { name: bot.name }) : t("Replying to a message")),
-      (0, import_react4.createElement)("div", { className: "bt-quote-dock-text" }, quote.excerpt)
+      "button",
+      {
+        type: "button",
+        className: "bt-quote-dock-main",
+        "aria-label": t("Go to the quoted message"),
+        title: t("Go to the quoted message"),
+        onClick: jump
+      },
+      (0, import_react4.createElement)("span", { className: "bt-quote-dock-who" }, bot ? t("Replying to {name}", { name: bot.name }) : t("Replying to a message")),
+      (0, import_react4.createElement)("span", { className: "bt-quote-dock-text" }, quote.excerpt)
     ),
     (0, import_react4.createElement)("button", {
       type: "button",
@@ -4844,7 +4873,7 @@ function MessageTools({ text, name, bot, sessionId, react, actions }) {
     "div",
     { ref: tools, className: "bt-tools", "data-open": panel !== null || void 0 },
     react ? (0, import_react8.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("Add reaction"), title: t("Add reaction"), "aria-expanded": panel === "react", onClick: (event) => open("react", event) }, (0, import_react8.createElement)(SmileIcon)) : null,
-    sessionId ? (0, import_react8.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("Reply"), title: t("Reply"), onClick: () => actions.quote(sessionId, text, bot) }, (0, import_react8.createElement)(ReplyIcon)) : null,
+    sessionId ? (0, import_react8.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("Reply"), title: t("Reply"), onClick: (event) => actions.quote(sessionId, text, bot, event.currentTarget.closest(".bt-msg-line")?.querySelector(".bt-bubble") ?? event.currentTarget.closest(".bt-msg-line")) }, (0, import_react8.createElement)(ReplyIcon)) : null,
     (0, import_react8.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("More message actions"), title: t("More"), "aria-haspopup": "menu", "aria-expanded": panel === "more", onClick: (event) => open("more", event) }, copied ? (0, import_react8.createElement)(CheckIcon) : (0, import_react8.createElement)(DotsIcon)),
     panel === "react" ? (0, import_react_dom.createPortal)((0, import_react8.createElement)(
       "div",
@@ -15661,7 +15690,7 @@ function apply(ctx) {
       return void 0;
     }
   };
-  actions.quote = (sessionId, text, bot) => {
+  actions.quote = (sessionId, text, bot, target) => {
     const facade = quoteFacade(sessionId);
     if (facade === void 0) {
       actions.reportError(new Error("no composer to quote into"), "quote");
@@ -15670,7 +15699,7 @@ function apply(ctx) {
     const { ref, clipboardText, label, excerpt } = quoteRef(bot, text);
     ui2.set((state) => ({
       ...state,
-      quote: { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, before: facade.state.getSnapshot().draft, token: Date.now(), inserted: false }
+      quote: { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, before: facade.state.getSnapshot().draft, target: target instanceof Element ? target : null, token: Date.now(), inserted: false }
     }));
   };
   actions.quoteInsert = (token, span) => {

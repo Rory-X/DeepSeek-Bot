@@ -107,7 +107,7 @@ function MessageTools({ text, name, bot, sessionId, react, actions }) {
   const item = (label, Icon, run) => h('button', { key: label, type: 'button', role: 'menuitem', onClick: () => { close(); run() } }, h(Icon), label)
   return h('div', { ref: tools, className: 'bt-tools', 'data-open': panel !== null || undefined },
     react ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Add reaction'), title: t('Add reaction'), 'aria-expanded': panel === 'react', onClick: event => open('react', event) }, h(SmileIcon)) : null,
-    sessionId ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Reply'), title: t('Reply'), onClick: () => actions.quote(sessionId, text, bot) }, h(ReplyIcon)) : null,
+    sessionId ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Reply'), title: t('Reply'), onClick: (event) => actions.quote(sessionId, text, bot, event.currentTarget.closest('.bt-msg-line')?.querySelector('.bt-bubble') ?? event.currentTarget.closest('.bt-msg-line')) }, h(ReplyIcon)) : null,
     h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('More message actions'), title: t('More'), 'aria-haspopup': 'menu', 'aria-expanded': panel === 'more', onClick: event => open('more', event) }, copied ? h(CheckIcon) : h(DotsIcon)),
     panel === 'react' ? createPortal(h('div', { ref: pop, className: 'bt-react-strip', role: 'menu', 'aria-label': t('Reactions'), style: place },
       REACTIONS.map(emoji => h('button', { key: emoji, type: 'button', role: 'menuitem', 'aria-label': emoji, onClick: () => { close(); react(emoji) } }, emoji))), document.body) : null,

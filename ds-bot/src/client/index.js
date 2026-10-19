@@ -904,7 +904,7 @@ export function apply(ctx) {
     if (binding === undefined || conversation === undefined) return undefined
     try { return conversation.input.for(binding.ctx) } catch { return undefined }
   }
-  actions.quote = (sessionId, text, bot) => {
+  actions.quote = (sessionId, text, bot, target) => {
     const facade = quoteFacade(sessionId)
     if (facade === undefined) {
       actions.reportError(new Error('no composer to quote into'), 'quote')
@@ -913,7 +913,7 @@ export function apply(ctx) {
     const { ref, clipboardText, label, excerpt } = quoteRef(bot, text)
     ui.set(state => ({
       ...state,
-      quote: { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, before: facade.state.getSnapshot().draft, token: Date.now(), inserted: false },
+      quote: { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, before: facade.state.getSnapshot().draft, target: target instanceof Element ? target : null, token: Date.now(), inserted: false },
     }))
   }
   actions.quoteInsert = (token, span) => {

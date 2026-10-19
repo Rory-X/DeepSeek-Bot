@@ -1122,7 +1122,9 @@ div:has(> nav [class*="_marks"]){display:none!important}
 .bt-q-inline .bt-q{margin:0;max-width:min(550px,86%);order:0}
 .bt-q-dock{width:100%;display:flex;justify-content:center}
 .bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
-.bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px}
+.bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px;margin:0;padding:0;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;border-radius:8px;transition:background-color .12s ease}
+.bt-quote-dock-main:hover{background:var(--bt-hover)}
+.bt-quote-dock-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
 .bt-quote-dock-who{font-size:12px;line-height:16px;font-weight:600;color:var(--bt-ink)}
 .bt-quote-dock-text{font-size:12px;line-height:16px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-quote-dock-x{flex:none;width:24px;height:24px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--bt-ink-3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
@@ -1172,6 +1174,10 @@ div:has(> nav [class*="_marks"]){display:none!important}
 .bt-ubody .bt-quote-text{color:color-mix(in srgb,var(--bt-user-ink) 78%,transparent)}
 .bt-quote[data-compact]{padding:5px 9px 5px 8px}
 .bt-quote[data-compact] .bt-quote-who{display:none}
+/* The message a quote points at flashes once when the quote bar is pressed. */
+@keyframes bt-quote-target{from{background-color:color-mix(in srgb,var(--bt-accent) 18%,transparent)}to{background-color:transparent}}
+.bt-quote-target{border-radius:18px;animation:bt-quote-target 1.2s ease-out}
+@media (prefers-reduced-motion:reduce){.bt-quote-target{animation:none;background-color:color-mix(in srgb,var(--bt-accent) 12%,transparent)}}
 .bt-uimages{display:block;font-size:12px;opacity:.7}
 .bt-earlier .bt-event{margin:4px 0}
 .bt-part-line{display:flex;align-items:center;gap:10px;margin:10px 0 6px;font-size:11px;line-height:14px;color:var(--bt-ink-3)}

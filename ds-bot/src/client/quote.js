@@ -5,6 +5,7 @@ import { BotMark, colorOf } from './mark.js'
 import { inkText } from './inks.js'
 import { t } from './i18n.js'
 import { CloseIcon } from './icons.js'
+import { reducedMotion } from './activity-row.js'
 
 // The excerpt a quote keeps, in characters; the rest of the message stays out of it.
 const QUOTE_LIMIT = 200
@@ -106,14 +107,25 @@ export function ComposerQuote({ sessionId, inputActions, useInput, useRoster, us
     const node = bar.current
     const input = document.querySelector('[class*="_centerCol"] [role=textbox][contenteditable=true], [class*="_centerCol"] textarea')
     if (node === null || input === null) return undefined
+    // The reader's "input" is the rounded composer card that holds the text box and the
+    // buttons, so the bar is laid over that box, not over the bare text.
+    const cardOf = (start) => {
+      let node = start.parentElement
+      for (let depth = 0; depth < 8 && node !== null; depth += 1) {
+        const style = getComputedStyle(node)
+        if (parseFloat(style.borderTopWidth) > 0 && node.querySelectorAll('button').length >= 2) return node
+        node = node.parentElement
+      }
+      return start
+    }
     const measure = () => {
-      const inputBox = input.getBoundingClientRect()
+      const cardBox = cardOf(input).getBoundingClientRect()
       node.style.marginLeft = '0px'
       node.style.left = '0px'
-      node.style.width = `${Math.round(inputBox.width)}px`
+      node.style.width = `${Math.round(cardBox.width)}px`
       const placed = node.getBoundingClientRect().left
       node.style.position = 'relative'
-      node.style.left = `${Math.round(inputBox.left - placed)}px`
+      node.style.left = `${Math.round(cardBox.left - placed)}px`
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -122,11 +134,22 @@ export function ComposerQuote({ sessionId, inputActions, useInput, useRoster, us
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
   }, [quote !== null])
   if (quote === null) return null
+  // A message still on screen is scrolled to and flashes once; one already gone is a no-op.
+  const jump = () => {
+    const target = quote.target
+    if (!(target instanceof Element) || !document.contains(target)) return
+    target.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' })
+    target.classList.add('bt-quote-target')
+    setTimeout(() => target.classList.remove('bt-quote-target'), 1200)
+  }
   return h('div', { ref: bar, className: 'bt-quote-dock' },
   bot ? h(BotMark, { bot, size: 18 }) : null,
-  h('div', { className: 'bt-quote-dock-main' },
-    h('div', { className: 'bt-quote-dock-who' }, bot ? t('Replying to {name}', { name: bot.name }) : t('Replying to a message')),
-    h('div', { className: 'bt-quote-dock-text' }, quote.excerpt)),
+  h('button', {
+    type: 'button', className: 'bt-quote-dock-main', 'aria-label': t('Go to the quoted message'), title: t('Go to the quoted message'),
+    onClick: jump,
+  },
+  h('span', { className: 'bt-quote-dock-who' }, bot ? t('Replying to {name}', { name: bot.name }) : t('Replying to a message')),
+  h('span', { className: 'bt-quote-dock-text' }, quote.excerpt)),
   h('button', {
     type: 'button', className: 'bt-quote-dock-x', 'aria-label': t('Cancel reply'), title: t('Cancel reply'),
     onClick: () => actions.quoteCancel(quote.token),
