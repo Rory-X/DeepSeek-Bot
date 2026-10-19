@@ -74,7 +74,7 @@ Settings → **Capabilities** is a shared library of MCP servers, skills and pac
 
 ### Connectors
 
-Settings → **Connectors** connects outside services whose tools every Bot can use. Connect GitHub (`GITHUB_TOKEN`) or Vercel (`VERCEL_TOKEN`) once: the token stays in Secrets and only the MCP connection carries it. GitHub's tools are `mcp__github__…`; Vercel is connected read-only, with tools such as `vercel_list_projects` and `vercel_get_runtime_logs`.
+Settings → **Connectors** connects outside services whose tools every Bot can use. Connect GitHub (`GITHUB_TOKEN`) or Vercel (`VERCEL_TOKEN`) once: the token stays in Secrets and only the MCP connection carries it. GitHub's tools are `mcp__github__…`; Vercel is connected read-only, with tools such as `vercel_list_projects` and `vercel_get_runtime_logs`. Vercel's four deployment actions are off by default: turn them on in the connector and each call asks for approval.
 
 ### Usage
 

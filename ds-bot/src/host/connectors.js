@@ -35,6 +35,10 @@ const VERCEL_READ_TOOLS = [
   'get_git_deployment_context',
 ]
 
+// The deployment actions Vercel's server offers. They change something outside DS Bot,
+// so they are registered only when the user turns them on, and every call asks first.
+const VERCEL_ACTION_TOOLS = ['create_deployment', 'cancel_deployment', 'request_promote', 'request_rollback']
+
 // Every connector, by the id its tools and the team file use. A profile overrides `url`
 // or `api` per service, or hides it with `false`. `mode` picks how its tools are mounted:
 // `mcp-client` mounts the whole server through DSH, `read-tools` registers only
@@ -61,6 +65,7 @@ const CONNECTORS = {
     api: 'https://api.vercel.com',
     tokenSecret: 'VERCEL_TOKEN',
     readTools: VERCEL_READ_TOOLS,
+    actionTools: VERCEL_ACTION_TOOLS,
     accountField: 'username',
     checkPath: '/v2/user',
     checkHeaders: token => ({ Authorization: `Bearer ${token}` }),
@@ -91,7 +96,7 @@ export async function signIn(id, token, { api, fetch: request = fetch } = {}) {
   const body = await response.json().catch(() => ({}))
   const account = connector.accountOf(body)
   if (typeof account !== 'string') throw new Error(`${connector.displayName} did not say who this token belongs to`)
-  return { [connector.accountField]: account, ...(connector.accountExtra?.(body) ?? {}) }
+  return { [connector.accountField]: account, ...connector.accountExtra?.(body) }
 }
 
 export function install(rt) {
@@ -104,6 +109,24 @@ export function install(rt) {
     options[id] = { ...connector, ...override, url: override.url ?? connector.mcpUrl, api: override.api ?? connector.api }
   }
   const ids = Object.keys(options)
+  // A connector action changes something outside DS Bot, so each call asks the user
+  // through DSH's own approval card before it runs.
+  const actionTools = new Map()
+  for (const [id, connector] of Object.entries(options)) {
+    for (const name of connector.actionTools ?? []) actionTools.set(`${id}_${name}`, { connector: connector.displayName, name })
+  }
+  ctx.on('tools/pre-execute', async (exec, next) => {
+    const action = actionTools.get(exec.name)
+    if (action === undefined) return next()
+    return {
+      kind: 'ask',
+      reason: `${action.connector}: ${action.name} changes the connected account`,
+      displayReason: {
+        en: `Run ${action.connector}'s ${action.name} on the connected account? It changes your projects or deployments.`,
+        zh: `要在已连接的 ${action.connector} 账号上执行 ${action.name} 吗？这会改动你的项目或部署。`,
+      },
+    }
+  })
   // `token` is what the current mount was made with, so a changed secret mounts again.
   const mounts = new Map()
   const statuses = new Map(ids.map(id => [id, { state: 'off' }]))
@@ -147,7 +170,7 @@ export function install(rt) {
       parameters,
       output,
       async execute(args) {
-        const call = { ...(args ?? {}) }
+        const call = { ...args }
         // The default team of the token's account answers the calls that need one; an
         // explicit argument wins.
         if (teamId !== undefined && parameters.properties?.teamId !== undefined && call.teamId === undefined) call.teamId = teamId
@@ -170,7 +193,8 @@ export function install(rt) {
     if (!replace && state.connectors?.[id]?.[connector.accountField] !== undefined) return
     try {
       const account = await signIn(id, token, { api: connector.api })
-      state.connectors = { ...state.connectors, [id]: { ...account, connectedAt: Date.now() } }
+      const actions = state.connectors?.[id]?.actions === true ? { actions: true } : {}
+      state.connectors = { ...state.connectors, [id]: { ...actions, ...account, connectedAt: Date.now() } }
       await rt.save()
     } catch (error) {
       rt.warn('ds-bot: could not read the %s account of the saved token: %s', connector.displayName, reason(error))
@@ -183,7 +207,9 @@ export function install(rt) {
     try {
       await client.open()
       const listed = await client.listTools()
-      const picked = listed.filter(tool => connector.readTools.includes(tool.name))
+      const actions = state.connectors?.[id]?.actions === true
+      const wanted = [...connector.readTools, ...(actions ? connector.actionTools ?? [] : [])]
+      const picked = listed.filter(tool => wanted.includes(tool.name))
       if (picked.length === 0) throw new Error(`${connector.displayName} offers none of the read tools DS Bot exposes`)
       const teamId = state.connectors?.[id]?.teamId ?? connector.teamId
       const dispose = []
@@ -276,6 +302,7 @@ export function install(rt) {
       state: status.state,
       ...(status.error !== undefined ? { error: status.error } : {}),
       account: rt.secretValue(connector.tokenSecret) !== undefined ? state.connectors?.[id]?.[connector.accountField] ?? null : null,
+      ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
     }
   })
 
@@ -295,7 +322,8 @@ export function install(rt) {
       const account = await signIn(body.id, token, { api: connector.api })
       // The account is written before the secret, so the mount the secret change starts
       // already knows the default team it hands to the read tools.
-      state.connectors = { ...state.connectors, [body.id]: { ...account, connectedAt: Date.now() } }
+      const actions = state.connectors?.[body.id]?.actions === true ? { actions: true } : {}
+      state.connectors = { ...state.connectors, [body.id]: { ...actions, ...account, connectedAt: Date.now() } }
       try {
         await rt.secretEndpoint('secret-set', { name: connector.tokenSecret, value: token, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
       } catch (error) {
@@ -321,6 +349,16 @@ export function install(rt) {
     async 'connector-retry'(body) {
       known(body.id)
       await rt.loadSecrets()
+      await sync(body.id, true)
+      return connectorsView()
+    },
+    async 'connector-set-actions'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.actionTools === undefined) throw new Error('This connector has no actions')
+      const enabled = body.enabled === true
+      state.connectors = { ...state.connectors, [body.id]: { ...state.connectors?.[body.id], actions: enabled } }
+      await rt.save()
       await sync(body.id, true)
       return connectorsView()
     },
