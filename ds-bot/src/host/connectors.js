@@ -4,7 +4,9 @@
 // GitHub uses DSH's own MCP client and the toolsets GitHub's server offers. A service
 // without a server-side tool filter (Vercel) goes through `mcp.js` instead: DS Bot opens
 // the session itself and registers only the read tools the connector names, so the write
-// tools are never in a model's context and cannot be called at all.
+// tools are never in a model's context and cannot be called at all. A service with only a
+// REST API gets `rest-tools`: one read-only GET per tool, defined in the registry. Slack
+// and Telegram are notification connectors: they send one message a Bot was asked to send.
 //
 // The token is the connector's own secret (secrets.js keeps it, redacts it, and offers it
 // to the shell). It reaches the service only in the MCP request headers, built here in
@@ -12,6 +14,8 @@
 // the tools do not need it there, and a Bot that reads a planted instruction in an issue
 // could send it anywhere. The Secrets page can still share it.
 import { McpHttpClient, mcpResultText } from './mcp.js'
+import { createSlackTool, createTelegramTool, sendSlack, sendTelegram, verifySlack, verifyTelegram } from './notify.js'
+import { createRestTools } from './rest-tools.js'
 import { output } from './tools.js'
 import { buildToolIndex, createCallTool, createSearchTool, TOOLBOX_TOOLS } from './vercel-toolbox.js'
 
@@ -73,6 +77,36 @@ const CONNECTORS = {
     checkHeaders: token => ({ Authorization: `Bearer ${token}` }),
     accountOf: body => body?.user?.username,
     accountExtra: body => (typeof body?.user?.defaultTeamId === 'string' ? { teamId: body.user.defaultTeamId } : {}),
+  },
+  slack: {
+    displayName: 'Slack',
+    mode: 'notify',
+    tokenSecret: 'SLACK_WEBHOOK_URL',
+    accountField: 'username',
+  },
+  telegram: {
+    displayName: 'Telegram',
+    mode: 'notify',
+    api: 'https://api.telegram.org',
+    tokenSecret: 'TELEGRAM_BOT_TOKEN',
+    needsChatId: true,
+    accountField: 'username',
+  },
+}
+
+// How each notification connector checks its secret, builds its tools and sends one
+// message; the test button uses the same send.
+const TEST_TEXT = 'DS Bot: the connection works.'
+const NOTIFY = {
+  slack: {
+    verify: (token, { api, fetch: request }) => verifySlack(token, { api, fetch: request }),
+    tools: ({ token, redact, fetch: request }) => [createSlackTool({ webhook: token, redact, fetch: request })],
+    send: ({ token, text, fetch: request }) => sendSlack({ webhook: token, text, fetch: request }),
+  },
+  telegram: {
+    verify: (token, { api, fetch: request }) => verifyTelegram(token, { api, fetch: request }),
+    tools: ({ token, chatId, api, redact, fetch: request }) => [createTelegramTool({ token, chatId, api, redact, fetch: request })],
+    send: ({ token, chatId, text, api, fetch: request }) => sendTelegram({ token, chatId, text, api, fetch: request }),
   },
 }
 
@@ -148,7 +182,7 @@ export function install(rt) {
     if (entry.class === 'write') return askAction(options[owner].displayName, target)
     return next()
   })
-  const insecure = id => [options[id].url, options[id].api].some(address => !/^https:\/\//i.test(String(address)))
+  const insecure = id => [options[id].url, options[id].api].filter(address => address !== undefined).some(address => !/^https:\/\//i.test(String(address)))
   const insecureText = id => `${options[id].displayName} addresses must start with https://`
   // The switches a connect or an account probe must carry over instead of dropping.
   const switchesOf = (id) => {
@@ -248,6 +282,37 @@ export function install(rt) {
     }
   }
 
+  // A notification connector registers its one tool as soon as its secret exists. The
+  // Telegram chat id lives in the team file, so mounting needs no network call.
+  function mountNotify(id, token) {
+    const connector = options[id]
+    const chatId = state.connectors?.[id]?.chatId
+    if (connector.needsChatId === true && typeof chatId !== 'string') {
+      mounts.set(id, { token })
+      statuses.set(id, { state: 'error', error: 'Add the chat id the message goes to.' })
+      return undefined
+    }
+    const dispose = []
+    try {
+      for (const tool of NOTIFY[id].tools({ token, chatId, api: connector.api, redact: rt.redactSecrets, output })) dispose.push(ctx.tools.register(tool))
+    } catch (error) {
+      for (const undo of dispose) undo()
+      throw error
+    }
+    return { token, dispose }
+  }
+
+  function mountRestTools(id, token) {
+    const dispose = []
+    try {
+      for (const tool of createRestTools(id, options[id], { token, output, redact: rt.redactSecrets })) dispose.push(ctx.tools.register(tool))
+    } catch (error) {
+      for (const undo of dispose) undo()
+      throw error
+    }
+    return { token, dispose }
+  }
+
   async function reconcile(id, force) {
     const connector = options[id]
     const previous = mounts.get(id)?.token
@@ -271,8 +336,26 @@ export function install(rt) {
       await claimAccount(id, token, replaced)
       if (stopped || mounts.get(id) !== attempt) return
     }
+    if (connector.mode === 'notify' || connector.mode === 'rest-tools') {
+      try {
+        const mounted = connector.mode === 'notify' ? mountNotify(id, token) : mountRestTools(id, token)
+        if (mounted === undefined) return
+        if (stopped || mounts.get(id) !== attempt) {
+          for (const undo of mounted.dispose) undo()
+          return
+        }
+        mounts.set(id, mounted)
+        statuses.set(id, { state: 'ready' })
+      } catch (error) {
+        await unmount(id)
+        mounts.set(id, { token })
+        statuses.set(id, { state: 'error', error: reason(error) })
+        rt.warn('ds-bot: %s connector failed: %s', connector.displayName, statuses.get(id).error)
+      }
+      return
+    }
     const loader = ctx.get?.('loader')
-    if (connector.mode !== 'read-tools' && (typeof loader?.import !== 'function' || typeof ctx.plugin !== 'function')) {
+    if (connector.mode === 'mcp-client' && (typeof loader?.import !== 'function' || typeof ctx.plugin !== 'function')) {
       statuses.set(id, { state: 'error', error: 'This DSH cannot load connectors' })
       return
     }
@@ -326,6 +409,10 @@ export function install(rt) {
       account: rt.secretValue(connector.tokenSecret) !== undefined ? state.connectors?.[id]?.[connector.accountField] ?? null : null,
       ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
       ...(connector.toolbox === true ? { toolbox: state.connectors?.[id]?.toolbox === true } : {}),
+      ...(connector.mode === 'notify' ? {
+        testable: true,
+        ...(typeof state.connectors?.[id]?.chatId === 'string' ? { chatId: state.connectors[id].chatId } : {}),
+      } : {}),
     }
   })
 
@@ -342,10 +429,12 @@ export function install(rt) {
       if (insecure(body.id)) throw new Error(insecureText(body.id))
       await rt.loadSecrets()
       const kept = rt.secretValue(connector.tokenSecret) !== undefined
-      const account = await signIn(body.id, token, { api: connector.api })
-      // The account is written before the secret, so the mount the secret change starts
-      // already knows the default team it hands to the read tools.
-      state.connectors = { ...state.connectors, [body.id]: { ...switchesOf(body.id), ...account, connectedAt: Date.now() } }
+      const account = connector.mode === 'notify' ? await NOTIFY[body.id].verify(token, { api: connector.api }) : await signIn(body.id, token, { api: connector.api })
+      const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : ''
+      if (connector.needsChatId === true && chatId === '') throw new Error('Add the chat id the message goes to.')
+      // What the mount needs is written before the secret, so the mount the secret change
+      // starts already knows the account (and a Telegram chat id).
+      state.connectors = { ...state.connectors, [body.id]: { ...switchesOf(body.id), ...account, ...(chatId === '' ? {} : { chatId }), connectedAt: Date.now() } }
       try {
         await rt.secretEndpoint('secret-set', { name: connector.tokenSecret, value: token, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
       } catch (error) {
@@ -373,6 +462,20 @@ export function install(rt) {
       await rt.loadSecrets()
       await sync(body.id, true)
       return connectorsView()
+    },
+    async 'connector-test'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.mode !== 'notify') throw new Error('This connector cannot send a test message')
+      await rt.loadSecrets()
+      const token = rt.secretValue(connector.tokenSecret)
+      if (token === undefined) throw new Error('Connect this connector first')
+      try {
+        await NOTIFY[body.id].send({ token, chatId: state.connectors?.[body.id]?.chatId, text: TEST_TEXT, api: connector.api })
+      } catch (error) {
+        throw new Error(reason(error))
+      }
+      return { sent: true }
     },
     async 'connector-set-actions'(body) {
       known(body.id)

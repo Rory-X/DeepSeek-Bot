@@ -277,6 +277,7 @@ export function install(rt) {
         case 'connector-retry':
         case 'connector-set-actions':
         case 'connector-set-toolbox':
+        case 'connector-test':
           await rt.load()
           return ok(await rt.connectorEndpoint(endpoint, body))
         case 'capability-save':

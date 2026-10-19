@@ -11,7 +11,13 @@ import { fakeContext } from './fake-ctx.js'
 const fresh = () => `tok_${randomBytes(16).toString('hex')}`
 const answer = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
 const off = id => ({ id, state: 'off', account: null })
-const OFF = { github: { id: 'github', name: 'GitHub', ...off('github') }, vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false } }
+const OFF = {
+  github: { id: 'github', name: 'GitHub', ...off('github') },
+  vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false },
+  slack: { id: 'slack', name: 'Slack', ...off('slack'), testable: true },
+  telegram: { id: 'telegram', name: 'Telegram', ...off('telegram'), testable: true },
+}
+const OFF_ALL = [OFF.github, OFF.vercel, OFF.slack, OFF.telegram]
 const statuses = view => view.map(item => [item.id, item.state, item.account])
 
 test('signIn asks GitHub who owns the token', async () => {
@@ -187,11 +193,11 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   const token = fresh()
 
   const before = await call(ctx, 'state', {})
-  assert.deepEqual(before.value.connectors, [OFF.github, OFF.vercel])
+  assert.deepEqual(before.value.connectors, OFF_ALL)
 
   const connected = await call(ctx, 'connector-connect', { id: 'github', token: ` ${token} ` })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo' }, OFF.vercel])
+  assert.deepEqual(connected.value, [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo' }, OFF.vercel, OFF.slack, OFF.telegram])
   assert.equal(mounts.length, 1)
   assert.deepEqual(mounts[0].config, githubMount(token))
   const state = await call(ctx, 'state', {})
@@ -200,7 +206,7 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes(token))
 
   const disconnected = await call(ctx, 'connector-disconnect', { id: 'github' })
-  assert.deepEqual(disconnected.value, [OFF.github, OFF.vercel])
+  assert.deepEqual(disconnected.value, OFF_ALL)
   assert.equal(mounts[0].disposed, true)
   assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
 })
@@ -244,7 +250,7 @@ test('deleting GITHUB_TOKEN on the Secrets page unmounts GitHub', async (t) => {
   await call(ctx, 'secret-delete', { name: 'GITHUB_TOKEN' })
   const state = await call(ctx, 'state', {})
   assert.equal(mounts[0].disposed, true)
-  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null]])
+  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['slack', 'off', null], ['telegram', 'off', null]])
 })
 
 test('connecting Vercel mounts only its read tools, and the default team answers what needs one', async (t) => {
@@ -258,7 +264,7 @@ test('connecting Vercel mounts only its read tools, and the default team answers
 
   const connected = await call(ctx, 'connector-connect', { id: 'vercel', token })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false }])
+  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false }, OFF.slack, OFF.telegram])
   // The write tool is never registered, and Vercel is not mounted through DSH's client.
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts.length, 0)
@@ -556,7 +562,7 @@ test('deleting VERCEL_TOKEN on the Secrets page unmounts Vercel and its tools', 
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   await call(ctx, 'secret-delete', { name: 'VERCEL_TOKEN' })
   const state = await call(ctx, 'state', {})
-  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null]])
+  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['slack', 'off', null], ['telegram', 'off', null]])
   assert.deepEqual([...disposed].sort(), vercelNames(VERCEL_READ).sort())
 })
 
@@ -572,12 +578,12 @@ test('each connector mounts and unmounts on its own', async (t) => {
   await call(ctx, 'connector-connect', { id: 'vercel', token: fresh() })
   assert.equal(mounts.length, 1)
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
-  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'ready', 'acme']])
+  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'ready', 'acme'], ['slack', 'off', null], ['telegram', 'off', null]])
 
   await call(ctx, 'connector-disconnect', { id: 'vercel' })
   assert.deepEqual([...disposed].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts[0].disposed, false)
-  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'off', null]])
+  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'off', null], ['slack', 'off', null], ['telegram', 'off', null]])
 
   await call(ctx, 'connector-disconnect', { id: 'github' })
   assert.equal(mounts[0].disposed, true)
@@ -586,13 +592,13 @@ test('each connector mounts and unmounts on its own', async (t) => {
 test('github: false hides only the GitHub connector', async (t) => {
   const { ctx, home } = setup({ github: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.vercel])
+  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.vercel, OFF.slack, OFF.telegram])
 })
 
 test('vercel: false hides only the Vercel connector', async (t) => {
   const { ctx, home } = setup({ vercel: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.github])
+  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.github, OFF.slack, OFF.telegram])
 })
 
 test('a GitHub address without https refuses to send the token', async (t) => {
@@ -621,6 +627,93 @@ test('a Vercel address without https refuses to send the token', async (t) => {
   assert.match(refused.error.message, /https/)
   assert.equal(asked, false)
   assert.deepEqual(registered, [])
+})
+
+test('connecting Slack keeps its webhook in Secrets and registers notify_slack', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const webhook = 'https://hooks.slack.com/services/T000/B000/secret'
+  const sent = []
+  globalThis.fetch = async (url, init) => { sent.push([url, JSON.parse(init.body)]); return { status: 200, ok: true, text: async () => 'ok' } }
+  const { ctx, home, registered } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const connected = await call(ctx, 'connector-connect', { id: 'slack', token: webhook })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  assert.deepEqual(connected.value[2], { id: 'slack', name: 'Slack', state: 'ready', account: null, testable: true })
+  assert.deepEqual(registered, ['notify_slack'])
+  assert.deepEqual((await call(ctx, 'state', {})).value.secrets.map(secret => [secret.name, secret.scope]), [['SLACK_WEBHOOK_URL', []]])
+
+  const tested = await call(ctx, 'connector-test', { id: 'slack' })
+  assert.deepEqual(tested.value, { sent: true })
+  assert.deepEqual(sent, [[webhook, { text: 'DS Bot: the connection works.' }]])
+
+  globalThis.fetch = async () => ({ status: 400, ok: false, text: async () => 'invalid_payload' })
+  const failed = await call(ctx, 'connector-test', { id: 'slack' })
+  assert.equal(failed.ok, false)
+  assert.match(failed.error.message, /invalid_payload/)
+
+  const disconnected = await call(ctx, 'connector-disconnect', { id: 'slack' })
+  assert.equal(disconnected.value[2].state, 'off')
+})
+
+test('a Slack webhook with the wrong shape is refused', async (t) => {
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const result = await call(ctx, 'connector-connect', { id: 'slack', token: 'https://example.com/nope' })
+  assert.equal(result.ok, false)
+  assert.match(result.error.message, /incoming webhook URL/)
+})
+
+test('connecting Telegram checks the bot and keeps its chat id', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const token = '123456:telegram-token'
+  const seen = []
+  globalThis.fetch = async (url) => {
+    seen.push(String(url))
+    if (String(url).endsWith('/getMe')) return { status: 200, ok: true, json: async () => ({ ok: true, result: { username: 'ds_bot' } }) }
+    return { status: 200, ok: true, json: async () => ({ ok: true }) }
+  }
+  const { ctx, home, registered } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const missing = await call(ctx, 'connector-connect', { id: 'telegram', token })
+  assert.equal(missing.ok, false)
+  assert.match(missing.error.message, /chat id/)
+
+  const connected = await call(ctx, 'connector-connect', { id: 'telegram', token, chatId: '-100200' })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  assert.deepEqual(connected.value[3], { id: 'telegram', name: 'Telegram', state: 'ready', account: 'ds_bot', testable: true, chatId: '-100200' })
+  assert.deepEqual(registered, ['notify_telegram'])
+  assert.ok(seen[0].endsWith('/getMe'))
+
+  const tested = await call(ctx, 'connector-test', { id: 'telegram' })
+  assert.deepEqual(tested.value, { sent: true })
+  assert.ok(seen.at(-1).endsWith('/sendMessage'))
+})
+
+test('a saved notification secret connects on its own', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const webhook = 'https://hooks.slack.com/services/T000/B000/self'
+  globalThis.fetch = async () => ({ status: 200, ok: true, text: async () => 'ok' })
+  const { ctx, home, registered } = setup({ secrets: [{ name: 'SLACK_WEBHOOK_URL', value: webhook }] })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const ready = await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[2]
+    return item?.state === 'ready' ? item : undefined
+  }, 'Slack to connect from its saved webhook')
+  assert.deepEqual([ready.account, ready.testable], [null, true])
+  assert.deepEqual(registered, ['notify_slack'])
+})
+
+test('only notification connectors can send a test message', async (t) => {
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const result = await call(ctx, 'connector-test', { id: 'github' })
+  assert.equal(result.ok, false)
+  assert.match(result.error.message, /cannot send a test message/)
 })
 
 test('an unknown connector is refused', async (t) => {
