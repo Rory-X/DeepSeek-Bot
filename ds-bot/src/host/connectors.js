@@ -198,6 +198,8 @@ export function install(rt) {
     const setting = rt.config[id]
     const override = setting !== null && typeof setting === 'object' ? setting : {}
     options[id] = { ...connector, ...override, url: override.url ?? connector.mcpUrl, api: override.api ?? connector.api }
+    // `imap-read` was the name the first IMAP draft used; one IMAP mode serves Gmail and QQ.
+    if (options[id].mode === 'imap-read') options[id].mode = 'imap'
   }
   const ids = Object.keys(options)
   // `token` is what the current mount was made with, so a changed secret mounts again.
@@ -337,6 +339,12 @@ export function install(rt) {
   // bring its own `verify` hook (a POST login, an IMAP login); a connector with a `checkPath`
   // falls back to the GET signIn; one with neither is accepted once the credentials exist.
   const verifyConnector = async (id, connector, values) => {
+    // A protocol the framework does not speak checks its own credentials; the hook gets the
+    // single token and returns the state fields (an account name, usually).
+    if (typeof connector.signIn === 'function') {
+      const extra = await connector.signIn(values[connector.tokenSecret] ?? Object.values(values)[0])
+      return extra !== null && typeof extra === 'object' && !Array.isArray(extra) ? extra : {}
+    }
     if (typeof connector.verify === 'function') {
       const token = values[connector.tokenSecret] ?? Object.values(values)[0]
       const extra = await connector.verify({ token, secrets: { ...values }, api: connector.api })
@@ -373,9 +381,10 @@ export function install(rt) {
   // `mountTools`, which returns disposers and an optional close.
   function mountConnectorTools(id) {
     const connector = options[id]
-    if (typeof connector.mountTools !== 'function') throw new Error(`${connector.displayName} has no tools to mount`)
+    const mount = connector.mountTools ?? connector.mount
+    if (typeof mount !== 'function') throw new Error(`${connector.displayName} has no tools to mount`)
     const secrets = secretMapOf(connector)
-    const mounted = connector.mountTools({
+    const mounted = mount({
       ctx,
       rt,
       connector,
@@ -386,9 +395,13 @@ export function install(rt) {
       redact: rt.redactSecrets,
     })
     if (mounted === undefined || mounted === null) return { token: credentialKeyOf(connector), dispose: [] }
+    // A module may hand back already-built tools or its own disposers.
+    const dispose = Array.isArray(mounted.tools)
+      ? mounted.tools.map(tool => ctx.tools.register(tool))
+      : Array.isArray(mounted.dispose) ? mounted.dispose : []
     return {
       token: credentialKeyOf(connector),
-      dispose: Array.isArray(mounted.dispose) ? mounted.dispose : [],
+      dispose,
       ...(typeof mounted.close === 'function' ? { close: mounted.close } : {}),
     }
   }
@@ -722,6 +735,9 @@ export function install(rt) {
         ? { mode: connector.mode, inputs: credentialFields(connector) }
         : {}),
       ...(connector.card === undefined ? {} : { card: connector.card }),
+      ...Object.fromEntries(['readOnly', 'readOnlyNote', 'glyph', 'about', 'docsUrl']
+        .filter(key => connector[key] !== undefined)
+        .map(key => [key, connector[key]])),
       ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
       ...(connector.toolbox === true
         ? {
