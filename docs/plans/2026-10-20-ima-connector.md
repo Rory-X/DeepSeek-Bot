@@ -45,6 +45,14 @@
 - 真实 key 下的联调未做；mock 只覆盖协议形状，不覆盖 ima 真实字段演进。
 - `list_note` 的翻页游标语义文档没写清（响应无 `next_cursor`），先按「传 `""` 起页、再传上次结果」声明，联调时校正。
 
+## 证据（2026-10-20）
+
+- 单测：`node --test test/ima.test.js` → 11 tests / 11 pass / 0 fail，约 1.1 s；覆盖成功、401、超时、断网、业务码、半填凭据、非信封回包、写入端点缺席、body 只发映射字段。
+- 全量：`npm test` → 833 tests / 832 pass / 1 fail。唯一失败是 `test/work-dir.test.js` 的 `a model the user picks while the fresh part is made reaches the fresh part`（2 s 超时），在干净的主线 tip `2b77fa9` 主 worktree 上同样复现（19/20），与本次改动无关。
+- 门槛：`node scripts/build-client.mjs --check` 通过；`npm run lint` 0 error（14 条 warning 全是既有客户端文件，不在本次改动内）。
+- 适配器预检（用 Forge 分支未提交版 `rest-tools.js` 直接跑本声明）：9 个工具注册为 `ima_*`；两个 header + `ima-openapi-ctx` 正确；`code=0` 信封正确解包；`search_notes` 的 body 仍是平铺的点号键（见「已知限制」）。
+- 未做：真实 clientid/apikey 联调；UI 截图要等 `integ/connector-base` + 卡片渲染落地，计划两屏：连接器页 ima 卡片未连接态（390 / 1280 各一张）、连接后一次 `ima_search_kb_list` 空结果调用（不截真实笔记内容）。
+
 ## 变更
 
 - 2026-10-20：初版（声明 + 单测 + 设计说明）。
