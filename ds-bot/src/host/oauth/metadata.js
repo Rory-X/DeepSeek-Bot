@@ -21,6 +21,8 @@ const secureAddress = (value) => {
   return url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK.has(url.hostname))
 }
 
+// The resource URL may carry a query: some servers select a mode that way (Cloudflare's
+// `?codemode=false`). Credentials and fragments are still refused.
 export function normalizeResource(raw) {
   let url
   try {
@@ -28,7 +30,7 @@ export function normalizeResource(raw) {
   } catch {
     throw new OAuthError('The connector has no valid server address', 'resource')
   }
-  if (url.username !== '' || url.password !== '' || url.hash !== '' || url.search !== '') {
+  if (url.username !== '' || url.password !== '' || url.hash !== '') {
     throw new OAuthError('The connector server address must be a plain URL', 'resource')
   }
   if (!secureAddress(url.href)) throw new OAuthError('The connector server address must start with https://', 'resource')
@@ -125,10 +127,24 @@ const protectedResourceUrls = (resource, challenge) => {
   return [...new Set(candidates)]
 }
 
+// A resource named with a query (a mode selector such as `?codemode=false`) accepts
+// metadata that declares the same origin and path without one; a resource named without a
+// query still has to match exactly, so a typo or a different resource cannot slip through.
+const sameResource = (declared, resource) => {
+  const normalized = normalizeOrUndefined(declared)
+  if (normalized === undefined) return false
+  const requested = new URL(resource)
+  const answered = new URL(normalized)
+  if (requested.search === '') return answered.href === requested.href
+  return answered.origin === requested.origin
+    && answered.pathname === requested.pathname
+    && (answered.search === '' || answered.search === requested.search)
+}
+
 const validProtectedResource = (body, resource) => {
   if (body === undefined) return false
   if (!Array.isArray(body.authorization_servers) || body.authorization_servers.length === 0) return false
-  if (typeof body.resource === 'string' && body.resource !== '' && normalizeOrUndefined(body.resource) !== resource) return false
+  if (typeof body.resource === 'string' && body.resource !== '' && !sameResource(body.resource, resource)) return false
   return true
 }
 

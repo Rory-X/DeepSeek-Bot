@@ -76,6 +76,7 @@ Options go in the profile's `cordis.patch.yml`, under the `bot` entry. All of th
     updateRegistry: https://registry.example/   # ask only this npm registry for updates
     github: false                   # hide the GitHub connector; default shown in Connectors
     vercel: false                   # hide the Vercel connector; default shown in Connectors
+    cloudflare: false               # hide the Cloudflare connector; default shown in Connectors
 ```
 
 **Updates**: when a window opens, DS Bot asks where it was installed from for a newer release: the npm registry (the one the DSH plugin manager installs from, then its fallbacks), or the latest GitHub release for a `github:…#vX.Y.Z` install. A newer version shows a cloud button at the top right of the sidebar; **Update** reinstalls DS Bot through the DSH plugin manager, and the new version runs from the next DSH start. A linked or local checkout is never offered an update. Settings → About DS Bot shows the same state, with **Check for updates** to ask again at once.
@@ -84,16 +85,19 @@ The same card can carry DSH itself: a DS Bot release may name the DSH release it
 
 ## Connectors
 
-Settings → Connectors connects outside services whose MCP servers every Bot and Session can use. A connector's tools are mounted for the team; its token is kept in Secrets under the connector's name and sent only in the MCP request headers, so no Bot's shell gets it. A token is saved only when the service accepts it and says which account it belongs to.
+Settings → Connectors connects outside services whose MCP servers every Bot and Session can use. A connector's tools are mounted for the team. GitHub and Vercel keep their token in Secrets under the connector's name and send it only in the MCP request headers, so no Bot's shell gets it; a token is saved only when the service accepts it and says which account it belongs to. Cloudflare instead authorizes once in the browser, and its grant is kept in DSH's credential store — not in Secrets, the team file or any shell.
 
-| Connector | Secret | MCP server | Account check |
+| Connector | Credential | MCP server | Account check |
 |---|---|---|---|
 | GitHub | `GITHUB_TOKEN` | `https://api.githubcopilot.com/mcp/` | `GET https://api.github.com/user` |
 | Vercel | `VERCEL_TOKEN` | `https://mcp.vercel.com` | `GET https://api.vercel.com/v2/user` |
+| Cloudflare | OAuth grant (browser) | `https://mcp.cloudflare.com/mcp?codemode=false` | the server's `whoami` tool |
 
 GitHub is mounted through DSH's MCP client with the toolsets `context,repos,issues,pull_requests`, so its tools are `mcp__github__<tool>`. Vercel's server lists hundreds of tools and has no server-side filter, so DS Bot does not mount it through DSH's client: it opens the session itself and registers only the read tools it exposes, named `vercel_<tool>` (`list_projects`, `get_deployment`, `get_runtime_logs`, …). Vercel's write tools are never registered, so they cannot be called and never reach a Bot's prompt. The token's default team answers the tools that need a team id.
 
 Vercel is read-only by default. In Settings → Connectors you can turn on its four deployment actions (`create_deployment`, `cancel_deployment`, `request_promote`, `request_rollback`): they are registered only while that switch is on, and every call asks for your approval first. A second switch adds the full-capability toolbox: `vercel_search_tools` searches everything the server offers, and `vercel_call` runs one tool by name. While the toolbox is on, the four named action tools are not registered (every write through `vercel_call` still asks for approval), the 13 read tools stay, and tools that return environment values or credentials are never offered. Tool results are redacted and cut at 20,000 characters. A profile can override a connector's `url` (the MCP server) and `api` (where the token is checked), or hide it with `github: false` / `vercel: false`. Both addresses must start with `https://`; a connector with another address shows an error and never sends the token. Deleting the token on the Secrets page unmounts the connector.
+
+**Cloudflare** connects with OAuth instead of a token: **Connect** opens Cloudflare's authorization page once, and the grant (with a refresh token) is kept in DSH's credential store, never in the team file, the Secrets page or a Bot's shell. The connector uses the server's endpoint mode (`?codemode=false`, one tool per API endpoint, no code execution) and registers exactly 14 read tools: `cloudflare_whoami`, `cloudflare_get_accounts`, the zone list and zone detail tools, the two DNS record tools, four analytics reads (`cloudflare_get_zones_dns_analytics_report`, `…_bytime`, `cloudflare_get_zones_analytics_latency`, `cloudflare_get_zones_rate_limit_analytics`), the two Workers route reads and the two Workers script reads. Nothing else is mounted: no write endpoint, and none of the server's code-mode tools (`docs`, `search`, `execute`). It asks only for read scopes — `user:read`, `account:read`, `zone.read`, `dns.read`, `analytics.read`, `workers-routes.read`, `workers-scripts.read` and `offline_access` (for the refresh token) — so it can read the zones and accounts you approve on Cloudflare's page, and cannot change anything. The card shows the authorized account (the server's `whoami` answer) once connected; **Disconnect** revokes the grant. A profile can hide it with `cloudflare: false`, and a deployment behind a proxy can name the origin the authorization must return to with `oauthOrigin`.
 
 ## Models
 
