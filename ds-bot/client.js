@@ -15212,6 +15212,16 @@ function apply(ctx) {
     const bot = roster.getSnapshot().byId[id];
     return bot ? currentPart(bot) : id;
   };
+  const knownSession = (id) => typeof id === "string" && id !== "" && ctx.sessions.list.getSnapshot().byId?.[id] !== void 0;
+  const openTarget = (target) => {
+    try {
+      ctx.uiWorkspace.openSession(target);
+      return true;
+    } catch (error) {
+      actions.reportError(error, "open-session");
+      return false;
+    }
+  };
   const agentSessions = (agentId) => {
     const ids = [...roster.getSnapshot().agentsById[agentId]?.sessions ?? []];
     for (const [id, owner] of pendingAdopt) if (owner === agentId && !ids.includes(id)) ids.push(id);
@@ -15250,7 +15260,7 @@ function apply(ctx) {
       setPlain(false);
       const target = partFor(id);
       expected = target;
-      ctx.uiWorkspace.openSession(target);
+      openTarget(target);
     },
     // The conversation replacements withdraw for a plain Session; set the surface
     // before the navigation so the Bot skin never flashes.
@@ -15265,7 +15275,7 @@ function apply(ctx) {
       ui2.set((state) => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: "details", renaming: false, tab: null }));
       setPlain(true);
       expected = sessionId;
-      ctx.uiWorkspace.openSession(sessionId);
+      openTarget(sessionId);
     },
     addAgent: async () => {
       const agent = await after(call("add-agent"));
@@ -15315,16 +15325,33 @@ function apply(ctx) {
       if (main !== void 0 && owned.includes(main) && roster.getSnapshot().mainBotId) actions.openSession(roster.getSnapshot().mainBotId);
       return result;
     },
-    // `last` is the Bot conversation the view held before it cleared: when that part
-    // was archived for a fresh one, the view goes on in the fresh one.
+    // `last` is the Bot conversation the view held before it cleared: when that part was
+    // archived for a fresh one, the view goes on in the fresh one. What it lands on has to be
+    // a Session the shell still knows — a part the roster remembers but the shell has dropped
+    // would be refused, and the view would stay on an empty page — so the Bot's current part
+    // and the Main Bot's are tried in turn, and with none of them the reader stays on the
+    // list rather than landing nowhere.
     landOn: async (id, last) => {
-      if (last) await pull().catch(() => {
-      });
-      const bot = last ? roster.getSnapshot().byId[last.botId] : void 0;
-      setPlain(false);
-      const target = bot && currentPart(bot) !== last.sessionId ? currentPart(bot) : partFor(id);
-      expected = target;
-      ctx.uiWorkspace.openSession(target);
+      try {
+        if (last) await pull().catch(() => {
+        });
+        const snapshot = roster.getSnapshot();
+        const bot = last ? snapshot.byId[last.botId] : void 0;
+        setPlain(false);
+        const target = [
+          bot && currentPart(bot) !== last.sessionId ? currentPart(bot) : partFor(id),
+          bot ? currentPart(bot) : void 0,
+          snapshot.mainBotId ? partFor(snapshot.mainBotId) : void 0
+        ].find(knownSession);
+        if (target === void 0) {
+          if (mobileNav.getSnapshot()) navLevel.set("list");
+          return;
+        }
+        expected = target;
+        openTarget(target);
+      } catch (error) {
+        actions.reportError(error, "land-on");
+      }
     },
     selectPanel: (id) => {
       ctx.layout.selectPanel(id);
