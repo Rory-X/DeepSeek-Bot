@@ -527,6 +527,7 @@ var ZH = {
   "{name} was cut off by a restart and picked its work back up": "{name} 的工作被重启打断，已经接着做",
   "{name} was cut off by a restart again and stopped": "{name} 的工作又被重启打断，已停下",
   "Picked up its work after a restart": "重启后接着做之前的工作",
+  Answered: "答复了",
   "Asked to make the tool call it wrote as text": "工具调用被写成了文字，已让它重新调用",
   "A Bot": "一个 Bot",
   "{name} is waiting for your approval": "{name} 等你批准",
@@ -4984,7 +4985,11 @@ function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnClock, us
     if (source.kind === "bot") {
       if (source.handoff === true) return roster.roomsById[sessionId] ? null : (0, import_react7.createElement)(EarlierParts, { sessionId, roster, actions });
       if (source.role === "kickoff" || source.role === "room") return null;
-      if (source.role === "secret" || deferred) return null;
+      if (source.role === "secret") return null;
+      if (deferred) {
+        const asker = roster.byId[source.senderSessionId] ?? { id: source.senderSessionId, name: source.senderName ?? t("a Bot"), color: "gray" };
+        return (0, import_react7.createElement)(EventLine, { prefix: t("Answered"), bots: [asker], onOpen: (bot) => bot.id && actions.openExchange(selfId, bot.id), whole: true });
+      }
       if (source.role === "post") {
         if (source.logged !== void 0) return null;
         if (source.failed !== void 0 || source.resumed === true || source.stopped === true || source.done === true) return null;

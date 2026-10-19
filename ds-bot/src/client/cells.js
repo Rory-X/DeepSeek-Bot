@@ -411,7 +411,13 @@ export function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnCl
       // Group turns belong to the group chat; the member's own chat stays one-to-one.
       if (source.role === 'kickoff' || source.role === 'room') return null
       // The secret card itself shows what the user did; the note to the Bot stays out.
-      if (source.role === 'secret' || deferred) return null
+      if (source.role === 'secret') return null
+      // A request the Bot read mid-turn is answered in this turn: the request line was drawn
+      // where it was read, so this turn names who it answers instead of repeating the text.
+      if (deferred) {
+        const asker = roster.byId[source.senderSessionId] ?? { id: source.senderSessionId, name: source.senderName ?? t('a Bot'), color: 'gray' }
+        return h(EventLine, { prefix: t('Answered'), bots: [asker], onOpen: bot => bot.id && actions.openExchange(selfId, bot.id), whole: true })
+      }
       if (source.role === 'post') {
         // A post logged into a running round already shows there, not again as a trigger.
         if (source.logged !== undefined) return null
