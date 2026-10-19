@@ -115,6 +115,22 @@ export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus
       : null)
 }
 
+// A plain Session — a DSH Agent's — keeps the shell's own conversation, so the header this
+// pill replaces is the shell's again and the reader is left with no way back to the list on a
+// phone. The way back takes the shell's own empty leading seat, and only there: a Bot
+// conversation has its own back control, and classic Agent mode has no Bot list to return to.
+export function PlainBack({ useMobileNav, useSurface, useNavLevel, actions }) {
+  const onPhone = useMobileNav(value => value)
+  const plain = useSurface(state => state.plain && state.mode === 'bot')
+  const atChat = useNavLevel(value => value === 'chat')
+  if (!(onPhone && plain && atChat)) return null
+  return h('button', {
+    type: 'button', className: 'bt-plain-back', 'data-bt-nav-back': '',
+    'aria-label': t('Back to Bot list'), title: t('Back to Bot list'),
+    onClick: () => actions.showBotList(),
+  }, h(ChevronLeftIcon))
+}
+
 // New-message pills. "N new messages ↓" takes Back to bottom's place when
 // replies land while the user is scrolled up; "N new messages ↑" points at an unread
 // divider above the viewport until it has been seen. The shell shows Back to bottom

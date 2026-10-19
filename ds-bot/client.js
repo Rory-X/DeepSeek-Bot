@@ -2455,6 +2455,11 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 /* The phone's conversation is the second level; this leaves it for the list page. It sits
    where the shell's own leading control does, opposite the right-sidebar button. */
 .bt-back{position:absolute;left:12px;top:4px;pointer-events:auto}
+/* The way back from a plain Session, in the shell's own header: a full touch target that
+   leaves the header's line as tall as it was, since the margins give back what the box adds. */
+.bt-plain-back{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;margin:-7px 0 -7px -10px;padding:0;border:0;border-radius:12px;background:none;color:var(--bt-ink-2);cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease,color .12s ease}
+.bt-plain-back:hover,.bt-plain-back:active{background:var(--bt-hover);color:var(--bt-ink)}
+.bt-plain-back svg{width:20px;height:20px}
 .bt-pill:active{transform:scale(.965)}
 .bt-pill-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .bt-pill-mem{flex:none;display:inline-flex;width:0;margin-left:-8px;overflow:hidden;transition:${spring(SPRING_SHAPE, "width", "margin-left")}}
@@ -6059,7 +6064,7 @@ function TeamSidebar(props) {
     return entries2.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at);
   }, [roster, updated]);
   const main = roster.byId[roster.mainBotId];
-  const onPhone = props.useMobileNav((value) => value) && !props.useSurface((value) => value.plain);
+  const onPhone = props.useMobileNav((value) => value);
   const atList = props.useNavLevel((value) => value === "list");
   useListGlide(listRef, wide, order.map((entry) => entry.item.id).join(","));
   useLandOnMainBot(roster, useSessions, actions);
@@ -6750,6 +6755,20 @@ function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSe
     // DSH's way into its right sidebar sits in the session header this pill replaces.
     actions.hasRightSidebar?.() ? (0, import_react11.createElement)("button", { type: "button", className: "bt-icon-btn bt-head-side", "data-bt-right-sidebar": "", "aria-label": t("Show or hide the right sidebar"), title: t("Right sidebar"), onClick: () => actions.toggleRightSidebar() }, (0, import_react11.createElement)(SidePanelIcon)) : null
   );
+}
+function PlainBack({ useMobileNav, useSurface, useNavLevel, actions }) {
+  const onPhone = useMobileNav((value) => value);
+  const plain = useSurface((state) => state.plain && state.mode === "bot");
+  const atChat = useNavLevel((value) => value === "chat");
+  if (!(onPhone && plain && atChat)) return null;
+  return (0, import_react11.createElement)("button", {
+    type: "button",
+    className: "bt-plain-back",
+    "data-bt-nav-back": "",
+    "aria-label": t("Back to Bot list"),
+    title: t("Back to Bot list"),
+    onClick: () => actions.showBotList()
+  }, (0, import_react11.createElement)(ChevronLeftIcon));
 }
 function useTranscriptView() {
   const [view, setView] = (0, import_react11.useState)(null);
@@ -15112,7 +15131,7 @@ function apply(ctx) {
     }
   };
   const syncNav = () => {
-    const nav = mobileNav.getSnapshot() && !surface.getSnapshot().plain;
+    const nav = mobileNav.getSnapshot();
     if (nav) document.body.dataset.btNav = navLevel.getSnapshot();
     else delete document.body.dataset.btNav;
     coverConversation(nav && navLevel.getSnapshot() === "list");
@@ -15133,9 +15152,8 @@ function apply(ctx) {
     };
   }, "ds-bot: mobile navigation");
   ctx.effect(() => installSwipeBack({
-    // Only a conversation the reader is looking at: not a dialog, not the details pane, not
-    // the plain surface an Agent Session gets.
-    canStart: () => mobileNav.getSnapshot() && !surface.getSnapshot().plain && navLevel.getSnapshot() === "chat" && ui2.getSnapshot().details === null && ui2.getSnapshot().settings === null && ui2.getSnapshot().newChat === null,
+    // Only a conversation the reader is looking at: not a dialog, not the details pane.
+    canStart: () => mobileNav.getSnapshot() && navLevel.getSnapshot() === "chat" && ui2.getSnapshot().details === null && ui2.getSnapshot().settings === null && ui2.getSnapshot().newChat === null,
     onStart: () => setMotion("drag", "0px"),
     onMove: (x, width) => {
       document.body.style.setProperty("--bt-nav-x", `${x}px`);
@@ -15256,7 +15274,10 @@ function apply(ctx) {
     () => shadow("settings.launcher", { priority: BOT_PRIORITY, inject: face }, AccountLauncher),
     () => shadow("shell.overlay", { id: "bot", order: 50, inject: face }, Overlays),
     () => shadow("shell.overlay", { id: "bot-signin", order: 55, inject: face }, DeepSeekSignIn),
-    () => shadow("shell.overlay", { id: "bot-toast", order: 60, inject: face }, ErrorToast)
+    () => shadow("shell.overlay", { id: "bot-toast", order: 60, inject: face }, ErrorToast),
+    // A plain Session withdraws the conversation group, so the way back to the list lives in
+    // the shell's own header instead: its leading seat, which the Bot surface leaves empty.
+    () => shadow("conversation.header.leading", { priority: BOT_PRIORITY, inject: face }, PlainBack)
   ];
   const installConversation = () => [
     () => installCompiledStyles(CONVERSATION_CSS, "conversation"),

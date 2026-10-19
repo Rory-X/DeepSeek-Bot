@@ -278,7 +278,7 @@ export function TeamSidebar(props) {
   // showing the rail, so only one copy of the list is ever mounted. It is mounted at the
   // list level only: over the conversation it would still take the taps meant for the back
   // control, and the shell hides the sidebar column at both levels anyway.
-  const onPhone = props.useMobileNav(value => value) && !props.useSurface(value => value.plain)
+  const onPhone = props.useMobileNav(value => value)
   const atList = props.useNavLevel(value => value === 'list')
   useListGlide(listRef, wide, order.map(entry => entry.item.id).join(','))
   useLandOnMainBot(roster, useSessions, actions)

@@ -12,7 +12,7 @@ import { MENTION_ORIGIN, currentPart } from './text.js'
 import { SHELL_CSS, CONVERSATION_CSS, installStyles, installCompiledStyles } from './styles.js'
 import { lookOf } from './mark.js'
 import { TeamSidebar, ConnectPlugins, YouAvatar, AccountLauncher, FooterAccount, BrandMark, BrandName, BotReturn, SIDEBAR_CSS, RETURN_CSS, holdShellShortcuts, openHarnessOnboarding, openHarnessSettings } from './sidebar.js'
-import { HeaderPill } from './header.js'
+import { HeaderPill, PlainBack } from './header.js'
 import { ComposerPlus, ComposerVoice, menuIcons } from './composer.js'
 import { CHATS_SOURCE, atSources } from './at-menu.js'
 import { VOICE_BUNDLE } from './speech.js'
@@ -718,7 +718,9 @@ export function apply(ctx) {
     }
   }
   const syncNav = () => {
-    const nav = mobileNav.getSnapshot() && !surface.getSnapshot().plain
+    // A plain (DSH Agent) Session keeps the phone's two levels too: the shell's own
+    // conversation is the page, and the list is the way back to it.
+    const nav = mobileNav.getSnapshot()
     if (nav) document.body.dataset.btNav = navLevel.getSnapshot()
     else delete document.body.dataset.btNav
     coverConversation(nav && navLevel.getSnapshot() === 'list')
@@ -738,9 +740,8 @@ export function apply(ctx) {
     }
   }, 'ds-bot: mobile navigation')
   ctx.effect(() => installSwipeBack({
-    // Only a conversation the reader is looking at: not a dialog, not the details pane, not
-    // the plain surface an Agent Session gets.
-    canStart: () => mobileNav.getSnapshot() && !surface.getSnapshot().plain && navLevel.getSnapshot() === 'chat'
+    // Only a conversation the reader is looking at: not a dialog, not the details pane.
+    canStart: () => mobileNav.getSnapshot() && navLevel.getSnapshot() === 'chat'
       && ui.getSnapshot().details === null && ui.getSnapshot().settings === null && ui.getSnapshot().newChat === null,
     onStart: () => setMotion('drag', '0px'),
     onMove: (x, width) => {
@@ -874,6 +875,9 @@ export function apply(ctx) {
     () => shadow('shell.overlay', { id: 'bot', order: 50, inject: face }, Overlays),
     () => shadow('shell.overlay', { id: 'bot-signin', order: 55, inject: face }, DeepSeekSignIn),
     () => shadow('shell.overlay', { id: 'bot-toast', order: 60, inject: face }, ErrorToast),
+    // A plain Session withdraws the conversation group, so the way back to the list lives in
+    // the shell's own header instead: its leading seat, which the Bot surface leaves empty.
+    () => shadow('conversation.header.leading', { priority: BOT_PRIORITY, inject: face }, PlainBack),
   ]
   const installConversation = () => [
     () => installCompiledStyles(CONVERSATION_CSS, 'conversation'),
