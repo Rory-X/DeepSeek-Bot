@@ -16,6 +16,7 @@
 // An OAuth connector (`mode: 'oauth-mcp'`) has no secret of its own: the user authorizes
 // once in the browser, and the grant lives in DSH's credential store (see oauth/flow.js),
 // outside the team file, the Secrets page and every shell.
+import { createApprovalDesk } from './connector-approval.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
 import { createOAuthFlow } from './oauth/flow.js'
 import { output } from './tools.js'
@@ -169,35 +170,42 @@ export function install(rt) {
   let queue = Promise.resolve()
   let stopped = false
 
-  // A connector action changes something outside DS Bot, so each call asks the user
-  // through DSH's own approval card before it runs. The toolbox carries the same gate:
-  // its call tool names the target, and a blocked target is refused outright.
-  const actionTools = new Map()
-  for (const [id, connector] of Object.entries(options)) {
-    for (const name of connector.actionTools ?? []) actionTools.set(`${id}_${name}`, { connector: connector.displayName, name })
-  }
+  // A blocked toolbox target is refused outright: no approval can make it runnable.
+  // Everything else that changes something outside DS Bot asks through the plugin's own
+  // card from inside the tool call (see connector-approval.js), because a Session can run
+  // with DSH approvals off, where a pre-execute `ask` would simply be rejected.
   const toolboxCall = TOOLBOX_TOOLS[1]
-  const askAction = (connector, name) => ({
-    kind: 'ask',
-    reason: `${connector}: ${name} changes the connected account`,
-    displayReason: {
-      en: `Run ${connector}'s ${name} on the connected account? It changes your projects or deployments.`,
-      zh: `要在已连接的 ${connector} 账号上执行 ${name} 吗？这会改动你的项目或部署。`,
-    },
-  })
   ctx.on('tools/pre-execute', async (exec, next) => {
-    const action = actionTools.get(exec.name)
-    if (action !== undefined) return askAction(action.connector, action.name)
     if (exec.name !== toolboxCall) return next()
     const owner = ids.find(id => options[id].toolbox === true)
     if (owner === undefined) return next()
     const target = typeof exec.arguments?.tool === 'string' ? exec.arguments.tool.trim() : ''
     const entry = toolIndexes.get(owner)?.find(item => item.name === target)
-    if (entry === undefined) return next()
-    if (entry.class === 'blocked') return { kind: 'deny', reason: `Vercel tool "${target}" can return environment values or credentials; the toolbox does not run it.` }
-    if (entry.class === 'write') return askAction(options[owner].displayName, target)
+    if (entry?.class === 'blocked') return { kind: 'deny', reason: `Vercel tool "${target}" can return environment values or credentials; the toolbox does not run it.` }
     return next()
   })
+
+  // One approval card per conversation at a time; the write itself waits for Allow once.
+  const approval = createApprovalDesk({
+    rt,
+    ...(Number.isFinite(rt.config.connectorApprovalTimeoutMs) && rt.config.connectorApprovalTimeoutMs > 0
+      ? { timeoutMs: rt.config.connectorApprovalTimeoutMs }
+      : {}),
+  })
+  // A connector write asks first and throws (a model-visible error) unless allowed.
+  const requireApproval = async (connector, tool, exec) => {
+    const outcome = await approval.approve({
+      sessionId: exec?.agent?.id,
+      connector: connector.displayName,
+      tool,
+      signal: exec?.signal,
+    })
+    if (outcome === 'allow') return
+    if (outcome === 'timeout') throw new Error(`The user did not answer in time, so ${connector.displayName}'s ${tool} was not run.`)
+    if (outcome === 'cancelled') throw new Error(`The approval was cancelled, so ${connector.displayName}'s ${tool} was not run.`)
+    if (outcome === 'unavailable') throw new Error(`${connector.displayName}'s ${tool} needs your approval, but the approval card could not be shown; nothing was sent.`)
+    throw new Error(`The user denied ${connector.displayName}'s ${tool}; nothing was sent.`)
+  }
   const insecure = id => [options[id].url, options[id].api]
     .filter(address => address !== undefined)
     .some(address => !/^https:\/\//i.test(String(address)))
@@ -283,15 +291,17 @@ export function install(rt) {
     }
   }
 
-  // One read tool of a `read-tools` connector, as a ToolRuntime definition.
-  const readOnlyTool = (id, tool, { client, teamId }) => {
+  // One tool of a `read-tools` connector, as a ToolRuntime definition. `approve` is set
+  // for a named write action, which asks the user before it runs.
+  const readOnlyTool = (id, tool, { client, teamId, approve }) => {
     const parameters = tool.inputSchema !== null && typeof tool.inputSchema === 'object' ? tool.inputSchema : { type: 'object', properties: {} }
     return {
       name: `${id}_${String(tool.name).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64),
       description: String(tool.description ?? tool.title ?? tool.name),
       parameters,
       output,
-      async execute(args) {
+      async execute(args, exec) {
+        if (approve !== undefined) await approve(exec)
         const call = { ...args }
         // The default team of the token's account answers the calls that need one; an
         // explicit argument wins.
@@ -365,12 +375,23 @@ export function install(rt) {
       if (picked.length === 0) throw new Error(`${connector.displayName} offers none of the read tools DS Bot exposes`)
       const index = toolbox ? buildToolIndex(listed) : undefined
       const teamId = state.connectors?.[id]?.teamId ?? connector.teamId
+      const actionNames = new Set(connector.actionTools ?? [])
       const dispose = []
       try {
-        for (const tool of picked) dispose.push(ctx.tools.register(readOnlyTool(id, tool, { client, teamId })))
+        for (const tool of picked) {
+          const approve = actionNames.has(tool.name) ? exec => requireApproval(connector, tool.name, exec) : undefined
+          dispose.push(ctx.tools.register(readOnlyTool(id, tool, { client, teamId, approve })))
+        }
         if (index !== undefined) {
           dispose.push(ctx.tools.register(createSearchTool({ index, output })))
-          dispose.push(ctx.tools.register(createCallTool({ client, index, output, redact: rt.redactSecrets, teamId })))
+          dispose.push(ctx.tools.register(createCallTool({
+            client,
+            index,
+            output,
+            redact: rt.redactSecrets,
+            teamId,
+            approve: (name, exec) => requireApproval(connector, name, exec),
+          })))
         }
       } catch (error) {
         for (const undo of dispose) undo()
@@ -604,10 +625,18 @@ export function install(rt) {
     void rt.loadSecrets().then(() => { for (const id of ids) void sync(id) })
     return () => {
       stopped = true
+      approval.dispose()
       oauth?.dispose()
       for (const id of ids) void unmount(id)
     }
   }, 'ds-bot: connectors')
 
-  Object.assign(rt, { connectorsView, connectorEndpoint, secretsChanged: () => { for (const id of ids) void sync(id) } })
+  Object.assign(rt, {
+    connectorsView,
+    connectorEndpoint,
+    secretsChanged: () => { for (const id of ids) void sync(id) },
+    answerConnectorApproval: (sessionId, questionId, body) => approval.answer(sessionId, questionId, body),
+    dismissConnectorApproval: (sessionId, questionId) => approval.dismiss(sessionId, questionId),
+    cancelConnectorApprovals: (sessionId, outcome) => approval.cancel(sessionId, outcome),
+  })
 }

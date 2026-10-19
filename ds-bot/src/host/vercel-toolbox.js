@@ -163,7 +163,7 @@ function matchesType(value, type) {
   }
 }
 
-export function createCallTool({ client, index, output, redact = text => String(text), teamId }) {
+export function createCallTool({ client, index, output, redact = text => String(text), teamId, approve }) {
   const cut = text => {
     const safe = redact(String(text))
     if (safe.length <= CALL_RESULT_MAX) return safe
@@ -183,7 +183,7 @@ export function createCallTool({ client, index, output, redact = text => String(
       additionalProperties: false,
     },
     output,
-    async execute(args) {
+    async execute(args, exec) {
       const requested = typeof args?.tool === 'string' ? args.tool.trim() : ''
       if (requested === '') throw new Error('vercel_call needs a tool name; find one with vercel_search_tools.')
       const entry = index.find(item => item.name === requested)
@@ -200,6 +200,8 @@ export function createCallTool({ client, index, output, redact = text => String(
         if (call[name] === undefined) continue
         if (!matchesType(call[name], type)) throw new Error(`"${requested}" expects "${name}" to be ${type}.`)
       }
+      // A write is approved by the user before anything reaches the server.
+      if (entry.class === 'write' && typeof approve === 'function') await approve(requested, exec)
       try {
         return cut(mcpResultText(await client.callTool(requested, call)))
       } catch (error) {
