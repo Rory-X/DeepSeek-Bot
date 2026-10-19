@@ -143,6 +143,9 @@ var ZH = {
   "Create a token": "创建 Token",
   "Vercel token": "Vercel 令牌",
   "Create a token on Vercel": "去 Vercel 创建 Token",
+  Actions: "执行操作",
+  Off: "关闭",
+  On: "开启",
   "Allow actions": "允许执行操作",
   "Each run asks for your approval": "每次执行都会弹出审批",
   "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
@@ -2907,7 +2910,16 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector[data-state=ready] .bt-connector-status{color:var(--bt-ink-2)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
 .bt-connector-actions{flex:none;display:flex;gap:6px}
-.bt-connector-action-row{display:flex;align-items:center;gap:12px;padding-top:10px;border-top:1px solid var(--bt-line)}
+.bt-connector-options{display:flex;flex-direction:column;padding-top:10px;border-top:1px solid var(--bt-line)}
+.bt-connector-options-toggle{display:flex;align-items:center;gap:8px;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
+.bt-connector-options-toggle:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-connector-options-label{font-size:13px;line-height:18px;font-weight:500}
+.bt-connector-options-summary{margin-left:auto;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+.bt-connector-options-summary[data-tone=on]{color:var(--bt-accent);font-weight:500}
+.bt-connector-options-chevron{flex:none;display:inline-flex;color:var(--bt-ink-3);transition:transform .15s ease}
+.bt-connector-options[data-open] .bt-connector-options-chevron{transform:rotate(90deg)}
+.bt-connector-options-body{display:flex;flex-direction:column;gap:8px;padding-top:10px}
+.bt-connector-action-row{display:flex;align-items:center;gap:12px}
 .bt-connector-action-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
 .bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
@@ -11864,6 +11876,26 @@ var TOKEN_CREATE = {
 };
 var tokenLabel = (id) => (TOKEN_LABELS[id] ?? (() => t("Token")))();
 var tokenCreate = (id) => (TOKEN_CREATE[id] ?? (() => t("Create a token")))();
+function ConnectorOptions({ summary, tone = "off", children }) {
+  const [open, setOpen] = (0, import_react30.useState)(false);
+  return (0, import_react30.createElement)(
+    "div",
+    { className: "bt-connector-options", "data-open": open || void 0 },
+    (0, import_react30.createElement)(
+      "button",
+      {
+        type: "button",
+        className: "bt-connector-options-toggle",
+        "aria-expanded": open,
+        onClick: () => setOpen((value) => !value)
+      },
+      (0, import_react30.createElement)("span", { className: "bt-connector-options-label" }, t("Actions")),
+      (0, import_react30.createElement)("span", { className: "bt-connector-options-summary", "data-tone": tone }, summary),
+      (0, import_react30.createElement)("span", { className: "bt-connector-options-chevron", "aria-hidden": true }, (0, import_react30.createElement)(ChevronRightIcon))
+    ),
+    open ? (0, import_react30.createElement)("div", { className: "bt-connector-options-body" }, children) : null
+  );
+}
 function statusText2(connector) {
   if (connector.state === "connecting") return t("Connecting…");
   if (connector.state === "error") return t("Could not connect: {error}", { error: connector.error ?? "" });
@@ -11914,24 +11946,31 @@ function ConnectorRow({ connector, actions }) {
         on ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => void run(actions.connectorDisconnect(connector.id)) }, t("Disconnect")) : form ? null : (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: () => setForm(true) }, t("Connect"))
       )
     ),
-    typeof connector.actions === "boolean" ? (0, import_react30.createElement)(
-      "div",
-      { className: "bt-connector-action-row", "data-on": actionsOn || void 0 },
+    on && typeof connector.actions === "boolean" ? (0, import_react30.createElement)(
+      ConnectorOptions,
+      { summary: actionsOn ? t("On") : t("Off"), tone: actionsOn ? "on" : "off" },
       (0, import_react30.createElement)(
         "div",
-        { className: "bt-connector-action-text" },
-        (0, import_react30.createElement)("div", { className: "bt-connector-action-title" }, t("Allow actions")),
-        (0, import_react30.createElement)("div", { className: "bt-connector-action-note" }, actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"))
-      ),
-      (0, import_react30.createElement)("button", {
-        type: "button",
-        role: "switch",
-        className: "bt-switch",
-        "aria-checked": actionsOn,
-        "aria-label": t("Allow actions"),
-        disabled: busy,
-        onClick: () => void run(actions.connectorSetActions(connector.id, !actionsOn))
-      }, (0, import_react30.createElement)("span", { className: "bt-switch-knob", "aria-hidden": true }))
+        { className: "bt-connector-action-row", "data-on": actionsOn || void 0 },
+        (0, import_react30.createElement)(
+          "div",
+          { className: "bt-connector-action-text" },
+          (0, import_react30.createElement)("div", { className: "bt-connector-action-title" }, t("Allow actions")),
+          (0, import_react30.createElement)("div", { className: "bt-connector-action-note" }, actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"))
+        ),
+        (0, import_react30.createElement)("button", {
+          type: "button",
+          role: "switch",
+          className: "bt-switch",
+          "aria-checked": actionsOn,
+          "aria-label": t("Allow actions"),
+          disabled: busy,
+          onClick: (event) => {
+            event.stopPropagation();
+            void run(actions.connectorSetActions(connector.id, !actionsOn));
+          }
+        }, (0, import_react30.createElement)("span", { className: "bt-switch-knob", "aria-hidden": true }))
+      )
     ) : null,
     !on && form ? (0, import_react30.createElement)(
       "div",
@@ -15824,7 +15863,9 @@ function apply(ctx) {
       priority: BOT_PRIORITY,
       select: (owner) => owner.pendingInteraction?.kind === "question" ? owner.pendingInteraction : null
     }, QuestionCard),
-    () => shadow("conversation.input.dock", { id: "bot-quote", order: -130, inject: face }, ComposerQuote),
+    // The quote bar sits under every other dock, so it always hugs the composer the reader is
+    // about to type in.
+    () => shadow("conversation.input.dock", { id: "bot-quote", order: 1e3, inject: face }, ComposerQuote),
     () => shadow("conversation.input.dock", { id: "bot-members", order: -120, inject: face }, MemberDock),
     () => shadow("conversation.input.dock", { id: "bot-model", order: -110, inject: face }, ModelChoiceDock),
     () => shadow("conversation.input.dock", { id: "bot-question", order: -100, inject: face }, QuestionDock),

@@ -2,6 +2,7 @@ import { createElement as h, useRef, useState } from 'react'
 import { useMorph } from './motion.js'
 import { MaskedInput } from './secret-card.js'
 import { t } from './i18n.js'
+import { ChevronRightIcon } from './icons.js'
 
 export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true },
   h('path', { d: 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z' }))
@@ -32,6 +33,22 @@ const TOKEN_CREATE = {
 }
 const tokenLabel = id => (TOKEN_LABELS[id] ?? (() => t('Token')))()
 const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
+
+// A connector's secondary options stay folded under its main line: the row names them and
+// carries their current summary, and the details open only when asked. Reused by any
+// connector that grows options later.
+export function ConnectorOptions({ summary, tone = 'off', children }) {
+  const [open, setOpen] = useState(false)
+  return h('div', { className: 'bt-connector-options', 'data-open': open || undefined },
+    h('button', {
+      type: 'button', className: 'bt-connector-options-toggle', 'aria-expanded': open,
+      onClick: () => setOpen(value => !value),
+    },
+    h('span', { className: 'bt-connector-options-label' }, t('Actions')),
+    h('span', { className: 'bt-connector-options-summary', 'data-tone': tone }, summary),
+    h('span', { className: 'bt-connector-options-chevron', 'aria-hidden': true }, h(ChevronRightIcon))),
+  open ? h('div', { className: 'bt-connector-options-body' }, children) : null)
+}
 
 function statusText(connector) {
   if (connector.state === 'connecting') return t('Connecting…')
@@ -72,17 +89,19 @@ function ConnectorRow({ connector, actions }) {
         on
           ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => void run(actions.connectorDisconnect(connector.id)) }, t('Disconnect'))
           : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => setForm(true) }, t('Connect')))),
-    typeof connector.actions === 'boolean'
-      ? h('div', { className: 'bt-connector-action-row', 'data-on': actionsOn || undefined },
-        h('div', { className: 'bt-connector-action-text' },
-          h('div', { className: 'bt-connector-action-title' }, t('Allow actions')),
-          h('div', { className: 'bt-connector-action-note' }, actionsOn
-            ? t('Each run asks for your approval')
-            : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'))),
-        h('button', {
-          type: 'button', role: 'switch', className: 'bt-switch', 'aria-checked': actionsOn, 'aria-label': t('Allow actions'),
-          disabled: busy, onClick: () => void run(actions.connectorSetActions(connector.id, !actionsOn)),
-        }, h('span', { className: 'bt-switch-knob', 'aria-hidden': true })))
+    on && typeof connector.actions === 'boolean'
+      ? h(ConnectorOptions, { summary: actionsOn ? t('On') : t('Off'), tone: actionsOn ? 'on' : 'off' },
+        h('div', { className: 'bt-connector-action-row', 'data-on': actionsOn || undefined },
+          h('div', { className: 'bt-connector-action-text' },
+            h('div', { className: 'bt-connector-action-title' }, t('Allow actions')),
+            h('div', { className: 'bt-connector-action-note' }, actionsOn
+              ? t('Each run asks for your approval')
+              : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'))),
+          h('button', {
+            type: 'button', role: 'switch', className: 'bt-switch', 'aria-checked': actionsOn, 'aria-label': t('Allow actions'),
+            disabled: busy,
+            onClick: (event) => { event.stopPropagation(); void run(actions.connectorSetActions(connector.id, !actionsOn)) },
+          }, h('span', { className: 'bt-switch-knob', 'aria-hidden': true }))))
       : null,
     !on && form ? h('div', { className: 'bt-connector-form' },
       h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),

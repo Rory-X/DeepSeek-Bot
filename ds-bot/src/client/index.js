@@ -1014,7 +1014,9 @@ export function apply(ctx) {
       priority: BOT_PRIORITY,
       select: owner => (owner.pendingInteraction?.kind === 'question' ? owner.pendingInteraction : null),
     }, QuestionCard),
-    () => shadow('conversation.input.dock', { id: 'bot-quote', order: -130, inject: face }, ComposerQuote),
+    // The quote bar sits under every other dock, so it always hugs the composer the reader is
+    // about to type in.
+    () => shadow('conversation.input.dock', { id: 'bot-quote', order: 1000, inject: face }, ComposerQuote),
     () => shadow('conversation.input.dock', { id: 'bot-members', order: -120, inject: face }, MemberDock),
     () => shadow('conversation.input.dock', { id: 'bot-model', order: -110, inject: face }, ModelChoiceDock),
     () => shadow('conversation.input.dock', { id: 'bot-question', order: -100, inject: face }, QuestionDock),
