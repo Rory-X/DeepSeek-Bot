@@ -160,6 +160,21 @@ export function install(rt) {
     }
   }
 
+  // A connector whose token was saved somewhere else (a secret card, a copied team) has
+  // no account in the team file. Ask the service once so the page shows it and the
+  // default team answers the read tools; a failed check leaves the mount to carry on.
+  const claimAccount = async (id, token) => {
+    const connector = options[id]
+    if (state.connectors?.[id]?.[connector.accountField] !== undefined) return
+    try {
+      const account = await signIn(id, token, { api: connector.api })
+      state.connectors = { ...state.connectors, [id]: { ...account, connectedAt: Date.now() } }
+      await rt.save()
+    } catch (error) {
+      rt.warn('ds-bot: could not read the %s account of the saved token: %s', connector.displayName, reason(error))
+    }
+  }
+
   async function mountReadTools(id, token) {
     const connector = options[id]
     const client = new McpHttpClient(connector.url, token)
@@ -200,6 +215,10 @@ export function install(rt) {
     statuses.set(id, { state: 'connecting' })
     const attempt = { token }
     mounts.set(id, attempt)
+    if (connector.mode === 'read-tools') {
+      await claimAccount(id, token)
+      if (stopped || mounts.get(id) !== attempt) return
+    }
     const loader = ctx.get?.('loader')
     if (connector.mode !== 'read-tools' && (typeof loader?.import !== 'function' || typeof ctx.plugin !== 'function')) {
       statuses.set(id, { state: 'error', error: 'This DSH cannot load connectors' })
