@@ -38,6 +38,9 @@ const TOKEN_LABELS = {
   github: () => t('GitHub token'),
   vercel: () => t('Vercel token'),
 }
+// A service whose authorization page offers a read-only set and a full-access grant: the
+// card says what the two mean before the browser leaves for it, so the reader chooses.
+const SCOPE_CHOICES = { cloudflare: true }
 const TOKEN_CREATE = {
   github: () => t('Create a token on GitHub'),
   vercel: () => t('Create a token on Vercel'),
@@ -78,6 +81,8 @@ function ConnectorRow({ connector, actions }) {
   // service without dynamic registration asks for first.
   const oauth = connector.oauth === true
   const manual = oauth && connector.manualClient === true
+  const scopeChoice = oauth && connector.state === 'off' && SCOPE_CHOICES[connector.id] === true
+  const [scopeAck, setScopeAck] = useState(false)
   const configured = typeof connector.clientId === 'string' && connector.clientId !== ''
   const [appForm, setAppForm] = useState(false)
   const [appId, setAppId] = useState('')
@@ -138,6 +143,9 @@ function ConnectorRow({ connector, actions }) {
   // call tool, which asks for approval by itself, so the actions switch has nothing to do.
   const toolboxOn = connector.toolbox === true
   const toolboxOffered = typeof connector.toolbox === 'boolean'
+  // The call tool is per service (`vercel_call`, `cloudflare_call`); an older host without
+  // the field keeps the Vercel one.
+  const toolboxCall = typeof connector.toolboxCall === 'string' && connector.toolboxCall !== '' ? connector.toolboxCall : 'vercel_call'
   const actionsOffered = typeof connector.actions === 'boolean'
   // A connected connector that has settings opens them from its own row; without either
   // there is nothing to open and the row stays what it was.
@@ -175,22 +183,38 @@ function ConnectorRow({ connector, actions }) {
             ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
             : oauth
               ? (manual && !configured && !appForm ? null : h('button', {
-                type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy,
+                type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || (scopeChoice && !scopeAck),
                 onClick: (event) => { event.stopPropagation(); void startAuthorization() },
               }, connector.state === 'error' ? t('Connect again') : t('Connect')))
               : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: (event) => { event.stopPropagation(); setForm(true) } }, t('Connect')))),
+    scopeChoice
+      ? h('div', { className: 'bt-connector-scope' },
+        h('div', { className: 'bt-connector-scope-title' }, t('Choose the access level on the authorization page')),
+        h('div', { className: 'bt-connector-scope-body' }, t('Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.', { service: connector.name })),
+        h('label', { className: 'bt-connector-consent' },
+          h('input', {
+            type: 'checkbox', className: 'bt-connector-check', checked: scopeAck,
+            onChange: (event) => setScopeAck(event.target.checked),
+          }),
+          h('span', null, t("I'll choose the access level on the authorization page"))))
+      : null,
     hasOptions && details
       ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
         toolboxOffered
-          ? h(ConnectorOption, {
-            title: t('Full capabilities'),
-            note: toolboxOn
-              ? t('Each run asks for your approval')
-              : t('Let the Bots use every tool the server offers, not only the read ones'),
-            checked: toolboxOn,
-            disabled: busy,
-            onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next)),
-          })
+          ? h('div', { className: 'bt-connector-setting' },
+            h(ConnectorOption, {
+              title: t('Full capabilities'),
+              note: toolboxOn
+                ? t('Each run goes through {tool}', { tool: toolboxCall })
+                : t('Let the Bots use every tool the server offers, not only the read ones'),
+              checked: toolboxOn,
+              disabled: busy,
+              onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next)),
+            }),
+            // A full-access grant can write; say so where its toolbox is switched on.
+            connector.oauth === true && connector.id === 'cloudflare'
+              ? h('div', { className: 'bt-connector-action-note' }, t('Full access can change your {service} account; every write asks for your approval first.', { service: connector.name }))
+              : null)
           : null,
         actionsOffered
           ? h('div', { className: 'bt-connector-setting', 'data-locked': toolboxOn || undefined },
@@ -205,7 +229,7 @@ function ConnectorRow({ connector, actions }) {
               onChange: (next) => void run(actions.connectorSetActions(connector.id, next)),
             }),
             actionsNoteId
-              ? h('div', { className: 'bt-connector-action-note', id: actionsNoteId }, t('With Full capabilities on, actions go through vercel_call and ask for approval one by one'))
+              ? h('div', { className: 'bt-connector-action-note', id: actionsNoteId }, t('With Full capabilities on, actions go through {tool} and ask for approval one by one', { tool: toolboxCall }))
               : null)
           : null)
       : null,

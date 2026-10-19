@@ -148,7 +148,9 @@ var ZH = {
   On: "开启",
   "Full capabilities": "完整能力",
   "Let the Bots use every tool the server offers, not only the read ones": "允许 Bot 使用服务器提供的全部工具，而不只限于只读工具",
-  "With Full capabilities on, actions go through vercel_call and ask for approval one by one": "完整能力开启时，动作经 vercel_call 逐次批准",
+  "With Full capabilities on, actions go through {tool} and ask for approval one by one": "完整能力开启时，动作经 {tool} 逐次批准",
+  "Each run goes through {tool}": "每次执行都经 {tool}",
+  "Full access can change your {service} account; every write asks for your approval first.": "Full access 允许改动你的 {service} 账号；每次写操作都会先请求你批准。",
   "Allow actions": "允许执行操作",
   "Connector settings": "连接器设置",
   "Waiting for the browser…": "正在浏览器里等待…",
@@ -162,6 +164,9 @@ var ZH = {
   "Save and connect": "保存并连接",
   "Open the authorization page": "打开授权页面",
   "Use a different app": "换一个应用",
+  "Choose the access level on the authorization page": "在授权页选择权限范围",
+  "Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.": "Requested scopes 是只读权限，也是这个连接器申请的权限。Full access 允许 Bot 修改你的 {service} 账号，每次写操作仍会先请求你批准。",
+  "I'll choose the access level on the authorization page": "我会在授权页自行选择权限范围",
   "Each run asks for your approval": "每次执行都会弹出审批",
   "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
   "Projects, deployments, and logs": "项目、部署和日志",
@@ -2950,6 +2955,14 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
 .bt-connector-input{flex:1 1 auto;min-width:0;border:0;background:none;color:inherit;font:inherit;font-size:13px;outline:none;padding:0}
 .bt-connector-hint{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+/* The access choice on the authorization page: a quiet accent panel under the card's row,
+   with the acknowledgement that arms the first Connect press. */
+.bt-connector-scope{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--bt-accent) 7%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 26%,transparent);animation:bt-veil-in .18s ease-out}
+.bt-connector-scope-title{font-size:12px;line-height:17px;font-weight:600}
+.bt-connector-scope-body{font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
+.bt-connector-consent{display:flex;align-items:flex-start;gap:8px;min-height:32px;padding:3px 0 1px;font-size:12px;line-height:17px;cursor:pointer}
+.bt-connector-check{flex:none;width:16px;height:16px;margin:0.5px 0 0;accent-color:var(--bt-accent);cursor:pointer}
+@media (prefers-reduced-motion:reduce){.bt-connector-scope{animation:none}}
 .bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
 
@@ -11998,6 +12011,7 @@ var TOKEN_LABELS = {
   github: () => t("GitHub token"),
   vercel: () => t("Vercel token")
 };
+var SCOPE_CHOICES = { cloudflare: true };
 var TOKEN_CREATE = {
   github: () => t("Create a token on GitHub"),
   vercel: () => t("Create a token on Vercel")
@@ -12043,6 +12057,8 @@ function ConnectorRow({ connector, actions }) {
   const [error, setError] = (0, import_react30.useState)(null);
   const oauth = connector.oauth === true;
   const manual = oauth && connector.manualClient === true;
+  const scopeChoice = oauth && connector.state === "off" && SCOPE_CHOICES[connector.id] === true;
+  const [scopeAck, setScopeAck] = (0, import_react30.useState)(false);
   const configured = typeof connector.clientId === "string" && connector.clientId !== "";
   const [appForm, setAppForm] = (0, import_react30.useState)(false);
   const [appId, setAppId] = (0, import_react30.useState)("");
@@ -12108,6 +12124,7 @@ function ConnectorRow({ connector, actions }) {
   const actionsOn = connector.actions === true;
   const toolboxOn = connector.toolbox === true;
   const toolboxOffered = typeof connector.toolbox === "boolean";
+  const toolboxCall = typeof connector.toolboxCall === "string" && connector.toolboxCall !== "" ? connector.toolboxCall : "vercel_call";
   const actionsOffered = typeof connector.actions === "boolean";
   const hasOptions = on && (actionsOffered || toolboxOffered);
   const actionsNoteId = toolboxOn && actionsOffered ? `bt-connector-${connector.id}-actions-note` : void 0;
@@ -12157,7 +12174,7 @@ function ConnectorRow({ connector, actions }) {
         } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? manual && !configured && !appForm ? null : (0, import_react30.createElement)("button", {
           type: "button",
           className: "bt-soft bt-soft-sm",
-          disabled: busy,
+          disabled: busy || scopeChoice && !scopeAck,
           onClick: (event) => {
             event.stopPropagation();
             void startAuthorization();
@@ -12168,16 +12185,39 @@ function ConnectorRow({ connector, actions }) {
         } }, t("Connect"))
       )
     ),
+    scopeChoice ? (0, import_react30.createElement)(
+      "div",
+      { className: "bt-connector-scope" },
+      (0, import_react30.createElement)("div", { className: "bt-connector-scope-title" }, t("Choose the access level on the authorization page")),
+      (0, import_react30.createElement)("div", { className: "bt-connector-scope-body" }, t("Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.", { service: connector.name })),
+      (0, import_react30.createElement)(
+        "label",
+        { className: "bt-connector-consent" },
+        (0, import_react30.createElement)("input", {
+          type: "checkbox",
+          className: "bt-connector-check",
+          checked: scopeAck,
+          onChange: (event) => setScopeAck(event.target.checked)
+        }),
+        (0, import_react30.createElement)("span", null, t("I'll choose the access level on the authorization page"))
+      )
+    ) : null,
     hasOptions && details ? (0, import_react30.createElement)(
       "div",
       { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings") },
-      toolboxOffered ? (0, import_react30.createElement)(ConnectorOption, {
-        title: t("Full capabilities"),
-        note: toolboxOn ? t("Each run asks for your approval") : t("Let the Bots use every tool the server offers, not only the read ones"),
-        checked: toolboxOn,
-        disabled: busy,
-        onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next))
-      }) : null,
+      toolboxOffered ? (0, import_react30.createElement)(
+        "div",
+        { className: "bt-connector-setting" },
+        (0, import_react30.createElement)(ConnectorOption, {
+          title: t("Full capabilities"),
+          note: toolboxOn ? t("Each run goes through {tool}", { tool: toolboxCall }) : t("Let the Bots use every tool the server offers, not only the read ones"),
+          checked: toolboxOn,
+          disabled: busy,
+          onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next))
+        }),
+        // A full-access grant can write; say so where its toolbox is switched on.
+        connector.oauth === true && connector.id === "cloudflare" ? (0, import_react30.createElement)("div", { className: "bt-connector-action-note" }, t("Full access can change your {service} account; every write asks for your approval first.", { service: connector.name })) : null
+      ) : null,
       actionsOffered ? (0, import_react30.createElement)(
         "div",
         { className: "bt-connector-setting", "data-locked": toolboxOn || void 0 },
@@ -12189,7 +12229,7 @@ function ConnectorRow({ connector, actions }) {
           describedby: actionsNoteId,
           onChange: (next) => void run(actions.connectorSetActions(connector.id, next))
         }),
-        actionsNoteId ? (0, import_react30.createElement)("div", { className: "bt-connector-action-note", id: actionsNoteId }, t("With Full capabilities on, actions go through vercel_call and ask for approval one by one")) : null
+        actionsNoteId ? (0, import_react30.createElement)("div", { className: "bt-connector-action-note", id: actionsNoteId }, t("With Full capabilities on, actions go through {tool} and ask for approval one by one", { tool: toolboxCall })) : null
       ) : null
     ) : null,
     !oauth && !on && form ? (0, import_react30.createElement)(
