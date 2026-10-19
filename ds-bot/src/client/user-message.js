@@ -5,6 +5,7 @@ import { BotMark } from './mark.js'
 import { CheckIcon, CopyIcon } from './icons.js'
 import { dateLocale, t } from './i18n.js'
 import { useFold } from './fold.js'
+import { splitQuote, QuoteCard } from './quote.js'
 
 // -------------------------------------------------------------------------
 // The user's own messages. DSH draws every "@word" in them as a file reference, and
@@ -85,16 +86,20 @@ export function UserMessageCell({ node, sessionId, useRoster, actions, renderMes
   const roster = useRoster(value => value)
   const data = node.data ?? {}
   const { text, attachments, rest } = contentParts(data.content)
+  // A reply starts with the quoted message; the card above the words shows who it answers.
+  const quoted = splitQuote(text)
+  const words = quoted ? quoted.body : text
   const referenceLabels = data.referenceLabels ?? []
   const references = openFile && openSkill ? { openFile, openSkill } : undefined
   const steering = node.kind === 'steering'
-  const { shown, folded, control } = useFold(text, { markdown: false })
+  const { shown, folded, control } = useFold(words, { markdown: false })
   const body = h(UserText, { text: shown, bots: mentionableBots(roster, sessionId), referenceLabels, skillNames: data.skillNames ?? [], references, actions })
   return h('div', { className: 'bt-umsg', 'data-steering': steering || undefined },
     h('div', { className: 'bt-ustack' },
       attachments.length > 0 ? h(Attachments, { attachments, renderMessageImages }) : null,
       text !== '' || rest.length > 0 ? h('div', { className: 'bt-ubody', title: clock(data.time), 'data-folded': folded || undefined },
-        control ? h('div', { className: 'bt-fold-body' }, body) : body,
+        quoted ? h(QuoteCard, { quote: quoted.quote, roster }) : null,
+        words !== '' ? (control ? h('div', { className: 'bt-fold-body' }, body) : body) : null,
         control,
         rest.map((block, index) => (ui.JsonBlock ? h(ui.JsonBlock, { key: index, label: t('Content'), payload: block }) : null))) : null,
       referenceLabels.length > 0 ? h('div', { className: 'bt-urefs' }, t('Referenced {labels}', { labels: referenceLabels.join(t(', ')) })) : null),
@@ -118,4 +123,7 @@ export const USER_MESSAGE_CSS = `
 .bt-urefs{font-size:13px;line-height:18px;color:var(--bt-ink-3)}
 .bt-utools{display:flex;flex:none;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
 .bt-umsg:hover .bt-utools,.bt-umsg:focus-within .bt-utools{opacity:1;visibility:visible}
+/* A touch pointer never hovers, and a visibility:hidden child cannot take focus, so the
+   copy button has no way to appear. Show it outright. */
+@media (hover:none){.bt-utools{opacity:1;visibility:visible}}
 `

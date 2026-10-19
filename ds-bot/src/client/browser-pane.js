@@ -64,6 +64,14 @@ const widthRange = (view, viewport) => (view === 'browser'
   ? [MIN_WIDTH, viewport - MIN_CHAT]
   : [DETAILS_WIDTH, Math.min(DETAILS_MAX, viewport - MIN_CHAT)])
 const fitWidth = (width, [low, high]) => Math.round(Math.max(low, Math.min(width, high)))
+// The layout viewport, without a scrollbar: window.innerWidth counts one, and a panel as
+// wide as that overhangs the window by the scrollbar's width.
+const layoutWidth = () => document.documentElement.clientWidth
+// The narrowest a panel can be, per view.
+const minPanelWidth = view => (view === 'browser' ? MIN_WIDTH : DETAILS_WIDTH)
+// Below this the chat column cannot keep MIN_CHAT beside the panel. The panel then covers
+// the chat instead of squeezing it to nothing.
+const overlayPanel = (view, viewport) => viewport < MIN_CHAT + minPanelWidth(view)
 
 // The conversation column's right margin lives in one rule of our own, matched on the
 // column's exact class. A custom property on <body> would restyle the whole page, tens
@@ -292,14 +300,15 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
   const [landed, setLanded] = useState(false)
   const [settling, setSettling] = useState(false)
   const [width, setWidth] = useState(savedWidth)
-  const [viewport, setViewport] = useState(() => window.innerWidth)
+  const [viewport, setViewport] = useState(() => layoutWidth())
   // While dragging or while the window resizes, width changes land at once.
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
   const instant = dragging || resizing
   const [reading, setReading] = useState(false)
 
-  const panelWidth = fitWidth(width ?? (view === 'browser' ? DEFAULT_WIDTH : DETAILS_WIDTH), widthRange(view, viewport))
+  const overlay = overlayPanel(view, viewport)
+  const panelWidth = overlay ? viewport : fitWidth(width ?? (view === 'browser' ? DEFAULT_WIDTH : DETAILS_WIDTH), widthRange(view, viewport))
   // Once the browser has shown, the Bot page keeps its width (up to DETAILS_MAX).
   useLayoutEffect(() => { if (view === 'browser' && width === null) setWidth(DEFAULT_WIDTH) }, [view, width])
   useLayoutEffect(() => { chatRoom.hold(instant) }, [instant])
@@ -319,15 +328,15 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     const switched = settling && shownView.current !== view
     shownView.current = view
     if (switched) chatRoom.hold(true)
-    chatRoom.set(leaving ? null : panelWidth)
+    chatRoom.set(leaving || overlay ? null : panelWidth)
     if (switched) chatRoom.hold(false)
-  }, [view, panelWidth, leaving])
+  }, [view, panelWidth, leaving, overlay])
   useEffect(() => () => { chatRoom.set(null); chatRoom.hold(false) }, [])
   useEffect(() => {
     let timer
     const onResize = () => {
       setResizing(true)
-      setViewport(window.innerWidth)
+      setViewport(layoutWidth())
       clearTimeout(timer)
       timer = setTimeout(() => setResizing(false), 160)
     }
@@ -429,12 +438,12 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
   // A drag writes the width into the panel's and the column's own inline styles each
   // frame (each restyles one element) and renders once, on release.
   const startResize = (event) => {
-    if (event.button !== 0 || leaving) return
+    if (event.button !== 0 || leaving || overlay) return
     event.preventDefault()
     const panel = root.current
     const grip = event.currentTarget
     grip.setPointerCapture?.(event.pointerId)
-    const range = widthRange(view, window.innerWidth)
+    const range = widthRange(view, layoutWidth())
     const from = { x: event.clientX, width: panelWidth }
     let next = panelWidth
     setDragging(true)
@@ -474,7 +483,7 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     'data-instant': instant || undefined, 'data-dragging': dragging || undefined, style: { '--bt-panel-w': `${panelWidth}px` },
     onAnimationEnd: (event) => { if (event.target === event.currentTarget) setLanded(true) },
   },
-    leaving ? null : h('div', { className: 'bt-panel-grip', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': t('Resize panel'), onPointerDown: startResize }),
+    leaving || overlay ? null : h('div', { className: 'bt-panel-grip', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': t('Resize panel'), onPointerDown: startResize }),
     // Over the whole window while dragging: the cursor stays a resize cursor and the
     // pages underneath (the chat, the guest) see no pointer.
     dragging ? createPortal(h('div', { className: 'bt-drag-shield', 'aria-hidden': true }), document.body) : null,
@@ -560,6 +569,9 @@ export const BROWSER_CSS = `
 .bt-bcard-host{flex:none;font-size:11px;line-height:15px;color:var(--bt-ink-3);max-width:38%;overflow:hidden;text-overflow:ellipsis}
 .bt-bcard-x{position:absolute;top:6px;right:6px;width:22px;height:22px;border:0;border-radius:7px;background:color-mix(in srgb,var(--bt-main) 88%,transparent);color:var(--bt-ink-2);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;opacity:0;transition:opacity .12s ease;backdrop-filter:blur(4px)}
 .bt-bcard:hover .bt-bcard-x{opacity:1}
+/* A touch pointer never hovers, so these close buttons stay invisible yet keep their hit
+   area: a tap near the corner closes a tab or a page by accident. Show them instead. */
+@media (hover:none){.bt-ptab-x,.bt-bcard-x{opacity:1}}
 .bt-bcard-new{display:flex;align-items:center;justify-content:center;gap:6px;height:40px;border:.5px dashed var(--bt-line-2);border-radius:12px;background:none;color:var(--bt-ink-3);font:inherit;font-size:12.5px;cursor:pointer}
 .bt-bcard-new:hover{color:var(--bt-ink);border-color:var(--bt-ink-3)}
 .bt-bcard-new svg{width:14px;height:14px}

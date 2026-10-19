@@ -1,7 +1,7 @@
 import { createElement as h, Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { currentPart, latestMemoryChange } from './text.js'
-import { ArrowUpIcon, CloseIcon, ArrowDownIcon, MemoryIcon, SidePanelIcon } from './icons.js'
+import { ArrowUpIcon, ChevronLeftIcon, CloseIcon, ArrowDownIcon, MemoryIcon, SidePanelIcon } from './icons.js'
 import { botState, BotAvatar, RoomAvatar } from './mark.js'
 import { ActivityIndicator } from './activity-row.js'
 import { clockLabel, openingTurn, unseenSince } from './cells.js'
@@ -42,7 +42,7 @@ function MemoryNotice({ shown }) {
     h('span', { className: 'bt-pill-mem-in', ref: inner }, h('span', { className: 'bt-pill-mem-ico' }, h(MemoryIcon)), label))
 }
 
-export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSession, useActivity, useMemoryNews, useTurnClock, useUi, useLive, useWork, actions }) {
+export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSession, useActivity, useMemoryNews, useTurnClock, useUi, useLive, useWork, useMobileNav, useNavLevel, actions }) {
   const roster = useRoster(value => value)
   const title = useSessions(list => list.byId[sessionId]?.displayTitle ?? list.byId[sessionId]?.title ?? '')
   const firstTurns = useSessions((list) => {
@@ -89,7 +89,13 @@ export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus
     return () => { delete document.body.dataset.btRoom }
   }, [Boolean(room)])
   const memoryNotice = notice && changed !== null && roster.memory !== false
+  // On a phone the conversation is the second level: the back control leaves it for the
+  // list page. Its hook is what the test bench reads.
+  const onNavChat = useMobileNav(value => value) && useNavLevel(value => value === 'chat')
   return h('div', { className: 'bt-head' },
+    onNavChat
+      ? h('button', { type: 'button', className: 'bt-icon-btn bt-back', 'data-bt-nav-back': '', 'aria-label': t('Back to Bot list'), title: t('Back to Bot list'), onClick: () => actions.showBotList() }, h(ChevronLeftIcon))
+      : null,
     h('button', {
       type: 'button', className: 'bt-pill', 'aria-expanded': detailsOpen, 'data-memory': memoryNotice ? 'updated' : undefined,
       'aria-label': memoryNotice ? t('Memory updated. Open {name}\'s memory', { name: roster.byId[changed]?.name ?? name }) : t('View conversation details'),
@@ -107,6 +113,22 @@ export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus
     actions.hasRightSidebar?.()
       ? h('button', { type: 'button', className: 'bt-icon-btn bt-head-side', 'data-bt-right-sidebar': '', 'aria-label': t('Show or hide the right sidebar'), title: t('Right sidebar'), onClick: () => actions.toggleRightSidebar() }, h(SidePanelIcon))
       : null)
+}
+
+// A plain Session — a DSH Agent's — keeps the shell's own conversation, so the header this
+// pill replaces is the shell's again and the reader is left with no way back to the list on a
+// phone. The way back takes the shell's own empty leading seat, and only there: a Bot
+// conversation has its own back control, and classic Agent mode has no Bot list to return to.
+export function PlainBack({ useMobileNav, useSurface, useNavLevel, actions }) {
+  const onPhone = useMobileNav(value => value)
+  const plain = useSurface(state => state.plain && state.mode === 'bot')
+  const atChat = useNavLevel(value => value === 'chat')
+  if (!(onPhone && plain && atChat)) return null
+  return h('button', {
+    type: 'button', className: 'bt-plain-back', 'data-bt-nav-back': '',
+    'aria-label': t('Back to Bot list'), title: t('Back to Bot list'),
+    onClick: () => actions.showBotList(),
+  }, h(ChevronLeftIcon))
 }
 
 // New-message pills. "N new messages ↓" takes Back to bottom's place when

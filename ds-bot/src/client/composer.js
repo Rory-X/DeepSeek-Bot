@@ -53,26 +53,10 @@ export function useDictation(onText) {
   return { listening, note, start, stop }
 }
 
-export function ComposerVoice({ sessionId, inputActions, actions, useUi }) {
+export function ComposerVoice({ sessionId, inputActions, actions }) {
   const dictation = useDictation((text, final) => {
     if (final && inputActions) inputActions.insertText(text, inputActions.captureInsertion())
   })
-  // Reply from a message's hover toolbar quotes it into this composer.
-  const quote = useUi(state => (state.quote?.sessionId === sessionId ? state.quote : null))
-  useEffect(() => {
-    if (!quote || !inputActions) return
-    actions.clearQuote(quote.token)
-    const excerpt = quote.text.replace(/\s+/g, ' ').trim()
-    const line = `> ${excerpt.length > 200 ? `${excerpt.slice(0, 200)}…` : excerpt}\n\n`
-    inputActions.insertText(line, inputActions.captureInsertion())
-    const box = document.querySelector('[class*="_centerCol"] [role=textbox][contenteditable=true]')
-    if (box instanceof HTMLElement) {
-      box.focus()
-      const selection = window.getSelection()
-      selection?.selectAllChildren(box)
-      selection?.collapseToEnd()
-    }
-  }, [quote?.token])
   if (sessionId === undefined) return null
   // With the Voice Input plugin on, its own microphone sits in this composer.
   const pluginMic = actions.speech() !== undefined

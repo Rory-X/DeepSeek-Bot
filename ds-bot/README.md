@@ -75,11 +75,25 @@ Options go in the profile's `cordis.patch.yml`, under the `bot` entry. All of th
     updateCheck: true               # look for a newer DS Bot when a window opens; default true
     updateRegistry: https://registry.example/   # ask only this npm registry for updates
     github: false                   # hide the GitHub connector; default shown in Connectors
+    vercel: false                   # hide the Vercel connector; default shown in Connectors
 ```
 
 **Updates**: when a window opens, DS Bot asks where it was installed from for a newer release: the npm registry (the one the DSH plugin manager installs from, then its fallbacks), or the latest GitHub release for a `github:…#vX.Y.Z` install. A newer version shows a cloud button at the top right of the sidebar; **Update** reinstalls DS Bot through the DSH plugin manager, and the new version runs from the next DSH start. A linked or local checkout is never offered an update. Settings → About DS Bot shows the same state, with **Check for updates** to ask again at once.
 
 The same card can carry DSH itself: a DS Bot release may name the DSH release it was verified against (`dsBot.verifiedDsh` in its `package.json`), and only that version is offered — running something newer is a downgrade offer too. A release that names no version offers no DSH update. A DSH installed from npm is swapped by `npm install -g @deepseek-ai/dsh@<version>`. DSH Desktop installs the newest release its own updater finds, so the card shows DSH there only when that release is the verified one, and **Open updates** opens the app's update panel. A release may raise the floor with `dsBot.minBot`: until the bot itself is that new, the DSH row waits.
+
+## Connectors
+
+Settings → Connectors connects outside services whose MCP servers every Bot and Session can use. A connector's tools are mounted for the team; its token is kept in Secrets under the connector's name and sent only in the MCP request headers, so no Bot's shell gets it. A token is saved only when the service accepts it and says which account it belongs to.
+
+| Connector | Secret | MCP server | Account check |
+|---|---|---|---|
+| GitHub | `GITHUB_TOKEN` | `https://api.githubcopilot.com/mcp/` | `GET https://api.github.com/user` |
+| Vercel | `VERCEL_TOKEN` | `https://mcp.vercel.com` | `GET https://api.vercel.com/v2/user` |
+
+GitHub is mounted through DSH's MCP client with the toolsets `context,repos,issues,pull_requests`, so its tools are `mcp__github__<tool>`. Vercel's server lists hundreds of tools and has no server-side filter, so DS Bot does not mount it through DSH's client: it opens the session itself and registers only the read tools it exposes, named `vercel_<tool>` (`list_projects`, `get_deployment`, `get_runtime_logs`, …). Vercel's write tools are never registered, so they cannot be called and never reach a Bot's prompt. The token's default team answers the tools that need a team id.
+
+Vercel is read-only by default. In Settings → Connectors you can turn on its four deployment actions (`create_deployment`, `cancel_deployment`, `request_promote`, `request_rollback`): they are registered only while that switch is on, and every call asks for your approval first. A profile can override a connector's `url` (the MCP server) and `api` (where the token is checked), or hide it with `github: false` / `vercel: false`. Both addresses must start with `https://`; a connector with another address shows an error and never sends the token. Deleting the token on the Secrets page unmounts the connector.
 
 ## Models
 

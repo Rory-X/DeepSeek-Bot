@@ -90,9 +90,9 @@ async function start(seed) {
   }
   apply(ctx, { home })
   let seq = 0
-  const emit = (id, type, data) => {
+  const emit = (id, type, data, time) => {
     for (const listener of ctx.listeners.get('session/event') ?? []) {
-      if (listener.length >= 2) listener({ id }, { type, seq: ++seq, data })
+      if (listener.length >= 2) listener({ id }, { type, seq: ++seq, data, ...(time === undefined ? {} : { time }) })
     }
   }
   // Runs every registered waterfall listener; `next` settles the chain.
@@ -286,19 +286,20 @@ test('stop_bot belongs to a Main Bot', async (t) => {
   await assert.rejects(tool('stop_bot', { bot: 'Writer' }, 'a'), { message: 'Writer is not running right now, so there is nothing to stop. Use message_bot to reach it.' })
 })
 
-function turnsHost() {
+function turnsHost(state = { exchangeTurns: {}, questions: {} }, { selfOf = id => id, groupOwners = new Map() } = {}) {
   let listener
   const delivered = []
   const rt = {
     ctx: { on: (name, fn) => { if (name === 'session/event') listener = fn } },
-    state: { exchangeTurns: {}, questions: {} },
+    state,
     bots: { a: { id: 'a', name: 'Chief' }, b: { id: 'b', name: 'Writer' } },
     isBotSession: () => true,
     roomOf: () => undefined,
-    groupOwners: new Map(),
+    groupOwners,
     chatOwners: new Map(),
     botOf: id => rt.bots[id],
-    selfOf: id => id,
+    selfOf,
+    load: async () => {},
     save: async () => {},
     deliver: async (args) => { delivered.push(args) },
     noteFailure() {},
@@ -308,7 +309,7 @@ function turnsHost() {
   }
   installTurns(rt)
   let seq = 0
-  const emit = (id, type, data) => listener({ id }, { type, seq: ++seq, data })
+  const emit = (id, type, data, time) => listener({ id }, { type, seq: ++seq, data, ...(time === undefined ? {} : { time }) })
   return { rt, emit, delivered }
 }
 
@@ -330,9 +331,68 @@ test('a stopped notice routes the acknowledgement back like a request', () => {
   assert.equal(delivered[0].text, 'understood')
 })
 
+test('a part-opening handoff turn stays hidden', () => {
+  const { rt, emit } = turnsHost()
+  emit('b', 'turn/start', { turn: 1 })
+  emit('b', 'user/message', { content: textBlock('[Bot team setup]'), source: replySource('handoff', { handoff: true }) })
+  emit('b', 'assistant/message', assistantText('Noted. I have my handoff note and carry on from here.'))
+  emit('b', 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  assert.deepEqual(rt.state.exchangeTurns.b, [1])
+})
+
+test('a resumed handoff turn that carries on the work stays visible', () => {
+  const { rt, emit } = turnsHost()
+  emit('b', 'turn/start', { turn: 1 })
+  emit('b', 'user/message', { content: textBlock('go on'), source: replySource('handoff', { handoff: true, resume: true }) })
+  emit('b', 'assistant/message', assistantText('carrying on'))
+  emit('b', 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  assert.deepEqual(rt.state.exchangeTurns, {})
+})
+
+test('a restart starts the activity order from the times the team file remembers', async () => {
+  const state = {
+    exchangeTurns: {},
+    questions: {},
+    bots: { b: { id: 'b', createdAt: 1, segments: [{ sessionId: 'b1', endedAt: 60 }] } },
+    rooms: { r1: { id: 'r1', createdAt: 2, segments: { b: [{ sessionId: 'g1', endedAt: 50 }] } } },
+    exchanges: [{ from: 'a', to: 'b', time: 70 }],
+  }
+  const { rt } = turnsHost(state)
+  await new Promise(resolve => setImmediate(resolve))
+  // The newest part end, message or creation counts, for both sides of an exchange.
+  assert.deepEqual([rt.lastActivityOf('b'), rt.lastActivityOf('a'), rt.roomActivityOf('r1')], [70, 70, 50])
+})
+
+test('a message moves its Bot and the group it appeared in', () => {
+  const state = { exchangeTurns: {}, questions: {}, bots: { b: { id: 'b', createdAt: 1 } }, rooms: { r1: { id: 'r1', createdAt: 2 } } }
+  const groupOwners = new Map([['gb', { botId: 'b', roomId: 'r1' }]])
+  const { rt, emit } = turnsHost(state, { selfOf: id => (id === 'gb' ? 'b' : id), groupOwners })
+  emit('b', 'user/message', { content: textBlock('hello'), source: { kind: 'user' } }, 100)
+  assert.equal(rt.lastActivityOf('b'), 100)
+  emit('gb', 'assistant/message', { turn: 1, message: { content: textBlock('posted') } }, 200)
+  assert.deepEqual([rt.lastActivityOf('b'), rt.roomActivityOf('r1')], [200, 200])
+  // A line DS Bot writes into the group itself counts too.
+  rt.noteRoomActivity('r1', 300)
+  assert.equal(rt.roomActivityOf('r1'), 300)
+})
+
+test('the team view dates each Bot and group for the activity order', async (t) => {
+  const seed = team({ group: true })
+  seed.bots.a.segments = [{ sessionId: 'a0', endedAt: 40 }]
+  seed.exchanges = [{ id: 'x', from: 'a', to: 'b', text: 'hi', role: 'request', time: 45 }]
+  seed.rooms.r1.createdAt = 3
+  const { emit, call, stop } = await start(seed)
+  t.after(stop)
+  const view = (await call('state', {})).value
+  assert.deepEqual(view.bots.map(bot => [bot.id, bot.lastActivity]), [['a', 45], ['b', 45]])
+  assert.equal(view.rooms[0].lastActivity, 3)
+  // A message moves the Bot that read it.
+  emit('b', 'assistant/message', { turn: 1, message: { content: textBlock('later') } }, 200)
+  assert.equal((await call('state', {})).value.bots.find(bot => bot.id === 'b').lastActivity, 200)
+})
+
 // What the turn hands back for a joined request: the request itself, to answer next.
 const deferredOf = job => [job.fromId, job.toId, job.sessionId, job.role, job.exchangeId, job.deferred, job.text]
-
 test('a request that joins a user-started turn is handed back, not answered with the turn\'s text', () => {
   const { rt, emit, delivered } = turnsHost()
   emit('b', 'turn/start', { turn: 1 })
@@ -344,13 +404,14 @@ test('a request that joins a user-started turn is handed back, not answered with
   assert.deepEqual(delivered.map(deferredOf), [['a', 'b', 'b', 'request', 'e1', true, 'make it shorter']])
   assert.deepEqual(rt.state.exchangeTurns, {})
 
-  // The handed-back request opens a hidden turn whose text is the reply.
+  // The handed-back request opens a turn of its own; it is the Bot's work, so it stays
+  // visible in the Bot's chat.
   emit('b', 'turn/start', { turn: 2 })
   emit('b', 'user/message', { content: textBlock('[Message from Chief · you read it during your last task; answer it now]\nmake it shorter'), source: replySource('request', { exchangeId: 'e1', deferred: true }) })
   emit('b', 'assistant/message', assistantText('done, it is shorter'))
   emit('b', 'turn/end', { turn: 2, reason: { kind: 'completed' } })
   assert.deepEqual(delivered.slice(1).map(job => [job.toId, job.role, job.replyTo, job.text]), [['a', 'reply', 'e1', 'done, it is shorter']])
-  assert.deepEqual(rt.state.exchangeTurns, { b: [2] })
+  assert.deepEqual(rt.state.exchangeTurns, {})
 })
 
 test('a request that joins a Bot-triggered turn is handed back; the trigger gets the whole turn', () => {
@@ -361,7 +422,8 @@ test('a request that joins a Bot-triggered turn is handed back; the trigger gets
   emit('b', 'user/message', { content: textBlock('[Message from Chief]\nmore'), source: replySource('request', { exchangeId: 'e1' }) })
   emit('b', 'assistant/message', assistantText('second half'))
   emit('b', 'turn/end', { turn: 1, reason: { kind: 'completed' } })
-  assert.deepEqual(rt.state.exchangeTurns.b, [1])
+  // A turn that answers another Bot is the Bot's work, so it stays visible.
+  assert.deepEqual(rt.state.exchangeTurns, {})
   assert.deepEqual(delivered.map(job => [job.role, job.replyTo ?? job.exchangeId, job.text]), [['reply', 'e0', 'first half\n\nsecond half'], ['request', 'e1', 'more']])
 })
 
@@ -655,12 +717,12 @@ test('Bots keep messaging and posting with no count of messages or rounds', asyn
 })
 
 // A Writer whose earlier part b1 holds `events`.
-function earlierParts(events) {
+function earlierParts(events, state = { exchangeTurns: {} }) {
   const writer = { id: 'b', name: 'Writer', createdAt: 1, sessionId: 'b2', segments: [{ sessionId: 'b1', endedAt: 2 }] }
   const rt = {
     ctx: { on() {}, effect() {}, get() {}, sessionController: { page: async () => ({ records: events.map(event => ({ event })), hasMore: false }) } },
     config: {},
-    state: { exchangeTurns: {} },
+    state,
     chatOwners: new Map([['b2', 'b']]),
     pastOwners: new Map([['b1', { botId: 'b' }]]),
     botOf: id => (id === 'b' ? writer : undefined),
@@ -680,6 +742,34 @@ test('an earlier part keeps the request its Bot answered', async () => {
   const { items } = await rt.earlierPage('b2')
   assert.deepEqual(items.map(item => [item.kind, item.role ?? item.text]), [['event', 'request'], ['bot', 'Understood, I stopped.']])
   assert.equal(items[0].botId, 'a')
+  // The line names the exchange it belongs to, so the chat can open it there.
+  assert.equal(items[0].id, 'x1')
+})
+
+test('an earlier message line without an exchange id has none', async () => {
+  const rt = earlierParts([
+    { type: 'user/message', seq: 1, time: 10, data: { turn: 1, content: [{ type: 'text', text: '[Message from Chief]\nold note' }], source: { kind: SOURCE_KIND, role: 'request', senderSessionId: 'a', senderName: 'Chief' } } },
+  ])
+  const { items } = await rt.earlierPage('b2')
+  assert.equal(items[0].kind, 'event')
+  assert.equal('id' in items[0], false)
+})
+
+test('a turn the Bot answered for another Bot stays in its earlier part', async () => {
+  const state = { exchangeTurns: {}, questions: {} }
+  const { emit } = turnsHost(state)
+  emit('b1', 'turn/start', { turn: 1 })
+  emit('b1', 'user/message', { content: textBlock('[Message from Chief]\nfix the test'), source: replySource('request', { exchangeId: 'e1' }) })
+  emit('b1', 'assistant/message', assistantText('Fixed it and ran the suite.'))
+  emit('b1', 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  // The turn is the Bot's work, so the part's page keeps what it wrote.
+  assert.deepEqual(state.exchangeTurns, {})
+  const rt = earlierParts([
+    { type: 'user/message', seq: 1, time: 10, data: { turn: 1, content: [{ type: 'text', text: '[Message from Chief]\nfix the test' }], source: replySource('request', { exchangeId: 'e1' }) } },
+    { type: 'assistant/message', seq: 2, time: 11, data: { turn: 1, message: { content: [{ type: 'text', text: 'Fixed it and ran the suite.' }] } } },
+  ], state)
+  const { items } = await rt.earlierPage('b2')
+  assert.deepEqual(items.map(item => [item.kind, item.role ?? item.text]), [['event', 'request'], ['bot', 'Fixed it and ran the suite.']])
 })
 
 test('each text block of a Bot message is an entry of its own, as each is a bubble of its own', async () => {

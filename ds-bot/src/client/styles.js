@@ -2,6 +2,7 @@ import { INKS } from './inks.js'
 import { DEFAULT_MASK } from './characters.js'
 import { MENTION_ORIGIN } from './text.js'
 import { SPRING_SHAPE, SPRING_TAP, SPRING_STRETCH, SPRING_POP, spring } from './motion.js'
+import { MOBILE_NAV, NOT_DESKTOP } from './media.js'
 
 // The pill stretches for "Memory updated" on SPRING_STRETCH, and its icon pops on
 // SPRING_POP; it closes on SPRING_SHAPE.
@@ -18,10 +19,13 @@ const SKIN_FOOT = ':is(div,footer):not([class*="_footArea"]):has(> div > [data-s
 // CONVERSATION_CSS re-skins the shell's own conversation DOM and styles what only
 // the conversation renders.
 export const SHELL_CSS = `
-body{--bt-ink:#141414;--bt-danger:#e02135;--bt-ink-2:rgba(20,20,20,.6);--bt-ink-3:rgba(20,20,20,.36);--bt-bubble:#eeeeee;--bt-sidebar:#f7f7f7;--bt-main:#fcfcfc;--bt-line:rgba(20,20,20,.08);--bt-line-2:rgba(20,20,20,.15);--bt-line-weak:rgba(20,20,20,.1);--bt-hover:rgba(119,119,119,.09);--bt-active:rgba(119,119,119,.17);--bt-card:#ffffff;--bt-accent:#4d6bfe;--bt-green:#00c972;--bt-star:#ff9800;--bt-user:#070707;--bt-user-ink:#fcfcfc;--bt-tag-bg:rgba(20,20,20,.06);--bt-tag-ink:rgba(20,20,20,.56)}
+body{--bt-ink:#141414;--bt-danger:#e02135;--bt-ink-2:rgba(20,20,20,.6);--bt-ink-3:rgba(20,20,20,.36);--bt-bubble:#eeeeee;--bt-sidebar:#f7f7f7;--bt-main:#fcfcfc;--bt-line:rgba(20,20,20,.08);--bt-line-2:rgba(20,20,20,.15);--bt-line-weak:rgba(20,20,20,.1);--bt-hover:rgba(119,119,119,.09);--bt-active:rgba(119,119,119,.17);--bt-card:#ffffff;--bt-accent:#4d6bfe;--bt-green:#00c972;--bt-star:#ff9800;--bt-user:#070707;--bt-user-ink:#fcfcfc;--bt-tag-bg:rgba(20,20,20,.06);--bt-tag-ink:rgba(20,20,20,.56);--bt-vh:100vh}
 body[data-ds-dark-theme]{--bt-ink:#f2f2f2;--bt-ink-2:rgba(242,242,242,.6);--bt-ink-3:rgba(242,242,242,.36);--bt-bubble:#262626;--bt-sidebar:#1b1b1b;--bt-main:#141414;--bt-line:rgba(255,255,255,.08);--bt-line-2:rgba(255,255,255,.15);--bt-line-weak:rgba(255,255,255,.1);--bt-hover:rgba(160,160,160,.12);--bt-active:rgba(160,160,160,.2);--bt-card:#1f1f1f;--bt-user:#f2f2f2;--bt-user-ink:#141414;--bt-tag-bg:rgba(255,255,255,.09);--bt-tag-ink:rgba(242,242,242,.62)}
 ${Object.entries(INKS).map(([name, [light]]) => `body{--bt-ink-${name}:${light}}`).join('')}
 ${Object.entries(INKS).map(([name, [, dark]]) => `body[data-ds-dark-theme]{--bt-ink-${name}:${dark}}`).join('')}
+/* A dialog sized in vh hangs under a mobile browser's URL bar, which vh does not count.
+   dvh tracks it; where dvh is missing the vh above stays. */
+@supports (height:100dvh){body{--bt-vh:100dvh}}
 .bt-mark{display:inline-block;flex:none;position:relative;line-height:0}
 .bt-mark svg{width:100%;height:100%;overflow:visible}
 .bt-mark-img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;box-shadow:inset 0 0 0 1px var(--bt-line)}
@@ -102,6 +106,17 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 @keyframes bt-blink-idle{0%,29.6%,35%,69.2%,74.6%,100%{transform:scaleY(1)}32.2%,71.8%{transform:scaleY(.03)}33.8%,73.4%{transform:scaleY(1.06)}}
 @keyframes bt-blink{0%,42%,50%,100%{transform:scaleY(1)}46%{transform:scaleY(.03)}48%{transform:scaleY(1.06)}}
 @media (prefers-reduced-motion:reduce){.bt-mark *{animation:none!important;transition:none!important}}
+/* A reader who asked for less motion gets none: not only the page changes, but the short
+   tints and slides a tap would otherwise set off. */
+@media (prefers-reduced-motion:reduce){.bt-row,.bt-tile,.bt-round,.bt-icon-btn,.bt-soft,.bt-settings-item,.bt-menu button,.bt-tool,.bt-brand,.bt-chief-bar{animation:none!important;transition:none!important}}
+/* A working Main Bot keeps its star; the working dot takes the free corner, so the card
+   reads both who it is and that it works. */
+.bt-badge-working-kept{top:1px;bottom:auto}
+/* The Main Bot's card says "working" without taking room: a halo breathing around its mark
+   instead of a line of text, so the card is the same size whether it works or not. */
+@keyframes bt-work-halo{0%,100%{opacity:.5;scale:1}50%{opacity:.16;scale:1.16}}
+.bt-tile:has(.bt-badge-working)>.bt-mark::after{content:'';position:absolute;inset:-8%;border-radius:50%;box-shadow:0 0 0 2px color-mix(in srgb,var(--bt-green) 70%,transparent);pointer-events:none;animation:bt-work-halo 1.7s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.bt-tile:has(.bt-badge-working)>.bt-mark::after{animation:none;opacity:.45}}
 .bt-badge{position:absolute;right:0;bottom:0;width:12px;height:12px;border-radius:50%;corner-shape:round;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.5px var(--bt-sidebar)}
 .bt-badge-admin{background:color-mix(in srgb,var(--bt-star) 82%,var(--bt-sidebar))}
 .bt-badge-admin svg{width:7px;height:7px}
@@ -118,7 +133,7 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-stack>*+*{margin-left:calc(var(--bt-stack-size) * -.3)}
 .bt-stack-more{font-size:11px;line-height:16px;color:var(--bt-ink-3);margin-left:3px!important}
 
-.bt-side{display:flex;flex-direction:column;min-height:0;flex:1 1 auto;gap:2px;padding:0 12px 8px 0;color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.bt-side{display:flex;flex-direction:column;min-height:0;flex:1 1 auto;gap:2px;padding:0 12px calc(8px + env(safe-area-inset-bottom)) 0;color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 .bt-side-top{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:6px 5px 0 0}
 .bt-brand{display:inline-flex;align-items:center;gap:6px;margin-right:auto;padding:4px 8px 4px 4px;border:0;border-radius:8px;background:none;cursor:pointer;font-family:inherit;font-size:15px;line-height:20px;font-weight:600;letter-spacing:-.01em;color:var(--bt-ink);white-space:nowrap}
 .bt-brand-whale{display:inline-flex;color:var(--bt-accent)}
@@ -132,14 +147,21 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-tile[aria-current=page]{background:var(--bt-active)}
 .bt-tile-name{font-size:13px;line-height:18px;font-weight:400;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-chip{font-size:11px;line-height:16px;padding:1px 4px;border-radius:4px;background:var(--bt-hover);border:1px solid var(--bt-line);color:var(--bt-ink-2);white-space:nowrap;max-width:84px;overflow:hidden;text-overflow:ellipsis}
+.bt-row-role{flex:none;max-width:84px;font-size:11px;line-height:16px;font-weight:400;padding:0 5px;border-radius:4px;background:var(--bt-hover);border:1px solid var(--bt-line);color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-row{display:flex;align-items:center;gap:8px;min-height:54px;padding:8px;border:0;border-radius:10px;background:transparent;color:var(--bt-ink);text-align:left;cursor:pointer;width:100%;box-sizing:border-box;font-family:inherit;transition:background-color .12s ease}
+/* A phone holds a row to open its menu: the hold must not select text or raise the
+   system's callout, and only the rows that carry a menu are affected. */
+.bt-row,.bt-tile,.bt-agent-sub-row{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .bt-row:hover{background:var(--bt-hover)}
 .bt-row[aria-current=page]{background:var(--bt-active)}
 .bt-row-body{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
 .bt-row-name{display:flex;align-items:center;gap:6px;min-width:0;font-size:14px;line-height:20px;font-weight:400}
-.bt-row-title{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bt-row-title{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-tag{flex:none;max-width:96px;font-size:12px;line-height:16px;font-weight:400;padding:1px 6px;border-radius:4px;background:var(--bt-tag-bg);color:var(--bt-tag-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-row-preview{font-size:13px;line-height:18px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* A busy row's line is the group's member state at the row's own size: what it is doing
+   clips at the row's edge, and the clock at the end is never cut. */
+.bt-row-state{font-size:13px;line-height:18px;color:var(--bt-ink-2);overflow:hidden}
 .bt-unread{width:8px;height:8px;border-radius:50%;background:var(--bt-accent);flex:none;margin-right:2px;animation:bt-fade .13s cubic-bezier(.22,1,.36,1)}
 .bt-unread-wait{background:var(--bt-star)}
 .bt-rail{align-items:center;padding:0 0 8px}
@@ -158,7 +180,15 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-pill{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;height:40px;padding:7.5px 13.5px 7.5px 7.5px;border-radius:999px;background:var(--bt-main);border:.5px solid var(--bt-line-2);box-shadow:0 2px 8px -1px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);color:var(--bt-ink);font-family:inherit;font-size:14px;line-height:20px;cursor:pointer;max-width:70%;box-sizing:border-box;transition:background-color .12s ease,transform ${SPRING_TAP.duration}ms ${SPRING_TAP.easing}}
 .bt-pill:hover{background:color-mix(in srgb,var(--bt-main),#777 9%)}
 .bt-head-side{position:absolute;right:12px;top:4px;width:32px;height:32px;border-radius:8px;pointer-events:auto;transition:background-color .12s ease}
-.bt-head-side:hover{background:color-mix(in srgb,var(--bt-main),#777 12%);color:var(--bt-ink)}
+.bt-head-side:hover,.bt-back:hover{background:color-mix(in srgb,var(--bt-main),#777 12%);color:var(--bt-ink)}
+/* The phone's conversation is the second level; this leaves it for the list page. It sits
+   where the shell's own leading control does, opposite the right-sidebar button. */
+.bt-back{position:absolute;left:12px;top:4px;pointer-events:auto}
+/* The way back from a plain Session, in the shell's own header: a full touch target that
+   leaves the header's line as tall as it was, since the margins give back what the box adds. */
+.bt-plain-back{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;margin:-7px 0 -7px -10px;padding:0;border:0;border-radius:12px;background:none;color:var(--bt-ink-2);cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease,color .12s ease}
+.bt-plain-back:hover,.bt-plain-back:active{background:var(--bt-hover);color:var(--bt-ink)}
+.bt-plain-back svg{width:20px;height:20px}
 .bt-pill:active{transform:scale(.965)}
 .bt-pill-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .bt-pill-mem{flex:none;display:inline-flex;width:0;margin-left:-8px;overflow:hidden;transition:${spring(SPRING_SHAPE, 'width', 'margin-left')}}
@@ -322,7 +352,7 @@ button.bt-q-opt:active{background:var(--bt-active)}
 .bt-dialog{flex:1;display:flex;flex-direction:column;min-width:0}
 .bt-dialog .bt-head{height:62px}
 .bt-dialog-log{flex:1;overflow-y:auto;padding:8px 16px 20px;width:100%;max-width:var(--dsh-chat-content-width,748px);margin:0 auto;box-sizing:border-box}
-.bt-dialog-foot{display:flex;justify-content:center;padding:10px 10px 16px}
+.bt-dialog-foot{display:flex;justify-content:center;padding:10px 10px calc(16px + env(safe-area-inset-bottom))}
 .bt-exchange{animation:bt-sheet-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing} both,bt-veil-in .24s ease-out both}
 .bt-exchange[data-leaving]{animation:bt-sheet-out .22s cubic-bezier(.4,0,1,1) forwards;pointer-events:none}
 @keyframes bt-sheet-in{from{transform:translateY(24px)}}
@@ -335,8 +365,17 @@ button.bt-q-opt:active{background:var(--bt-active)}
 [data-folded] .bt-fold-body{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 40px),transparent)}
 .bt-ubody .bt-fold .bt-more,.bt-ububble .bt-fold .bt-more,.bt-ubody .bt-fold-note,.bt-ububble .bt-fold-note{color:inherit;opacity:.7}
 .bt-ubody .bt-fold .bt-more:hover,.bt-ububble .bt-fold .bt-more:hover{opacity:1}
-.bt-exchange .bt-dialog-foot{position:absolute;left:0;right:0;bottom:0;height:76px;box-sizing:border-box;align-items:flex-end;padding:0 0 28px;background:var(--bt-main);z-index:3;animation:bt-foot-in .3s cubic-bezier(.22,1,.36,1) .3s both}
+.bt-exchange .bt-dialog-foot{position:absolute;left:0;right:0;bottom:0;height:calc(76px + env(safe-area-inset-bottom));box-sizing:border-box;align-items:flex-end;padding:0 0 calc(28px + env(safe-area-inset-bottom));background:var(--bt-main);z-index:3;animation:bt-foot-in .3s cubic-bezier(.22,1,.36,1) .3s both}
 .bt-exchange .bt-dialog-foot::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:40px;background:linear-gradient(to top,var(--bt-main),transparent);pointer-events:none}
+/* The transcript keeps its newest line in view; a reader who scrolled up gets a way back,
+   floated over the log and clear of the footer and the safe area under it. */
+.bt-exchange-jump{position:absolute;right:max(16px,calc((100% - 960px)/2 + 16px));bottom:calc(76px + env(safe-area-inset-bottom) + 12px);z-index:4;width:40px;height:40px;padding:0;border:1px solid var(--bt-line);border-radius:999px;background:var(--bt-main);color:var(--bt-ink);display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;animation:bt-veil-in .16s ease-out}
+.bt-exchange-jump svg{width:18px;height:18px}
+/* The line a tapped event opened the dialog on flashes once, so the eye lands on it. */
+@keyframes bt-exchange-hit{from{background-color:color-mix(in srgb,var(--bt-accent) 16%,transparent)}to{background-color:transparent}}
+.bt-exchange .bt-exchange-hit{border-radius:12px;animation:bt-exchange-hit 1.2s ease-out}
+@media (prefers-reduced-motion:reduce){.bt-exchange .bt-exchange-hit{animation:none;background-color:color-mix(in srgb,var(--bt-accent) 12%,transparent)}}
+@media (prefers-reduced-motion:reduce){.bt-exchange-jump{animation:none}}
 .bt-exchange[data-leaving] .bt-dialog-foot{animation:bt-foot-out .22s cubic-bezier(.4,0,1,1) forwards}
 @keyframes bt-foot-in{from{opacity:0;transform:translateY(6px)}}
 @keyframes bt-foot-out{to{opacity:0;transform:translateY(6px)}}
@@ -373,7 +412,7 @@ button.bt-q-opt:active{background:var(--bt-active)}
 .bt-tab[aria-selected=true]{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-tabs>.bt-thumb{top:0;bottom:0;border-radius:9999px;background:var(--bt-hover)}
 .bt-tabs[data-glide] .bt-tab[aria-selected=true]{background:transparent}
-.bt-drawer-body{flex:1;overflow-y:auto;padding:20px 16px 16px;font-size:13px;line-height:18px;display:flex;flex-direction:column;gap:16px}
+.bt-drawer-body{flex:1;overflow-y:auto;padding:20px 16px calc(16px + env(safe-area-inset-bottom));font-size:13px;line-height:18px;display:flex;flex-direction:column;gap:16px}
 .bt-empty{text-align:center;color:var(--bt-ink-3);font-size:13px;line-height:18px;padding:8px 12px}
 .bt-section-title{font-size:12px;color:var(--bt-ink-2);margin-bottom:6px}
 .bt-muted{color:var(--bt-ink-2)}
@@ -443,7 +482,7 @@ button.bt-q-opt:active{background:var(--bt-active)}
 .bt-settings-layer{position:fixed;inset:var(--dsh-frame-chrome-top,0px) 0 0;z-index:60;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 .bt-scrim{position:absolute;inset:0;background:rgba(0,0,0,.32);animation:bt-fade .22s ease-out}
 body[data-ds-dark-theme] .bt-scrim{background:rgba(0,0,0,.5)}
-.bt-settings{--bt-set-w:min(1100px,calc(100vw - 48px));--bt-set-h:min(780px,calc(100vh - 2*max(32px,var(--dsh-frame-overlay-top,32px))));position:relative;width:var(--bt-set-w);height:var(--bt-set-h);background:var(--bt-main);border-radius:16px;border:.5px solid var(--bt-line-2);box-shadow:0 24px 80px rgba(0,0,0,.24);display:flex;overflow:hidden;color:var(--bt-ink);animation:bt-dialog-rise ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
+.bt-settings{--bt-set-w:min(1100px,calc(100vw - 48px));--bt-set-h:min(780px,calc(var(--bt-vh) - 2*max(32px,var(--dsh-frame-overlay-top,32px))));position:relative;width:var(--bt-set-w);height:var(--bt-set-h);background:var(--bt-main);border-radius:16px;border:.5px solid var(--bt-line-2);box-shadow:0 24px 80px rgba(0,0,0,.24);display:flex;overflow:hidden;color:var(--bt-ink);animation:bt-dialog-rise ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 :is(.bt-settings-layer,.bt-mem-layer)[data-leaving]{pointer-events:none}
 :is(.bt-settings-layer,.bt-mem-layer)[data-leaving] .bt-scrim{opacity:0;transition:opacity .16s ease-in}
 :is(.bt-settings-layer,.bt-mem-layer)[data-leaving]>[role=dialog]{animation:bt-dialog-sink .16s cubic-bezier(.4,0,1,1) forwards}
@@ -465,7 +504,7 @@ body[data-ds-dark-theme] .bt-scrim{background:rgba(0,0,0,.5)}
 .bt-settings-head h2{margin:0;font-size:15px;line-height:24px;font-weight:600;animation:bt-veil-in .2s ease-out}
 .bt-settings-head>.bt-icon-btn{animation:bt-back-in ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .16s ease-out}
 @keyframes bt-back-in{from{translate:6px 0;scale:.8}}
-.bt-settings-scroll{flex:1;overflow-y:auto;padding:12px 20px 24px;display:flex;flex-direction:column;gap:20px;scrollbar-width:thin}
+.bt-settings-scroll{flex:1;overflow-y:auto;padding:12px 20px calc(24px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:20px;scrollbar-width:thin}
 .bt-settings-page>:not(.bt-us){animation:bt-page-up ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing} backwards,bt-veil-in .22s ease-out backwards}
 .bt-settings-page[data-move=in]>:not(.bt-us){animation-name:bt-page-in,bt-veil-in}
 .bt-settings-page[data-move=out]>:not(.bt-us){animation-name:bt-page-out,bt-veil-in}
@@ -495,6 +534,23 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-set-bot{flex:1;display:flex;align-items:center;gap:8px;min-width:0}
 .bt-set-paste{flex-direction:column;align-items:stretch;gap:8px}
 .bt-chevron{color:var(--bt-ink-3);display:inline-flex;flex:none}
+/* A phone has no room for a 198px page list beside the page, so the list becomes a strip
+   above it. The glide thumb is a bar that only glides vertically, and a row gives it
+   nothing to glide along: it steps aside and the current item keeps the highlight. The
+   strip itself stops short of the close button — padding inside a scroll container is not
+   room, since at scroll 0 the items still run under the button and take its taps. */
+@media (max-width:640px){
+.bt-settings{--bt-set-w:calc(100vw - 16px);flex-direction:column}
+.bt-settings-nav{width:auto;flex-direction:row;align-items:center;gap:2px;overflow-x:auto;margin-right:calc(12px + 32px);padding:8px;border-right:0;border-bottom:.5px solid var(--bt-line);scrollbar-width:none}
+.bt-settings-nav>.bt-thumb{display:none}
+.bt-settings-nav[data-glide] .bt-settings-item[aria-current=page]{background:var(--bt-active)}
+.bt-settings-item{flex:none;white-space:nowrap}
+.bt-settings-shell{margin-top:0;margin-left:auto}
+.bt-settings-main{flex:1 1 auto;width:auto;height:auto;min-height:0}
+.bt-settings-usage[data-off]{left:0;width:100%}
+.bt-settings-head{padding:12px 16px 4px}
+.bt-settings-scroll{padding:12px 16px calc(20px + env(safe-area-inset-bottom))}
+}
 
 /* Settings → Connectors. */
 .bt-connector{display:flex;flex-direction:column;gap:10px;padding:12px}
@@ -506,6 +562,20 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector[data-state=ready] .bt-connector-status{color:var(--bt-ink-2)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
 .bt-connector-actions{flex:none;display:flex;gap:6px}
+/* A connected connector opens its settings from its own row: the row is the control, the
+   chevron says which way it goes, and the panel below holds one section per setting. */
+.bt-connector-main{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 auto;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;border-radius:10px}
+button.bt-connector-main{cursor:pointer;min-height:24px}
+button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-connector-chevron{flex:none;display:inline-flex;color:var(--bt-ink-3);transition:transform .15s ease}
+.bt-connector[data-open] .bt-connector-chevron{transform:rotate(90deg)}
+.bt-connector-panel{display:flex;flex-direction:column;gap:12px;padding-top:10px;border-top:1px solid var(--bt-line);animation:bt-veil-in .16s ease-out}
+@media (prefers-reduced-motion:reduce){.bt-connector-chevron{transition:none}.bt-connector-panel{animation:none}}
+.bt-connector-action-row{display:flex;align-items:center;gap:12px}
+.bt-connector-action-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
+.bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+.bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
@@ -536,6 +606,82 @@ ${SKIN_FOOT}{display:flex!important;flex-direction:row!important;align-items:cen
 ${SKIN_FOOT}>div:has(> [data-slot="sidebar.footer.action"]){display:flex!important;align-items:center!important;flex:1 1 auto!important;min-width:0!important}
 ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:none!important;width:auto!important}
 [class*="_widthHandle"]{display:none!important}
+/* On a phone the Bot list is a page of its own, so the shell's sidebar goes away for the
+   whole surface. Below 1024px the shell keeps a 56px rail for a collapsed sidebar and
+   offers no way to set that track to zero, so the frame's grid is closed here: the sidebar
+   track, and the shell's right panel, which its own column math cannot keep open this
+   narrow (a panel track needs 300px beside a 400px conversation, so it is always collapsed
+   under this width). Hiding a column takes it out of the grid flow, so the conversation is
+   pinned to its track; without that it lands in the 0px track and the right panel's
+   still-mounted slot sits over it, swallowing the taps meant for the conversation's own
+   controls.
+   The right panel is the exception: the sidebar-right package makes it fullscreen below
+   768px, and its column is the box that panel positions itself against, so hiding the
+   column is what left the conversation header's button doing nothing. While the panel is
+   fullscreen the column comes back out of the grid and covers the viewport, and the
+   conversation keeps its width either way.
+   The media query is the device test (the same string the navigation state reads, from
+   media.js); the body attribute narrows it to the Bot surface, which a media query cannot
+   see — an Agent Session keeps the shell's own sidebar. */
+@media ${MOBILE_NAV}{
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) 0!important}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"],${NOT_DESKTOP} body[data-bt-nav] [data-rightbar-col]{display:none!important}
+${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
+/* The panel is fullscreen on a phone by its own rule, and this column is the box it
+   positions itself against: the column covers the viewport with it, so the panel is the
+   whole screen and the shell's own chrome inside it is the way out. */
+${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{display:block!important;position:fixed!important;inset:0;width:100%!important;z-index:39;overscroll-behavior:contain;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+/* A page change on a phone: the conversation slides out of the way and the page it came
+   from follows it, so the list yields on the way in and comes back on the way out. The edge
+   swipe sets the same offset by hand, which is why one variable drives both. */
+${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"]{position:relative;z-index:36;transform:translateX(var(--bt-nav-x,0px))}
+${NOT_DESKTOP} body[data-bt-nav-motion=push] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=pop] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion=cancel] [class*="_centerCol"]{transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
+${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{transform:translateX(var(--bt-nav-list-x,0px))}
+${NOT_DESKTOP} body[data-bt-nav-motion=push] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=pop] .bt-nav-page,${NOT_DESKTOP} body[data-bt-nav-motion=cancel] .bt-nav-page{transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
+@media (prefers-reduced-motion:reduce){
+${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"],${NOT_DESKTOP} body[data-bt-nav-motion] .bt-nav-page{transition:none}
+}
+/* The Main Bot's card is the list's first item; once it has scrolled away a small rounded
+   card under the top row says who it is — the mark with its Main Bot star, the name and the
+   role. It is a mark, not a control, and it overlays the list rather than taking a row: the
+   list's scroll geometry must not change when it comes and goes, or the content under the
+   reader's finger would move and the card could slide back into view by itself. */
+.bt-nav-body{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:8px;max-width:min(300px,88%);min-height:44px;box-sizing:border-box;padding:6px 12px 6px 6px;border:0;border-radius:16px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font:inherit;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
+.bt-chief-bar:active{background:color-mix(in srgb,var(--bt-card),var(--bt-ink) 8%)}
+.bt-chief-text{display:flex;flex-direction:column;min-width:0;text-align:left}
+.bt-chief-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:20px;font-weight:600}
+.bt-chief-role{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+@media (prefers-reduced-motion:reduce){.bt-chief-bar{animation:none}}
+/* While the pill stands in for the card, the card itself is not drawn: leaving it there
+   would show two cards at once, and taking it out of the flow would move the list. */
+body[data-bt-chief=collapsed] .bt-nav-body .bt-tile-wrap{visibility:hidden}
+/* The phone's list page opens the account menu from its own brand: the entries take a
+   touch height, the menu scrolls where it is long, and it stays clear of the home bar. */
+${NOT_DESKTOP} .bt-nav-account{cursor:pointer;min-height:44px;padding:6px 10px}
+${NOT_DESKTOP} .bt-account-menu{width:min(300px,calc(100% - 20px));max-height:min(70vh,420px);overflow-y:auto;overscroll-behavior:contain;padding-bottom:calc(6px + env(safe-area-inset-bottom))}
+${NOT_DESKTOP} .bt-account-menu button{min-height:44px;padding:10px 12px;font-size:15px;line-height:22px}
+${NOT_DESKTOP} .bt-account-menu button svg{width:18px;height:18px}
+/* The page itself must not move under a finger: no rubber-band, no pull-to-refresh, and no
+   pinch or double-tap zoom. Panning stays in the allowed set, so the chat and every inner
+   list keep scrolling; the page has nothing to pan, its frame is the viewport. */
+${NOT_DESKTOP}{overscroll-behavior:none;overscroll-behavior-y:none;touch-action:pan-x pan-y}
+${NOT_DESKTOP} body{overscroll-behavior:none;overscroll-behavior-y:none;touch-action:pan-x pan-y;-webkit-tap-highlight-color:transparent}
+/* Safari zooms the page when a field under 16px takes focus, and that zoom outlives the
+   field: it is the one page movement the user cannot undo. */
+${NOT_DESKTOP} :is(input:not([type=checkbox]):not([type=radio]),select,textarea,[contenteditable=true]){font-size:max(16px,1em)!important}
+}
+/* A touch pointer never hovers, but Safari keeps the :hover style after a tap: a tapped row
+   or button stays tinted and reads as selected. The tint moves to :active, the real press. */
+@media (hover:none){
+.bt-row:hover,.bt-tile:hover,.bt-settings-item:hover,.bt-icon-btn:hover,.bt-round:hover,.bt-soft:hover,.bt-brand:hover{background:none}
+.bt-row:active,.bt-tile:active,.bt-settings-item:active,.bt-icon-btn:active,.bt-round:active,.bt-soft:active,.bt-brand:active{background:var(--bt-hover)}
+}
+/* An installed app has no browser chrome to fall back on: the safe areas are the whole
+   frame, and the interface is the only thing on screen. */
+body[data-bt-standalone] .bt-nav-page{padding-top:max(env(safe-area-inset-top),6px);padding-bottom:env(safe-area-inset-bottom)}
+body[data-bt-standalone] .bt-nav-top{padding-top:2px}
+body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:none}
 
 .bt-voice-pane{flex-direction:column;align-items:center;justify-content:center;animation:bt-fade .2s ease-out}
 .bt-voice-stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;max-width:560px;text-align:center}
@@ -574,6 +720,17 @@ ${SKIN_FOOT}>div:has(> [data-slot="sidebar.settings"]){order:-1!important;flex:n
 .bt-tools{position:absolute;top:50%;left:100%;margin-left:6px;transform:translateY(-50%);display:flex;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
 .bt-tools::after{content:"";position:absolute;top:-8px;bottom:-8px;right:100%;width:128px;z-index:-1}
 .bt-msg:hover>.bt-msg-line>.bt-tools,.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open]{opacity:1;visibility:visible}
+/* A touch pointer never hovers, and the :focus-within fallback cannot fire either: a
+   visibility:hidden child cannot take focus. Show the toolbar outright. */
+@media (hover:none){.bt-tools{opacity:1;visibility:visible}
+/* The toolbar's invisible hover bridge reaches 128px left of it to catch a pointer on its
+   way from the bubble; a finger has no such path, and the strip swallows taps meant for
+   whatever sits under it, the conversation header included. */
+.bt-tools::after{display:none}
+/* A group message is sized against the row the sender's avatar shares, so its cap left the
+   toolbar's own 82px out: the toolbar then reached past the transcript's scrollport and the
+   conversation could be panned sideways by a few pixels. */
+.bt-astack[data-lead]>.bt-msg{max-width:min(calc(80% + 6px),590px,calc(100% - 82px))}}
 .bt-tool{width:24px;height:24px;border:0;padding:0;border-radius:6px;background:none;color:var(--bt-ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s ease,color .12s ease}
 .bt-tool:hover,.bt-tool[aria-expanded=true]{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-tool:active{background:var(--bt-active)}
@@ -705,7 +862,7 @@ body[data-ds-dark-theme] .bt-theme-chip i{background:var(--da)}
 .bt-mem-row-go{display:inline-flex;align-items:center;gap:2px;color:var(--bt-ink-3);font-size:12px;flex:none;white-space:nowrap}
 .bt-mem-layer{position:fixed;inset:var(--dsh-frame-chrome-top,0px) 0 0;z-index:61;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 .bt-mem-scrim{animation:bt-fade .2s ease-out}
-.bt-mem{position:relative;width:min(680px,calc(100vw - 48px));height:min(760px,calc(100vh - 2*max(32px,var(--dsh-frame-overlay-top,32px))));background:var(--bt-main);border-radius:20px;border:.5px solid var(--bt-line-2);box-shadow:0 24px 80px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden;color:var(--bt-ink);animation:bt-dialog-rise ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
+.bt-mem{position:relative;width:min(680px,calc(100vw - 48px));height:min(760px,calc(var(--bt-vh) - 2*max(32px,var(--dsh-frame-overlay-top,32px))));background:var(--bt-main);border-radius:20px;border:.5px solid var(--bt-line-2);box-shadow:0 24px 80px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden;color:var(--bt-ink);animation:bt-dialog-rise ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-mem-head{position:relative;display:flex;align-items:center;gap:8px;height:60px;flex:none;padding:0 14px 0 24px;border-bottom:.5px solid var(--bt-line);box-sizing:border-box}
 .bt-mem-head .bt-icon-btn{width:32px;height:32px;flex:none}
 .bt-mem-head [aria-haspopup] svg{width:18px;height:18px;stroke-width:2.6}
@@ -760,8 +917,8 @@ body[data-ds-dark-theme] .bt-theme-chip i{background:var(--da)}
 .bt-mem-remove[data-confirm]{background:color-mix(in srgb,var(--bt-danger) 10%,transparent);color:var(--bt-danger);padding:0 10px}
 @media (hover:none){.bt-mem-remove{opacity:1}}
 .bt-mem-none{font-size:13px;line-height:18px;color:var(--bt-ink-3);padding:8px 4px}
-.bt-mem-foot{flex:none;padding:8px 20px 20px;display:flex;flex-direction:column;gap:10px}
-.bt-mem-reply{border-radius:16px;background:var(--bt-hover);padding:8px 8px 12px 16px;display:flex;flex-direction:column;gap:6px;max-height:36vh;overflow-y:auto;scrollbar-width:thin;transform-origin:50% 100%;animation:bt-pop-lift ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
+.bt-mem-foot{flex:none;padding:8px 20px calc(20px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
+.bt-mem-reply{border-radius:16px;background:var(--bt-hover);padding:8px 8px 12px 16px;display:flex;flex-direction:column;gap:6px;max-height:calc(var(--bt-vh) * .36);overflow-y:auto;scrollbar-width:thin;transform-origin:50% 100%;animation:bt-pop-lift ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-mem-reply-head{display:flex;align-items:center;gap:8px;min-height:24px}
 .bt-mem-reply-asked{flex:1;min-width:0;font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-mem-reply .bt-icon-btn{width:24px;height:24px;flex:none}
@@ -780,7 +937,7 @@ body[data-ds-dark-theme] .bt-theme-chip i{background:var(--da)}
 .bt-mem-send>*{animation:bt-check-pop ${SPRING_POP.duration}ms ${SPRING_POP.easing}}
 .bt-mem-spin{width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;box-sizing:border-box;animation:bt-mem-spin .7s linear infinite}
 @keyframes bt-mem-spin{to{transform:rotate(360deg)}}
-@media (max-width:640px){.bt-mem{width:100vw;height:100%;border-radius:0;border:0}.bt-mem-body{padding:18px 18px 20px}.bt-mem-foot{padding:8px 12px 12px}}
+@media (max-width:640px){.bt-mem{width:100vw;height:100%;border-radius:0;border:0}.bt-mem-body{padding:18px 18px 20px}.bt-mem-foot{padding:8px 12px calc(12px + env(safe-area-inset-bottom))}}
 @media (prefers-reduced-motion:reduce){.bt-mem,.bt-mem-scrim,.bt-mem-summary>*,.bt-mem-empty,.bt-mem-reply,.bt-mem-skel-block span,.bt-mem-entries,.bt-mem-send>*,.bt-mem-changes li svg{animation:none}}
 
 .bt-thumb{position:absolute;left:0;top:0;z-index:0;pointer-events:none;transition:opacity .14s ease}
@@ -837,9 +994,18 @@ export const CONVERSATION_CSS = `
 [class*="_flowItem"]:has(> [data-slot="conversation.chat.node"]:empty){display:none!important}
 [class*="_header"]:has(.bt-head){border-bottom-color:transparent!important;box-shadow:none!important}
 /* The transcript runs under a floating header pill. */
-header[class*="_header"]:has(.bt-head){position:absolute!important;top:0;left:0;right:0;z-index:8;display:flex!important;padding:10px 0 0!important;background:transparent!important;pointer-events:none;justify-content:center}
-header[class*="_header"]:has(.bt-head)::before{content:"";position:absolute;inset:0 0 auto;height:60px;background:linear-gradient(to bottom,var(--bt-main),color-mix(in srgb,var(--bt-main) 0%,transparent));pointer-events:none;z-index:-1}
-header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{position:absolute;left:12px;top:10px;pointer-events:auto}
+/* An installed app on a notched phone has no browser chrome above the conversation: the
+   header keeps its own row clear of the safe area, which is nothing at all where env() has
+   no value. The fade grows with it so the column still scrolls out under it. */
+header[class*="_header"]:has(.bt-head){position:absolute!important;top:0;left:0;right:0;z-index:8;display:flex!important;padding:calc(10px + env(safe-area-inset-top,0px)) 0 0!important;background:transparent!important;pointer-events:none;justify-content:center}
+header[class*="_header"]:has(.bt-head)::before{content:"";position:absolute;inset:0 0 auto;height:calc(60px + env(safe-area-inset-top,0px));background:linear-gradient(to bottom,var(--bt-main),color-mix(in srgb,var(--bt-main) 0%,transparent));pointer-events:none;z-index:-1}
+header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{position:absolute;left:12px;top:calc(10px + env(safe-area-inset-top,0px));pointer-events:auto}
+/* The back control takes the corner; anything the shell or another plugin put in the
+   leading seat moves aside rather than sitting under it. */
+header[class*="_header"]:has(.bt-back)>[class*="_headerLeading"]{left:52px}
+/* A plain Session keeps the shell's own header, so its way back is the only chrome of ours
+   in there: it keeps clear of the safe area on its own. */
+${NOT_DESKTOP} header[class*="_header"]>[class*="_headerLeading"]:has(.bt-plain-back){top:calc(10px + env(safe-area-inset-top,0px))}
 header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 [class*="_body"]:has(> [class*="_scrollBody"]){--dsh-chat-content-width:min(960px,100%)}
 /* The shell writes the column's width on the conversation root at every resize, only to
@@ -900,7 +1066,7 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 [data-composer-card]{display:flex!important;flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;gap:0!important;min-height:44px!important;border-radius:22px!important;padding:7.5px!important;box-sizing:border-box;background:var(--bt-main)!important;border:.5px solid var(--bt-line-2)!important;box-shadow:0 2px 8px -1px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.03),0 0 0 1px rgba(228,228,228,.04)!important;transition:border-color .15s ease,background-color .15s ease,${spring(SPRING_SHAPE, 'border-radius')}!important}
 [data-composer-card]:hover,[data-composer-card]:focus-within{border-color:color-mix(in srgb,var(--bt-ink) 30%,transparent)!important}
 [data-composer-card]:has(> [data-slot="conversation.input.attachments"] *),[data-composer-card]:has([data-composer-input] br + *),[data-composer-card]:has([data-composer-input] > :nth-child(2)){border-radius:18px!important}
-[class*="_root"]:has(> [data-composer-card]){padding:0 11px 13px 16px!important}
+[class*="_root"]:has(> [data-composer-card]){padding:0 max(11px,env(safe-area-inset-right)) calc(13px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))!important}
 [class*="_root"]:has(> [data-composer-card])>[data-composer-card]{max-width:min(992px,100%)!important}
 [data-composer-card]>[class*="_row"]{display:contents!important}
 [data-composer-card] [class*="_tools"]{order:1!important;flex:none!important;align-self:flex-end!important;margin:0!important}
@@ -958,6 +1124,8 @@ div:has(> nav [class*="_marks"]){display:none!important}
 [data-chat-flow-kind=user] [class*="_userRow"]{flex-direction:row-reverse;align-items:center;justify-content:flex-start}
 [data-chat-flow-kind=user] [class*="_actions"]{display:flex!important;height:24px!important;gap:2px!important;opacity:0!important;visibility:hidden;transition:opacity .12s ease,visibility .12s!important;flex:none}
 [data-chat-flow-kind=user] [class*="_userRow"]:hover [class*="_actions"],[data-chat-flow-kind=user] [class*="_userRow"]:focus-within [class*="_actions"]{opacity:1!important;visibility:visible}
+/* Same as the reply toolbar: no hover and no focus to reveal these on a touch screen. */
+@media (hover:none){[data-chat-flow-kind=user] [class*="_actions"]{opacity:1!important;visibility:visible}}
 [data-chat-flow-kind=user] [class*="_actions"] [class*="_timeStart"]{display:none}
 [data-chat-flow-kind=user] [class*="_actions"] button{width:24px;height:24px;border-radius:6px;color:var(--bt-ink-2)}
 [data-chat-flow-kind=user] [class*="_actions"] button:hover{background:var(--bt-hover);color:var(--bt-ink)}
@@ -967,6 +1135,14 @@ div:has(> nav [class*="_marks"]){display:none!important}
 [data-chat-flow-kind=question-reply]:has(.bt-q-inline),[data-chat-group-key]:has([data-chat-flow-kind=question-reply] .bt-q-inline),[data-chat-group-key]:has(.bt-q-gone){margin-top:0!important}
 .bt-q-inline .bt-q{margin:0;max-width:min(550px,86%);order:0}
 .bt-q-dock{width:100%;display:flex;justify-content:center}
+.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-quote-ink,var(--bt-accent));border-radius:12px;background:var(--bt-card)}
+.bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px;margin:0;padding:0;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;border-radius:8px;transition:background-color .12s ease}
+.bt-quote-dock-main:hover{background:var(--bt-hover)}
+.bt-quote-dock-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-quote-dock-who{font-size:12px;line-height:16px;font-weight:600;color:var(--bt-ink)}
+.bt-quote-dock-text{font-size:12px;line-height:16px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bt-quote-dock-x{flex:none;width:24px;height:24px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--bt-ink-3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.bt-quote-dock-x:hover{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-q-dock .bt-q{margin:0 auto 8px}
 [class*="_toBottomSlot"]{justify-content:center!important;padding-right:0!important}
 [data-conversation-scroll] [class*="_toBottomSlot"]{bottom:calc(var(--dsh-composer-height,152px) + 8px)!important}
@@ -1000,6 +1176,28 @@ div:has(> nav [class*="_marks"]){display:none!important}
 .bt-ububble{max-width:min(560px,78%);background:var(--bt-user);color:var(--bt-user-ink);border-radius:18px;padding:7px 12px;font-size:14px;line-height:20px;box-sizing:border-box;overflow-wrap:anywhere}
 .bt-ububble [class*="_markdown"],.bt-ububble a{color:inherit!important}
 .bt-ububble p{margin:0;line-height:22px}
+/* A reply keeps the message it answers above its words: a left accent edge, the Bot that
+   sent it, and two lines of the quote. Tokens only; inside the dark user bubble the veil
+   and the text come from the bubble's own ink so they stay readable in both themes. */
+.bt-quote{margin:0 0 6px;padding:6px 10px 6px 9px;border-left:3px solid var(--bt-quote-ink,var(--bt-accent));border-radius:10px;background:var(--bt-hover);color:var(--bt-ink);white-space:normal;box-sizing:border-box}
+.bt-quote-who{display:flex;align-items:center;gap:5px;min-width:0;font-size:12px;line-height:16px;font-weight:600;margin-bottom:2px}
+.bt-quote-who>:first-child{flex:none}
+.bt-quote-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-quote-text{font-size:13px;line-height:18px;color:var(--bt-ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.bt-ubody .bt-quote{background:color-mix(in srgb,var(--bt-user-ink) 14%,transparent);border-left-color:color-mix(in srgb,var(--bt-quote-ink,var(--bt-accent)) 72%,var(--bt-user-ink))}
+.bt-ubody .bt-quote-text{color:color-mix(in srgb,var(--bt-user-ink) 78%,transparent)}
+.bt-quote[data-compact]{padding:5px 9px 5px 8px}
+.bt-quote[data-compact] .bt-quote-who{display:none}
+/* The message a quote points at flashes once when the quote bar is pressed. */
+@keyframes bt-quote-target{from{background-color:color-mix(in srgb,var(--bt-accent) 18%,transparent)}to{background-color:transparent}}
+.bt-quote-target{border-radius:18px;animation:bt-quote-target 1.2s ease-out}
+/* A quote card is a link back to its message: it points, it answers a hover, and its text can
+   still be selected and copied. */
+.bt-quote[role=button]{cursor:pointer;transition:background-color .12s ease}
+.bt-quote[role=button]:hover{background:var(--bt-active)}
+.bt-quote[role=button]:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-ubody .bt-quote[role=button]:hover{background:color-mix(in srgb,var(--bt-user-ink) 22%,transparent)}
+@media (prefers-reduced-motion:reduce){.bt-quote-target{animation:none;background-color:color-mix(in srgb,var(--bt-accent) 12%,transparent)}}
 .bt-uimages{display:block;font-size:12px;opacity:.7}
 .bt-earlier .bt-event{margin:4px 0}
 .bt-part-line{display:flex;align-items:center;gap:10px;margin:10px 0 6px;font-size:11px;line-height:14px;color:var(--bt-ink-3)}

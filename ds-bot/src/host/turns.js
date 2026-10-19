@@ -226,8 +226,10 @@ export function install(rt) {
     for (const [id, source] of waiting.values()) tellSender(id, source, text)
   }
 
-  // A group Session is hidden as a whole, so its turns need no marking. A handoff
-  // package that only opens a part is acknowledged with a fixed line, also hidden.
+  // A group Session is hidden as a whole, so its turns need no marking. A turn in a
+  // Bot's own chat is hidden only when it has nothing of its own to show: the
+  // acknowledgement of being stopped, and the fixed line that opens a part. A turn that
+  // answers another Bot is the Bot's work, and the user reads it in the Bot's chat.
   const claimTrigger = (sessionId, entry, info) => {
     entry.info = info
     // A turn that was stopped for a part switch brings its joined requests along.
@@ -235,10 +237,46 @@ export function install(rt) {
       entry.joined = info.joined.filter(item => item?.info !== undefined && item.info !== null)
     }
     if (rt.groupOwners.has(sessionId)) return
-    if ((expectsReply(info) && !answersUser(info)) || info.role === 'room' || (info.role === 'handoff' && info.resume !== true)) {
+    if (info.role === 'stopped' || (info.role === 'handoff' && info.resume !== true)) {
       markExchangeTurn(sessionId, entry.turn)
     }
   }
+
+  // Last message time per Bot and per group, for ordering the sidebar by activity. Process
+  // memory only: the team file keeps no copy, and a restart starts from what it dates.
+  const lastSeen = new Map()
+  const roomSeen = new Map()
+  const seenAfter = (table, id, at) => {
+    if (id === undefined || typeof at !== 'number' || !Number.isFinite(at)) return
+    if (at > (table.get(id) ?? 0)) table.set(id, at)
+  }
+  // A message counts for the Bot that read or wrote it, and for the group it appeared in.
+  const noteActivity = (sessionId, at) => {
+    seenAfter(lastSeen, rt.selfOf(sessionId), at)
+    seenAfter(roomSeen, rt.groupOwners.get(sessionId)?.roomId, at)
+  }
+  // The saved team dates its Bots and groups by when they were made, when their earlier
+  // parts ended, and when a Bot messaged another; the newest of those is where a restart
+  // starts.
+  const seedActivity = () => {
+    for (const bot of Object.values(state.bots ?? {})) {
+      seenAfter(lastSeen, bot.id, bot.createdAt)
+      for (const segment of bot.segments ?? []) seenAfter(lastSeen, bot.id, segment.endedAt)
+      for (const room of Object.values(state.rooms ?? {})) for (const segment of room.segments?.[bot.id] ?? []) seenAfter(lastSeen, bot.id, segment.endedAt)
+    }
+    for (const room of Object.values(state.rooms ?? {})) {
+      seenAfter(roomSeen, room.id, room.createdAt)
+      for (const segments of Object.values(room.segments ?? {})) for (const segment of segments) seenAfter(roomSeen, room.id, segment.endedAt)
+    }
+    for (const entry of state.exchanges ?? []) {
+      seenAfter(lastSeen, entry.from, entry.time)
+      seenAfter(lastSeen, entry.to, entry.time)
+    }
+  }
+  const lastActivityOf = id => lastSeen.get(id) ?? rt.botOf(id)?.createdAt ?? 0
+  const roomActivityOf = id => roomSeen.get(id) ?? rt.roomOf(id)?.createdAt ?? 0
+  // A line DS Bot itself writes into a group is the group's activity too.
+  const noteRoomActivity = (id, at = Date.now()) => seenAfter(roomSeen, id, at)
 
   // Activity is tracked per Session; a Bot's mascot shows its own chat's, else a group's.
   const activityView = () => {
@@ -354,6 +392,7 @@ export function install(rt) {
   ctx.on('session/event', (session, event) => {
     const id = session?.id
     if (id === undefined) return
+    if (event.type === 'user/message' || event.type === 'assistant/message') noteActivity(id, event.time)
     if (!rt.isBotSession(id) && !rt.roomOf(id)) {
       // A deleted Bot's Session can still be ending its turn; nothing of it stays.
       if (live.delete(id)) setActivity(id, undefined)
@@ -636,5 +675,8 @@ export function install(rt) {
     }
   })
 
-  Object.assign(rt, { live, liveOf, roomWaiters, roomProgress, roomInbox, activityView, workView, roomWorkView, turnsView, callDetail, doingOf, stopRoomTurn, releaseBot })
+  // Where a restart starts: the times the team file remembers, until a message moves them.
+  if (typeof rt.load === 'function') void rt.load().then(seedActivity, () => {})
+
+  Object.assign(rt, { live, liveOf, roomWaiters, roomProgress, roomInbox, activityView, workView, roomWorkView, turnsView, callDetail, doingOf, stopRoomTurn, releaseBot, lastActivityOf, roomActivityOf, noteRoomActivity })
 }

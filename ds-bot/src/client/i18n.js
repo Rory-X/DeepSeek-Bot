@@ -2,9 +2,12 @@
 // Copy is looked up at render time and every slot outlet re-renders on a language
 // switch, so nothing caches a translated string.
 
+import { BOARD_ZH } from './board-i18n.js'
+
 export const NAMESPACE = 'ds-bot'
 
 const ZH = {
+  ...BOARD_ZH,
   // Shared
   'Main Bot': '主 Bot',
   Working: '工作中',
@@ -56,6 +59,7 @@ const ZH = {
 
   // Sidebar and account menu
   'Bot list': 'Bot 列表',
+  'Back to Bot list': '返回 Bot 列表',
   'Setting up your Main Bot…': '正在设置你的主 Bot…',
   'Connect plugins': '连接插件',
   'Plugin compatibility is not fully verified.': '插件兼容性未完全验证',
@@ -102,6 +106,18 @@ const ZH = {
   Connect: '连接',
   'GitHub token': 'GitHub token',
   'Create a token on GitHub': '去 GitHub 生成 token',
+  Token: '令牌',
+  'Create a token': '创建 Token',
+  'Vercel token': 'Vercel 令牌',
+  'Create a token on Vercel': '去 Vercel 创建 Token',
+  Actions: '执行操作',
+  Off: '关闭',
+  On: '开启',
+  'Allow actions': '允许执行操作',
+  'Connector settings': '连接器设置',
+  'Each run asks for your approval': '每次执行都会弹出审批',
+  'Let the Bots deploy, cancel, promote and roll back; every run asks for your approval': '允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准',
+  'Projects, deployments, and logs': '项目、部署和日志',
   'Could not reach GitHub': '连不上 GitHub',
   'GitHub did not accept this token': 'GitHub 不接受这个 token',
   'GitHub did not say who this token belongs to': 'GitHub 没有返回这个 token 的账号',
@@ -509,6 +525,13 @@ const ZH = {
   '{name} was cut off by a restart and picked its work back up': '{name} 的工作被重启打断，已经接着做',
   '{name} was cut off by a restart again and stopped': '{name} 的工作又被重启打断，已停下',
   'Picked up its work after a restart': '重启后接着做之前的工作',
+  Answered: '答复了',
+  'Jump to latest': '回到底部',
+  'Replying to {name}': '正在回复 {name}',
+  'Replying to a message': '正在回复一条消息',
+  'Cancel reply': '取消回复',
+  'Go to the quoted message': '跳到被引用的消息',
+  'Could not quote this message': '这条消息没法引用',
   'Asked to make the tool call it wrote as text': '工具调用被写成了文字，已让它重新调用',
   'A Bot': '一个 Bot',
   '{name} is waiting for your approval': '{name} 等你批准',
@@ -642,6 +665,8 @@ const ZH = {
   'Checking memory': '正在查看记忆',
   'Memory updated': '记忆已更新',
   'Show or hide the right sidebar': '显示或隐藏右侧栏',
+  '{name}, Main Bot': '{name}，主 Bot',
+  'Open this setting on a desktop.': '该设置项请在桌面端查看',
   'Right sidebar': '右侧栏',
   'Team memory updated': '团队记忆已更新',
   "Updated {name}'s memory": '已更新 {name} 的记忆',

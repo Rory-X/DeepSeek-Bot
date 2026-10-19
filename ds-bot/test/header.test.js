@@ -37,6 +37,8 @@ const header = actions => HeaderPill({
   useTurnClock: hook({}),
   useUi: hook({}),
   useLive: hook({}),
+  useMobileNav: hook(false),
+  useNavLevel: hook('list'),
   actions,
 })
 const sideButton = (node) => {

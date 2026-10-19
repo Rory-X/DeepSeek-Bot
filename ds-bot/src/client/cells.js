@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { MarkdownText } from './dsh-primitives.js'
 import { inkText } from './inks.js'
 import { linkMentions, mentionTarget, dayLabel, contentText, stripHeader, isHiddenTurn, isRelayContext, relaysBefore, relayPart, commRunOf, toolName, toolArgs, reminderPrompts, elapsedLabel } from './text.js'
+import { splitQuote, QuoteCard } from './quote.js'
 import { SmileIcon, ReplyIcon, DotsIcon, CheckIcon, DownloadIcon, CopyIcon, MemoryIcon } from './icons.js'
 import { colorOf, toolState, BotMark, RoomAvatar } from './mark.js'
 import { AnsweredCell, SettledQuestion, PendingQuestion } from './questions.js'
@@ -53,7 +54,7 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
       h('div', { className: 'bt-bubble', 'data-folded': folded || undefined },
         control ? h('div', { className: 'bt-fold-body' }, body) : body,
         control),
-      live ? null : h(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t('Bot'), sessionId, react: key ? emoji => actions.toggleReaction(msgKey, index, emoji) : undefined, actions })),
+      live ? null : h(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t('Bot'), bot: roster.byId[selfId], sessionId, react: key ? emoji => actions.toggleReaction(msgKey, index, emoji) : undefined, actions })),
     picked.length ? h('div', { className: 'bt-reacts' }, picked.map(emoji => h('button', {
       key: emoji, type: 'button', className: 'bt-react', 'aria-label': t('Remove reaction {emoji}', { emoji }), onClick: () => actions.toggleReaction(msgKey, index, emoji),
     }, emoji))) : null)
@@ -77,7 +78,7 @@ function useDismiss(open, close, refs) {
 }
 
 // The hover toolbar beside a reply bubble: Add reaction, Reply, More.
-function MessageTools({ text, name, sessionId, react, actions }) {
+function MessageTools({ text, name, bot, sessionId, react, actions }) {
   const [panel, setPanel] = useState(null)
   const [place, setPlace] = useState(null)
   const [copied, setCopied] = useState(false)
@@ -106,7 +107,7 @@ function MessageTools({ text, name, sessionId, react, actions }) {
   const item = (label, Icon, run) => h('button', { key: label, type: 'button', role: 'menuitem', onClick: () => { close(); run() } }, h(Icon), label)
   return h('div', { ref: tools, className: 'bt-tools', 'data-open': panel !== null || undefined },
     react ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Add reaction'), title: t('Add reaction'), 'aria-expanded': panel === 'react', onClick: event => open('react', event) }, h(SmileIcon)) : null,
-    sessionId ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Reply'), title: t('Reply'), onClick: () => actions.quote(sessionId, text) }, h(ReplyIcon)) : null,
+    sessionId ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Reply'), title: t('Reply'), onClick: (event) => actions.quote(sessionId, text, bot, event.currentTarget.closest('.bt-msg-line')?.querySelector('.bt-bubble') ?? event.currentTarget.closest('.bt-msg-line')) }, h(ReplyIcon)) : null,
     h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('More message actions'), title: t('More'), 'aria-haspopup': 'menu', 'aria-expanded': panel === 'more', onClick: event => open('more', event) }, copied ? h(CheckIcon) : h(DotsIcon)),
     panel === 'react' ? createPortal(h('div', { ref: pop, className: 'bt-react-strip', role: 'menu', 'aria-label': t('Reactions'), style: place },
       REACTIONS.map(emoji => h('button', { key: emoji, type: 'button', role: 'menuitem', 'aria-label': emoji, onClick: () => { close(); react(emoji) } }, emoji))), document.body) : null,
@@ -178,7 +179,7 @@ export function AssistantCell({ node, groupPart, sessionId, openFile, fileMentio
         key: relay.seq,
         prefix: source.role === 'stopped' ? t('Stopped by') : source.role === 'reply' ? t('Reply from') : t('Message from'),
         bots: [sender],
-        onOpen: () => { if (sender.id) actions.openExchange(selfId, sender.id) },
+        onOpen: () => { if (sender.id) actions.openExchange(selfId, sender.id, source.exchangeId) },
         whole: true,
       })
     }),
@@ -257,10 +258,12 @@ const scrollParent = (node) => {
   return null
 }
 
-function EarlierUser({ row }) {
-  const { shown, folded, control } = useFold(row.text ?? '')
-  const body = row.text ? h(MarkdownText, { text: shown, labels: mdLabels(), variant: 'compact' }) : null
+function EarlierUser({ row, roster }) {
+  const quoted = splitQuote(row.text)
+  const { shown, folded, control } = useFold(quoted ? quoted.body : row.text ?? '')
+  const body = (quoted ? quoted.body : row.text) ? h(MarkdownText, { text: shown, labels: mdLabels(), variant: 'compact' }) : null
   return h('div', { className: 'bt-urow' }, h('div', { className: 'bt-ububble', 'data-folded': folded || undefined },
+    quoted ? h(QuoteCard, { quote: quoted.quote, roster }) : null,
     control ? h('div', { className: 'bt-fold-body' }, body) : body,
     control,
     row.images ? h('span', { className: 'bt-uimages' }, row.images === 1 ? t('1 image') : t('{count} images', { count: row.images })) : null))
@@ -353,14 +356,14 @@ export function ChatRows({ items, sessionId, roster, actions, useUi, clock = fal
 function chatRow(row, key, { sessionId, selfId, roster, actions, useUi }) {
   switch (row.kind) {
     case 'divider': return h(PartLine, { key, time: row.time })
-    case 'user': return h(EarlierUser, { key, row })
+    case 'user': return h(EarlierUser, { key, row, roster })
     case 'answer': return h(AnsweredCell, { key, node: { data: row } })
     case 'bot': return h(Bubbles, { key, texts: row.texts, roster, selfId, actions, sessionId: useUi ? sessionId : undefined, msgKey: useUi ? `${sessionId}:${row.time}` : undefined, useUi, fold: FOLD_HUGE })
     case 'event': {
       if (row.role === 'report') return h(GroupEvent, { key, prefix: t('Replies from'), room: roster.roomsById[row.roomId], name: t('a group chat'), roster, actions })
       const other = roster.byId[row.botId] ?? { id: row.botId, name: row.name ?? t('a Bot'), color: 'gray' }
       const prefix = { stopped: t('Stopped by'), reply: t('Reply from') }[row.role] ?? t('Message from')
-      return h(EventLine, { key, prefix, bots: [other], onOpen: () => { if (selfId && other.id) actions.openExchange(selfId, other.id) }, whole: true })
+      return h(EventLine, { key, prefix, bots: [other], onOpen: () => { if (selfId && other.id) actions.openExchange(selfId, other.id, row.id) }, whole: true })
     }
     default: return null
   }
@@ -411,7 +414,13 @@ export function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnCl
       // Group turns belong to the group chat; the member's own chat stays one-to-one.
       if (source.role === 'kickoff' || source.role === 'room') return null
       // The secret card itself shows what the user did; the note to the Bot stays out.
-      if (source.role === 'secret' || deferred) return null
+      if (source.role === 'secret') return null
+      // A request the Bot read mid-turn is answered in this turn: the request line was drawn
+      // where it was read, so this turn names who it answers instead of repeating the text.
+      if (deferred) {
+        const asker = roster.byId[source.senderSessionId] ?? { id: source.senderSessionId, name: source.senderName ?? t('a Bot'), color: 'gray' }
+        return h(EventLine, { prefix: t('Answered'), bots: [asker], onOpen: bot => bot.id && actions.openExchange(selfId, bot.id, source.exchangeId), whole: true })
+      }
       if (source.role === 'post') {
         // A post logged into a running round already shows there, not again as a trigger.
         if (source.logged !== undefined) return null
@@ -452,7 +461,7 @@ export function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnCl
       return h(EventLine, {
         prefix: source.role === 'stopped' ? t('Stopped by') : count > 1 ? t('{count} messages with', { count }) : t('Message from'),
         bots,
-        onOpen: bot => actions.openExchange(selfId, bot.id),
+        onOpen: bot => actions.openExchange(selfId, bot.id, source.exchangeId),
         whole: true,
       })
     }

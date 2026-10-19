@@ -264,6 +264,9 @@ export const BOT_SETTINGS_CSS = `
 .bt-bs-name{font-size:17px;line-height:24px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-bs-sub{font-size:13px;line-height:18px;color:var(--bt-ink-2)}
 .bt-bs .bt-avedit{left:0;transform:none}
+/* A 300px popover overflows a phone. Cap it to the window and put it back on its anchor,
+   which sits in the middle of the pane. */
+@media (max-width:640px){.bt-avedit{width:min(300px,calc(100vw - 32px))}.bt-bs .bt-avedit{left:50%;transform:translateX(-50%)}}
 .bt-bs-row{min-height:48px}
 label.bt-bs-row{cursor:text}
 .bt-bs-row>.bt-set-copy{flex:1 1 auto}

@@ -165,3 +165,61 @@ test('the chat-room rule is installed through installStyles, so it is owned too'
   assert.match(pane, /installStyles\(.*'chat-room'/)
   assert.equal(pane.includes("dataset.dshBot = 'chat-room'"), false)
 })
+
+// The phone's settings strip scrolls sideways, so room for the close button has to sit
+// outside its box: padding-right leaves the items running under the button at scroll 0,
+// where they take the taps meant for it.
+test('the phone settings strip leaves the close button room outside its scroll box', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const strip = css.split('\n').find(line => line.includes('.bt-settings-nav{') && line.includes('overflow-x:auto'))
+  assert.ok(strip, 'the phone settings strip rule is there')
+  assert.match(strip, /margin-right:calc\(12px \+ 32px\)/)
+  assert.equal(/padding:[^;]*48px/.test(strip), false)
+})
+
+// A phone must not move the page itself. The shell's frame is the viewport, so a drag that
+// reaches the page would rubber-band, refresh, or zoom the whole interface.
+test('the phone pins the page against bounce, refresh and zoom', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const root = css.split('\n').find(line => line.includes('overscroll-behavior:none'))
+  assert.ok(root, 'the root carries the overscroll rule')
+  assert.match(root, /touch-action:pan-x pan-y/)
+  const field = css.split('\n').find(line => line.includes('max(16px,1em)'))
+  assert.ok(field, 'a field under 16px would zoom the page when it takes focus')
+  assert.match(field, /select/, 'a select zooms it too')
+})
+
+// The Main Bot's card, once it has scrolled away on a phone, is a small centred pill
+// under the top row: a full-width bar would be a different design, and a pill that is not
+// centred is not what the phone asks for.
+test('the phone stands in for the Main Bot card with a centred pill', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const pill = css.split('\n').find(line => line.includes('.bt-chief-bar{') && line.includes('left:50%'))
+  assert.ok(pill, 'the pill is there')
+  assert.match(pill, /left:50%;transform:translateX\(-50%\)/)
+  assert.match(pill, /border-radius:16px/)
+  assert.equal(/left:0;right:0/.test(pill), false, 'not a full-width bar')
+  // The pill opens the Main Bot's conversation, so it is a control and takes a touch height.
+  assert.match(pill, /min-height:44px/)
+  assert.match(pill, /cursor:pointer/)
+  const role = css.split('\n').find(line => line.includes('.bt-chief-role{'))
+  assert.match(role, /color:var\(--bt-ink-3\)/, 'the role rides under the name')
+})
+
+// The shell's right panel goes fullscreen below 768px, and its column is the box it
+// positions itself against: hiding that column is what left the header's button doing
+// nothing. It comes back, out of the grid, while the panel is fullscreen.
+test('the phone lets the shell\'s fullscreen right panel through', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const shown = css.split('\n').find(line => line.includes('data-rightbar-fullscreen] [data-rightbar-col]'))
+  assert.ok(shown, 'the fullscreen rule is there')
+  assert.match(shown, /display:block!important/)
+  assert.match(shown, /position:fixed!important/)
+  const hidden = css.split('\n').find(line => line.includes('body[data-bt-nav] [data-rightbar-col]'))
+  assert.match(hidden, /display:none!important/, 'it stays hidden while collapsed')
+  // A strip of the conversation stays visible, and the scrim over it is the way out.
+  // Fullscreen: the panel is the whole screen, so nothing is left beside it to tap.
+  assert.match(shown, /inset:0/)
+  assert.match(shown, /width:100%!important/)
+  assert.equal(css.includes('bt-right-scrim'), false, 'no strip means no scrim')
+})

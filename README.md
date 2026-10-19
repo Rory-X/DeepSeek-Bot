@@ -15,6 +15,12 @@ DeepSeek Bot (DS Bot) is a bot plugin for [DeepSeek Harness](https://github.com/
 
 ![Say one sentence to Chief, and it sets up the bots and the group chat](docs/images/team.png)
 
+## Project board preview
+
+The project-board feature branch adds a main-navigation board for registered DSH projects, with four columns, saved drafts, one lead and multiple collaborators. Start a requirement to open its dedicated task conversation. The lead clarifies and proposes a plan; only your approval enables implementation. Assigned Bots update their own steps, an independent reviewer checks multi-Bot work, and the lead submits deliverables with evidence for each acceptance criterion. You can accept or request changes; only your acceptance marks Done. Bot tools use the same versioned workflow as the UI.
+
+The global queue shows which Bot or project each task is waiting for. Each Bot runs one board assignment at a time, and implementation in the same project is serialized. Pause and cancel stop new dispatch and request running DSH turns to stop; capacity is released only after the Agent is idle and its DSH-managed background jobs have settled. The task drawer shows shell job states, including foreground commands promoted to the background on timeout. A hard restart can lose the DSH process-local job registry: those tasks stay blocked until you verify shutdown and record evidence in the drawer, after which recovery reconciles saved effects before continuing. Cancellation retains files and history and does not undo external effects. On restart, the scheduler checks durable inboxes and public Session history before replaying an undelivered message or creating a recovery continuation. Bots must inspect and record existing effects before a continuation can modify files. The isolated bench verifies the workflow with a scripted mock model, including a guarded hard stop of its own web process. See the [design and milestones](docs/plans/2026-10-20-project-board.md).
+
 ## Install
 
 First install DSH and set up at least one model in it. DS Bot uses the models from DSH.
@@ -71,6 +77,10 @@ Any bot can hand work to another bot with @. That bot does the work on its own, 
 ### Capabilities
 
 Settings → **Capabilities** is a shared library of MCP servers, skills and packs. Add a capability to a Bot in its settings; it is available from that Bot's next message in its own chat and group chats. A local MCP command that a Bot adds needs your approval before it can run. While other Bots use a capability, only you or a Main Bot can change or delete it.
+
+### Connectors
+
+Settings → **Connectors** connects outside services whose tools every Bot can use. Connect GitHub (`GITHUB_TOKEN`) or Vercel (`VERCEL_TOKEN`) once: the token stays in Secrets and only the MCP connection carries it. GitHub's tools are `mcp__github__…`; Vercel is connected read-only, with tools such as `vercel_list_projects` and `vercel_get_runtime_logs`. Vercel's four deployment actions are off by default: turn them on in the connector and each call asks for approval.
 
 ### Usage
 

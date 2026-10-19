@@ -7,10 +7,13 @@ import { PlusIcon, SearchIcon, SidebarIcon, GaugeIcon, PlugIcon, ClockIcon, Gear
 import { MAIN_LOOK } from './characters.js'
 import { botState, BotMark, BotAvatar, RoomAvatar } from './mark.js'
 import { reducedMotion } from './activity-row.js'
-import { Shimmer, workPhrase } from './cells.js'
+
+import { workStateLine } from './member-status.js'
 import { springEasing, SPRING_SHAPE } from './motion.js'
 import { hostText, t } from './i18n.js'
 import { showsDshRow } from './dsh-offer.js'
+import { useRowMenu } from './hold.js'
+import { BoardEntry } from './project-board.js'
 
 // -------------------------------------------------------------------------
 // Sidebar
@@ -33,15 +36,14 @@ const useApproval = (useWork, match) => (useWork ? useWork(work => (work.approva
 // Picked as text, so a row redraws only when what it shows changes.
 const useGroupWork = (useWork, pick) => (useWork ? useWork(work => JSON.stringify(pick(work.rooms ?? {}))) : '[]')
 const workKeys = text => JSON.parse(text)
-const doingOf = ({ tool, said, note, target, switching }) => ({ tool, said, note, target, switching })
-const workLine = (lead, doing, more) => h(Shimmer, null, `${lead} · ${workPhrase(doing)}…${more > 0 ? ` +${more}` : ''}`)
+const doingOf = ({ tool, said, note, target, switching, since }) => ({ tool, said, note, target, switching, since })
 // The Bots and groups a Bot waits for (handoffs.js), by the names they have now.
 const waitingFor = (roster, waits) => {
   const names = [...(waits?.bots ?? []).map(id => roster.byId[id]?.name), ...(waits?.rooms ?? []).map(id => roster.roomsById[id]?.name)].filter(Boolean)
   return names.length === 0 ? '' : t('Waiting for {names}', { names: names.join(t(' and ')) })
 }
 
-function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, wide, marked }) {
+function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, wide, marked, time }) {
   const id = bot.id
   const part = currentPart(bot)
   const preview = useSessions(list => previewOf(list, part, roster.exchangeTurns[part]))
@@ -57,21 +59,27 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   // Work in a group runs in a Session of its own, so the Bot's chat stays idle meanwhile.
   const groups = workKeys(useGroupWork(useWork, rooms => Object.entries(rooms).flatMap(([roomId, entries]) => entries.filter(entry => entry.botId === id).map(entry => ({ id: roomId, ...doingOf(entry) })))))
   const away = !running && groups.length > 0
+  // A Bot at work in its own chat, as the group's member list reads it: its own chat wins
+  // over a group there, so an entry that carries a room is the group's line.
+  const own = workKeys(useWork ? useWork(work => JSON.stringify(work.bots?.[id] ?? null)) : 'null')
   const state = botState(running || away, doing, alert)
-  const awayLine = away ? workLine(roster.roomsById[groups[0].id]?.name ?? t('a group chat'), groups[0], groups.length - 1) : null
+  // The row is the Bot, so its own chat needs no place named; a group is named without a
+  // joining word, and a long name is cut by the line's own ellipsis.
+  const busy = running && own !== null && own.roomId === undefined
+    ? { doing: own, where: '' }
+    : away ? { doing: groups[0], where: `· ${roster.roomsById[groups[0].id]?.name ?? t('a group chat')}` } : null
+  const busyLine = busy ? workStateLine({ ...busy, className: 'bt-member-state bt-row-state' }) : null
   const waits = workKeys(useWork ? useWork(work => JSON.stringify(work.waiting?.[id] ?? null)) : 'null')
   const waitsFor = state === 'waiting' ? waitingFor(roster, waits) : ''
   if (bot.hidden && !active && !main) return null
-  const onContextMenu = (event) => {
-    event.preventDefault()
-    actions.openMenu({ kind: 'bot', id, x: event.clientX, y: event.clientY })
-  }
+  // A right click and a phone hold open the same menu, at the mouse or the finger.
+  const menu = useRowMenu(point => actions.openMenu({ kind: 'bot', id, x: point.x, y: point.y }))
   const pinned = bot.pinned === true && !tile
-  const label = [bot.name, main ? t('Main Bot') : '', pinned ? t('Pinned') : '', running || away ? t('Working') : '', waitsFor, approval ? t('Waiting for your approval') : alert ? t('Waiting for your answer') : '', unread ? t('Unread activity') : ''].filter(Boolean).join(', ')
+  const label = [bot.name, bot.role ?? '', main ? t('Main Bot') : '', pinned ? t('Pinned') : '', running || away ? t('Working') : '', waitsFor, approval ? t('Waiting for your approval') : alert ? t('Waiting for your answer') : '', unread ? t('Unread activity') : ''].filter(Boolean).join(', ')
   if (tile && wide) {
     return h('div', { className: 'bt-tile-wrap' }, h('button', {
       type: 'button', className: 'bt-tile', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
-      'data-bot-id': id, title: preview || bot.name, onClick: () => actions.openSession(id), onContextMenu,
+      'data-bot-id': id, title: preview || bot.name, onClick: () => actions.openSession(id), ...menu,
     },
     h(BotAvatar, { bot, size: 60, state, main: true }),
     h('span', { className: 'bt-tile-name' }, bot.name),
@@ -79,20 +87,21 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   }
   return h('button', {
     type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
-    'data-bot-id': id, title: wide ? undefined : bot.name, onClick: () => actions.openSession(id), onContextMenu,
+    'data-bot-id': id, title: wide ? undefined : bot.name, onClick: () => actions.openSession(id), ...menu,
   },
   h(BotAvatar, { bot, size: 36, state, main }),
   pinned && !wide ? h(PinMark) : null,
   wide ? h('span', { className: 'bt-row-body' },
-    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, bot.name), pinned ? h(PinMark) : null),
-    awayLine ? h('span', { className: 'bt-row-preview' }, awayLine)
+    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, bot.name), bot.role ? h('span', { className: 'bt-row-role' }, bot.role) : null, pinned ? h(PinMark) : null, time ? h('span', { className: 'bt-row-time' }, time) : null),
+    busyLine ? busyLine
       : waitsFor ? h('span', { className: 'bt-row-preview' }, waitsFor)
         : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
   wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true }) : null)
 }
 
-function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, wide, marked }) {
+function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, wide, marked, time }) {
   const id = room.id
+  const menu = useRowMenu(point => actions.openMenu({ kind: 'room', id, x: point.x, y: point.y }))
   const fallback = useSessions(list => previewOf(list, id))
   const preview = room.preview?.replace(/\s+/g, ' ').trim() || fallback
   const active = useSessionRetainInfo(id, info => (info?.retainedBy?.mainView ?? 0) > 0)
@@ -101,19 +110,19 @@ function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSess
   const approval = useApproval(useWork, entry => entry.roomId === id)
   const members = workKeys(useGroupWork(useWork, rooms => (rooms[id] ?? []).map(entry => ({ id: entry.botId, ...doingOf(entry) }))))
   const first = roster.byId[members[0]?.id]
-  const workingLine = first ? workLine(first.name, members[0], members.length - 1) : null
+  // The reader is in this group, so the line names no place: the member, the work and its clock.
+  const workingLine = first ? workStateLine({ doing: members[0], lead: first.name, more: members.length - 1, className: 'bt-member-state bt-row-state' }) : null
   if (room.hidden && !active) return null
   const pinned = room.pinned === true
   const label = [room.name, pinned ? t('Pinned') : '', members.length > 0 ? t('Working') : '', approval ? t('Waiting for your approval') : ''].filter(Boolean).join(', ')
   return h('button', {
     type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
-    'data-room-id': id, onClick: () => actions.openSession(id),
-    onContextMenu: (event) => { event.preventDefault(); actions.openMenu({ kind: 'room', id, x: event.clientX, y: event.clientY }) },
+    'data-room-id': id, onClick: () => actions.openSession(id), ...menu,
   },
   h(RoomAvatar, { room, roster, size: 36 }),
   pinned && !wide ? h(PinMark) : null,
   wide ? h('span', { className: 'bt-row-body' },
-    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, room.name), pinned ? h(PinMark) : null),
+    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, room.name), pinned ? h(PinMark) : null, time ? h('span', { className: 'bt-row-time' }, time) : null),
     workingLine ? h('span', { className: 'bt-row-preview' }, workingLine) : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
   wide && approval && !active ? h('span', { className: 'bt-unread bt-unread-wait', 'aria-hidden': true })
     : wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true }) : null)
@@ -123,6 +132,7 @@ function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSess
 // context menu for rename/archive.
 function AgentSessionRow({ session, agent, actions, renaming, index }) {
   const input = useRef(null)
+  const menu = useRowMenu(point => actions.openMenu({ kind: 'agent-session', id: session.id, agentId: agent.id, x: point.x, y: point.y }))
   useLayoutEffect(() => {
     if (!renaming) return
     input.current?.focus()
@@ -155,12 +165,7 @@ function AgentSessionRow({ session, agent, actions, renaming, index }) {
   }
   return h('button', {
     type: 'button', className: 'bt-agent-sub-row', 'aria-current': session.active ? 'page' : undefined, style: { '--i': index },
-    onClick: () => actions.openAgentSession(session.id),
-    onContextMenu: (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      actions.openMenu({ kind: 'agent-session', id: session.id, agentId: agent.id, x: event.clientX, y: event.clientY })
-    },
+    onClick: () => actions.openAgentSession(session.id), ...menu,
   },
   h('span', { className: 'bt-agent-sub-title' }, session.title),
   h('span', { className: 'bt-agent-sub-time' }, session.at > 0 ? relativeShort(session.at) : ''))
@@ -169,6 +174,7 @@ function AgentSessionRow({ session, agent, actions, renaming, index }) {
 // The DSH Agent row: a plain dsh Session list lives in the Bot workspace, so it
 // sits among the Bots with the harness's own whale mark.
 function AgentRow({ agent, actions, useSessions, useSessionStatus, useUi, wide, marked }) {
+  const menu = useRowMenu(point => actions.openMenu({ kind: 'agent', id: agent.id, x: point.x, y: point.y }))
   const info = useSessions(list => JSON.stringify(agent.sessions.map((id) => {
     const row = list.byId[id]
     return {
@@ -202,7 +208,7 @@ function AgentRow({ agent, actions, useSessions, useSessionStatus, useUi, wide, 
     h('button', {
       type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
       'data-agent-id': agent.id, title: wide ? undefined : 'DSH Agent', onClick: () => actions.openAgent(agent.id),
-      onContextMenu: (event) => { event.preventDefault(); actions.openMenu({ kind: 'agent', id: agent.id, x: event.clientX, y: event.clientY }) },
+      ...menu,
     },
     h('span', { className: `bt-agent-ava${running ? ' bt-run' : ''}` }, h(FishLogo, { size: 22 })),
     wide ? h('span', { className: 'bt-row-body' },
@@ -256,15 +262,29 @@ export function TeamSidebar(props) {
   })
   const order = useMemo(() => {
     const stamps = JSON.parse(updated)
+    // A Session's list time only moves for messages the user typed, so a Bot answering another
+    // Bot never moved its row. The team view carries the newest message in or out of each Bot
+    // and group; that is what the list moves on, with the Session time and the creation time as
+    // the floor so a missing field never sends a row to the end.
+    const activity = (item, id) => {
+      const seen = typeof item.lastActivity === 'number' ? item.lastActivity : 0
+      return Math.max(seen, stamps[id] ?? 0, item.createdAt ?? 0)
+    }
     const entries = [
-      ...roster.bots.filter(bot => bot.id !== roster.mainBotId).map(bot => ({ kind: 'bot', item: bot, at: stamps[currentPart(bot)] ?? bot.createdAt })),
-      ...roster.rooms.map(room => ({ kind: 'room', item: room, at: stamps[room.id] ?? room.createdAt })),
+      ...roster.bots.filter(bot => bot.id !== roster.mainBotId).map(bot => ({ kind: 'bot', item: bot, at: activity(bot, currentPart(bot)) })),
+      ...roster.rooms.map(room => ({ kind: 'room', item: room, at: activity(room, room.id) })),
       // The Agent sorts by its most recent Session, falling back to when it was added.
       ...(roster.agents ?? []).map(agent => ({ kind: 'agent', item: agent, at: Math.max(0, ...agent.sessions.map(id => stamps[id] ?? 0)) || agent.createdAt })),
     ]
     return entries.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at)
   }, [roster, updated])
   const main = roster.byId[roster.mainBotId]
+  // On a phone the list is a page of its own: the sidebar hands over to it instead of
+  // showing the rail, so only one copy of the list is ever mounted. It is mounted at the
+  // list level only: over the conversation it would still take the taps meant for the back
+  // control, and the shell hides the sidebar column at both levels anyway.
+  const onPhone = props.useMobileNav(value => value)
+  const atList = props.useNavLevel(value => value === 'list')
   useListGlide(listRef, wide, order.map(entry => entry.item.id).join(','))
   useLandOnMainBot(roster, useSessions, actions)
   const rowProps = { roster, actions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, wide }
@@ -275,6 +295,18 @@ export function TeamSidebar(props) {
     event.preventDefault()
     actions.openPalette(event.key)
   }
+  // The list page is mounted while it is the level, and also while a page motion is in
+  // flight: it is the page the conversation slides over on the way in, and the one that
+  // comes back underneath on the way out. At rest on the conversation it is not mounted.
+  const moving = props.useNavMotion(value => value !== 'idle')
+  if (onPhone && (atList || moving)) {
+    return createPortal(h(MobileNavList, {
+      roster, actions, listRef, main, order, markedUnread, typeToSearch,
+      // The page is the full-width list: its rows carry names, previews and the unread dot.
+      rowProps: { ...rowProps, wide: true }, useUpdate: props.useUpdate,
+    }), document.body)
+  }
+  if (onPhone) return null
   return h('div', { className: wide ? 'bt-side' : 'bt-side bt-rail', onKeyDown: typeToSearch },
     wide ? h('div', { className: 'bt-side-top' },
       h('span', { className: 'bt-brand' }, h(BrandMark, { size: 22 }), h(BrandName)),
@@ -286,13 +318,112 @@ export function TeamSidebar(props) {
           h(UpdateButton, { useUpdate: props.useUpdate, actions }),
           h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
     wide && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
-    h('div', { ref: listRef, className: 'bt-list', role: 'region', 'aria-label': t('Bot list') },
-      main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true }) : roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…')),
-      order.map(entry => (entry.kind === 'bot'
-        ? h(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true })
-        : entry.kind === 'room'
-          ? h(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true })
-          : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true })))))
+    h(BoardEntry, { actions, wide, pending: roster.boardPending ?? 0 }),
+    h(BotList, { listRef, main, order, roster, markedUnread, rowProps }))
+}
+
+// The Bot and group list. The sidebar and the phone's list page both render it, so the
+// two views cannot disagree about order, marks or rows.
+function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTime }) {
+  const stamp = entry => (showTime ? relativeShort(entry.at) : undefined)
+  return h('div', { ref: listRef, className: 'bt-list', role: 'region', 'aria-label': t('Bot list') },
+    main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true, time: undefined }) : roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…')),
+    order.map(entry => (entry.kind === 'bot'
+      ? h(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
+      : entry.kind === 'room'
+        ? h(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
+        : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))))
+}
+
+// The Main Bot's card is the list's first item, and on a phone it stands in for the whole
+// Bot while it is out of view: a thin bar with its mark, its name and the way back to the
+// full card. The bar overlays the list rather than taking a row of its own — the list's
+// scroll geometry must not change when the bar comes and goes, or the content under the
+// reader's finger would move and the card could slide back into view by itself.
+const CHIEF_COLLAPSE_AT = 24
+
+// The Main Bot's card is the list's first item, and on a phone a small pill stands in for
+// it once the list has moved and all but a sliver of the card is past the top edge. The
+// pill opens the Main Bot's conversation, the same move the card makes.
+function useChiefBar(listRef) {
+  const [out, setOut] = useState(false)
+  useEffect(() => {
+    const list = listRef.current
+    if (list === null) return undefined
+    const read = () => {
+      const card = list.querySelector('.bt-tile-wrap')
+      const box = list.getBoundingClientRect()
+      // A short list cannot scroll the whole card away, so the top edge is the measure: the
+      // pill comes when the card has all but left, and goes when the card is back in sight.
+      const next = card !== null && list.scrollTop > CHIEF_COLLAPSE_AT && card.getBoundingClientRect().bottom <= box.top + 24
+      setOut(current => (current === next ? current : next))
+    }
+    list.addEventListener('scroll', read, { passive: true })
+    read()
+    return () => list.removeEventListener('scroll', read)
+  }, [listRef])
+  return out
+}
+
+// The card's stand-in: the mark with its Main Bot star, the name and the role, on a small
+// rounded card under the top row. It is a button, and it goes where the card goes.
+function ChiefBar({ main, actions }) {
+  if (main === undefined) return null
+  const name = main.name
+  return h('button', {
+    type: 'button', className: 'bt-chief-bar', 'data-bt-chief-bar': '',
+    'aria-label': t("Open {name}'s chat", { name }), title: name,
+    onClick: () => actions.openSession(main.id),
+  },
+    h(BotAvatar, { bot: main, size: 30, state: 'idle', main: true, badge: true, live: false }),
+    h('span', { className: 'bt-chief-text' },
+      h('span', { className: 'bt-chief-name' }, name),
+      main.role ? h('span', { className: 'bt-chief-role' }, main.role) : null))
+}
+
+// The phone's list page: the same list as the sidebar, on a page of its own. Its root
+// carries the hook the styles and the test bench read, and its brand opens the same
+// account menu the footer avatar does — the shell's settings seat is not on this page.
+// The page is unmounted whenever a conversation holds the screen, and how far the reader
+// had scrolled is part of the way back: the return hands them the list they left rather
+// than its top, so the position is kept here, outside the page that comes and goes.
+let listScrollTop = 0
+
+function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+  const menu = useAccountMenu(actions, 'down')
+  const chiefOut = useChiefBar(listRef)
+  // Restored before the first paint, so the list is never shown at its top first.
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (list === null) return undefined
+    list.scrollTop = listScrollTop
+    const save = () => { listScrollTop = list.scrollTop }
+    list.addEventListener('scroll', save, { passive: true })
+    return () => { save(); list.removeEventListener('scroll', save) }
+  }, [listRef])
+  // The state is published for the styles and the test bench: `collapsed` while the pill
+  // stands in, `expanded` while the card is in place. It exists only while this page does,
+  // which is only where the judgment holds.
+  useEffect(() => {
+    document.body.dataset.btChief = chiefOut ? 'collapsed' : 'expanded'
+    return () => { delete document.body.dataset.btChief }
+  }, [chiefOut])
+  return h('div', { className: 'bt-nav-page', 'data-bt-nav': 'list', onKeyDown: typeToSearch },
+    h('div', { className: 'bt-nav-top' },
+      h('button', {
+        ref: menu.anchor, type: 'button', className: 'bt-brand bt-nav-account', 'aria-label': t('Account'),
+        'aria-haspopup': 'menu', 'aria-expanded': menu.open, 'data-bt-settings-entry': '', onClick: menu.toggle,
+      }, h(BrandMark, { size: 22 }), h(BrandName)),
+      h(UpdateButton, { useUpdate, actions }),
+      h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Search'), title: t('Search'), onClick: () => actions.openPalette() }, h(SearchIcon)),
+      h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
+    roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
+    h(BoardEntry, { actions, pending: roster.boardPending ?? 0 }),
+    h('div', { className: 'bt-nav-body' },
+      // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
+      chiefOut ? h(ChiefBar, { main, actions }) : null,
+      h(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true })),
+    menu.menu)
 }
 
 // The update button at the sidebar's top right: a cloud while a newer DS Bot —
@@ -475,21 +606,71 @@ function pressSettingsShortcut() {
   }))
 }
 
+// The account menu's entries. The footer avatar and the phone's list page open the same
+// menu, so it is built in one place. `phone` is the list page's menu: the shell's sidebar
+// panels are not there — the list page covers the screen and the shell's sidebar is away —
+// so its automation tasks open the settings page a phone can see.
+function accountGroups(actions, phone) {
+  return [
+    [
+      [t('Usage'), GaugeIcon, () => actions.openSettings('usage')],
+      [t('Connectors'), ConnectorIcon, () => actions.openConnectors()],
+      [t('Automation tasks'), ClockIcon, () => (phone ? actions.openSettings('schedules') : actions.selectPanel('schedules'))],
+      [t('Bot settings'), GearIcon, () => actions.openSettings('general')],
+    ],
+    [
+      [t('Switch to classic Agent mode'), SwitchIcon, () => actions.setSurface('agent')],
+    ],
+  ]
+}
+
+// One account menu: `up` opens above its trigger (the footer avatar), `down` below it (the
+// phone's list page, whose trigger is at the top of the screen). Outside a press or Escape
+// closes it, and the trigger keeps the focus.
+function useAccountMenu(actions, place = 'up') {
+  const [open, setOpen] = useState(false)
+  const [box, setBox] = useState(null)
+  const anchor = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (event) => {
+      if (event.target instanceof Element && (event.target.closest('.bt-account-menu') || anchor.current?.contains(event.target))) return
+      setOpen(false)
+    }
+    const onKey = (event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); anchor.current?.focus() } }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey, true)
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true) }
+  }, [open])
+  const toggle = () => {
+    const rect = anchor.current?.getBoundingClientRect()
+    if (rect) setBox(place === 'down' ? { left: rect.left, top: rect.bottom + 6 } : { left: rect.left, bottom: window.innerHeight - rect.top + 5 })
+    setOpen(value => !value)
+  }
+  const menu = open && box ? createPortal(h('div', {
+    className: `bt-menu bt-account-menu${place === 'up' ? ' bt-menu-up' : ''}`, role: 'menu', 'aria-label': t('Account'), style: box,
+  }, accountGroups(actions, place === 'down').map((group, index) => h(Fragment, { key: index },
+    index > 0 ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
+    group.map(([label, Icon, run]) => h('button', {
+      key: label, type: 'button', role: 'menuitem',
+      onClick: () => { setOpen(false); void Promise.resolve(run()).catch(error => actions.reportError(error, 'menu')) },
+    }, h(Icon), h('span', { className: 'bt-menu-label' }, label)))))), document.body) : null
+  return { open, anchor, toggle, menu, close: () => setOpen(false) }
+}
+
 // The footer avatar opens an account menu above itself, with Bot settings as one
 // entry. Shell panels hidden from the Bot sidebar (plugins, automation) live here too.
 // `seat` is the shell's settings.launcher seat: at priority -10 the whale wins it
 // over a shell account plugin's own launcher (the Desktop's "··· More"), which comes
 // back in Agent mode; FooterAccount stands in while no seat exists at all.
 export function AccountLauncher({ seat = true, settingsOpen, openSettings, openOnboarding, actions }) {
-  const [open, setOpen] = useState(false)
+  const menu = useAccountMenu(actions, 'up')
   useLayoutEffect(() => {
     if (!seat) return undefined
     actions.seatAccount(true)
     return () => actions.seatAccount(false)
   }, [seat])
-  const [box, setBox] = useState(null)
-  const button = useRef(null)
-  useEffect(() => { if (settingsOpen) setOpen(false) }, [settingsOpen])
+  useEffect(() => { if (settingsOpen) menu.close() }, [settingsOpen])
   // The settings dialog links back to the shell's own settings (models, providers).
   useEffect(() => {
     if (!openSettings) return undefined
@@ -501,43 +682,10 @@ export function AccountLauncher({ seat = true, settingsOpen, openSettings, openO
     openShellOnboarding = openOnboarding
     return () => { if (openShellOnboarding === openOnboarding) openShellOnboarding = null }
   }, [openOnboarding])
-  useEffect(() => {
-    if (!open) return undefined
-    const onDown = (event) => {
-      if (event.target instanceof Element && (event.target.closest('.bt-account-menu') || button.current?.contains(event.target))) return
-      setOpen(false)
-    }
-    const onKey = (event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); button.current?.focus() } }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey, true)
-    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true) }
-  }, [open])
-  const toggle = () => {
-    const rect = button.current?.getBoundingClientRect()
-    if (rect) setBox({ left: rect.left, bottom: window.innerHeight - rect.top + 5 })
-    setOpen(value => !value)
-  }
-  const groups = [
-    [
-      [t('Usage'), GaugeIcon, () => actions.openSettings('usage')],
-      [t('Connectors'), ConnectorIcon, () => actions.openConnectors()],
-      [t('Automation tasks'), ClockIcon, () => actions.selectPanel('schedules')],
-      [t('Bot settings'), GearIcon, () => actions.openSettings('general')],
-    ],
-    [
-      [t('Switch to classic Agent mode'), SwitchIcon, () => actions.setSurface('agent')],
-    ],
-  ]
   return h(Fragment, null,
-    h('button', { ref: button, type: 'button', className: 'bt-account', 'aria-label': t('Account'), 'aria-haspopup': 'menu', 'aria-expanded': open, onClick: toggle },
+    h('button', { ref: menu.anchor, type: 'button', className: 'bt-account', 'aria-label': t('Account'), 'aria-haspopup': 'menu', 'aria-expanded': menu.open, onClick: menu.toggle },
       h('span', { className: 'bt-you', 'aria-hidden': true }, h(BotMark, { look: MAIN_LOOK, size: 24 }))),
-    open && box ? createPortal(h('div', { className: 'bt-menu bt-menu-up bt-account-menu', role: 'menu', 'aria-label': t('Account'), style: box },
-      groups.map((group, index) => h(Fragment, { key: index },
-        index > 0 ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
-        group.map(([label, Icon, run, hint]) => h('button', {
-          key: label, type: 'button', role: 'menuitem',
-          onClick: () => { setOpen(false); void Promise.resolve(run()).catch(error => actions.reportError(error, 'menu')) },
-        }, h(Icon), h('span', { className: 'bt-menu-label' }, label), hint ? h('span', { className: 'bt-menu-hint' }, hint) : null))))), document.body) : null)
+    menu.menu)
 }
 
 // Opens the Main Bot whenever the main view holds no Bot conversation, the way
@@ -666,4 +814,13 @@ export const SIDEBAR_CSS = `
 .bt-agent-sub[data-open] .bt-agent-sub-row{animation:bt-agent-row-in .24s ease both;animation-delay:calc(var(--i, 0)*30ms)}
 @keyframes bt-agent-row-in{from{opacity:0;filter:blur(4px)}to{opacity:1;filter:blur(0)}}
 @media (prefers-reduced-motion:reduce){.bt-agent-sub{transition:none}.bt-agent-sub .bt-agent-sub-row{animation:none}}
+
+/* The phone's list page. It is the only copy of the list while it is up: the sidebar
+   renders nothing, and the shell's own sidebar column is closed by the shell styles. */
+.bt-nav-page{position:fixed;inset:0;z-index:35;display:flex;flex-direction:column;background:var(--bt-main);color:var(--bt-ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box}
+.bt-nav-top{display:flex;align-items:center;gap:8px;flex:none;padding:10px 12px 6px}
+.bt-nav-page .bt-list{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 8px 12px}
+.bt-nav-page .bt-row{min-height:60px}
+.bt-nav-page .bt-tile-wrap{padding:8px 0 12px}
+.bt-row-time{flex:none;margin-left:auto;padding-left:8px;font-size:12px;line-height:18px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums}
 `

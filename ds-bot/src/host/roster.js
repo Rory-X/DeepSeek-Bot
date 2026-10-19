@@ -44,12 +44,13 @@ export function install(rt) {
 
   // `dir` is a working folder outside the team workspace. Such a Session is made by cwd
   // alone, so it joins no DSH workspace and the user's own project lists stay as they are.
-  async function createSession(title, { dir } = {}) {
+  async function createSession(title, { dir, strictDir = false } = {}) {
     // A Bot's tools run here too; while another dsh holds the team, a new Session would
     // belong to no saved Bot.
     const readOnly = rt.readOnly()
     if (readOnly !== undefined) throw new Error(readOnly)
     const usable = dir !== undefined && await rt.isFolder(dir)
+    if (strictDir && !usable) throw new Error('The requirement project directory is no longer available')
     if (dir !== undefined && !usable) rt.warn('ds-bot: the working folder %s is gone; %s starts in the team workspace', dir, title)
     const place = usable ? { cwd: dir } : { workspaceId: await ensureWorkspace() }
     const { sessionId } = await ctx.sessionController.create({ ...place, ...await botPreset() })
@@ -324,8 +325,9 @@ export function install(rt) {
     }
   }
 
-  function checkMembers(members) {
-    if (members.length < 2) throw new Error('A group chat needs at least two Bots')
+  function checkMembers(members, boardCardId) {
+    const task = boardCardId && rt.own(state.board?.cards ?? {}, boardCardId)
+    if (members.length < (task ? 1 : 2)) throw new Error('A group chat needs at least two Bots')
     if (members.length > ROOM_MAX_MEMBERS) throw new Error(`A group chat holds at most ${ROOM_MAX_MEMBERS} Bots`)
   }
 
@@ -333,17 +335,17 @@ export function install(rt) {
   // member when it has one.
   const defaultAdmin = (members, createdBy) => (members.includes(createdBy) ? createdBy : members.find(rt.isMain) ?? null)
 
-  async function createRoom({ members: memberIds = [], name: roomName, notice, mode, admin, createdBy } = {}) {
+  async function createRoom({ members: memberIds = [], name: roomName, notice, mode, admin, createdBy, boardCardId } = {}) {
     const members = [...new Set(memberIds)].filter(id => rt.botOf(id))
-    checkMembers(members)
+    checkMembers(members, boardCardId)
     const custom = cleanRoomName(roomName ?? '')
     const adminId = admin !== undefined ? admin : defaultAdmin(members, createdBy)
     if (adminId !== null && !members.includes(adminId)) throw new Error('The admin must be a member of the group')
     if (mode !== undefined && !ROOM_MODES.includes(mode)) throw new Error(`Reply mode must be one of ${ROOM_MODES.join(', ')}`)
-    return holdName('room', custom, () => buildRoom({ members, custom, notice, mode, adminId, createdBy }))
+    return holdName('room', custom, () => buildRoom({ members, custom, notice, mode, adminId, createdBy, boardCardId }))
   }
 
-  async function buildRoom({ members, custom, notice, mode, adminId, createdBy }) {
+  async function buildRoom({ members, custom, notice, mode, adminId, createdBy, boardCardId }) {
     const title = custom || autoRoomName(members)
     // The group's own Session only relays, so it stays in the team workspace; the
     // group's folder is for its members' Sessions.
@@ -352,7 +354,7 @@ export function install(rt) {
       // A member deleted while the Session was made stays out, and the group is checked
       // again as it is written.
       const live = members.filter(member => rt.botOf(member))
-      checkMembers(live)
+      checkMembers(live, boardCardId)
       const lead = adminId === null || live.includes(adminId) ? adminId : defaultAdmin(live, createdBy)
       const name = custom || autoRoomName(live)
       const room = {
@@ -365,6 +367,7 @@ export function install(rt) {
         notice: cleanNotice(notice),
         createdAt: Date.now(),
         createdBy: createdBy ?? null,
+        ...(boardCardId ? { boardCardId } : {}),
       }
       state.rooms[id] = room
       await rt.save()
@@ -385,6 +388,7 @@ export function install(rt) {
   // await: another change or a deleted Bot may have come in meanwhile, and `add` and
   // `remove` apply to the members the group has then.
   function planRoomChange(room, patch, actorId) {
+    if (room.boardCardId && ['members', 'add', 'remove', 'admin', 'workDir', 'permission'].some(key => patch[key] !== undefined)) throw new Error('Requirement conversation members, lead and project are managed by the board')
     const byMain = actorId === undefined || rt.isMain(actorId)
     const byAdmin = !byMain && rt.isAdminOf(room, actorId)
     if (!byMain && !byAdmin) throw new Error(`Only the user, a Main Bot, or the admin of "${room.name}" can change it`)

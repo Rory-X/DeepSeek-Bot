@@ -871,7 +871,7 @@ export function install(rt) {
     if (signal.aborted) throw signal.reason
     const dir = rt.workDirOf(job)
     const intended = dir !== undefined && await rt.isFolder(dir) ? dir : rt.teamFolder()
-    const freshId = await rt.createSession(room ? `${bot.name} · ${room.name}` : bot.name, { dir })
+    const freshId = await rt.createSession(room ? `${bot.name} · ${room.name}` : bot.name, { dir, ...(room?.boardCardId ? { strictDir: true } : {}) })
     const picked = await freshRoute(bot, session)
     if (picked !== undefined) await selectRoute(bot, freshId, picked)
     await rt.applyPermission(bot, freshId, room)
@@ -1006,6 +1006,7 @@ export function install(rt) {
     if (place === undefined || cwd === undefined || (midTurn && place.roomId !== undefined) || Date.now() < (folderRetry.get(agent.id) ?? 0)) return undefined
     const wanted = rt.workDirOf(place)
     const usable = wanted !== undefined && await rt.isFolder(wanted)
+    if (rt.roomOf(place.roomId)?.boardCardId && !usable) throw new Error('The requirement project directory is no longer available')
     // A team copied from another DSH_HOME has no team workspace here until one is made, and its
     // Sessions still work in the old one.
     if (!usable && rt.teamFolder() === undefined) await rt.ensureWorkspace()
@@ -1029,6 +1030,8 @@ export function install(rt) {
     const team = await rt.keepTeamFolder()
     if (current === team || !rt.isBotSession(agent.id)) return next()
     const place = placeOf(agent.id)
+    // Let DSH report the missing project; a requirement must never move to the team folder.
+    if (rt.roomOf(place?.roomId)?.boardCardId) return next()
     const wanted = rt.workDirOf(place)
     const target = wanted !== undefined && await rt.isFolder(wanted) ? wanted : team
     if (target !== undefined) {
@@ -1176,7 +1179,7 @@ export function install(rt) {
         const reply = readReply(textOf(event.data.content))
         if (reply !== undefined) items.push({ kind: 'answer', questions: reply.questions, answers: reply.answers, time: event.time })
       } else if (source?.kind === SOURCE_KIND && source.handoff !== true && source.deferred !== true && ['request', 'reply', 'report', 'stopped'].includes(source.role)) {
-        items.push({ kind: 'event', role: source.role, botId: source.senderSessionId ?? null, name: source.senderName ?? null, roomId: source.roomId ?? null, time: event.time })
+        items.push({ kind: 'event', role: source.role, botId: source.senderSessionId ?? null, name: source.senderName ?? null, roomId: source.roomId ?? null, ...(source.exchangeId ? { id: source.exchangeId } : {}), time: event.time })
       }
     }
     return items

@@ -2,20 +2,27 @@ import { call } from './api.js'
 import { isHex, inkText, paintCss } from './inks.js'
 import { DEFAULT_MASK, SHAPES, markupCache, maskOf } from './characters.js'
 import { createSource, EMPTY_ROSTER, indexRoster, isAgentSession } from './sources.js'
+import { watchMobileNav } from './media.js'
+import { installViewport, watchStandalone } from './platform.js'
+import { NAV_MOTION_MS, installSwipeBack } from './nav-motion.js'
+import { installRightColumns } from './right-columns.js'
+import { installNavHistory } from './nav-history.js'
 import { teamActions } from './team-actions.js'
 import { themeCss, shellTokens, registry, registerShape, registerTheme, allThemes } from './themes.js'
 import { MENTION_ORIGIN, currentPart } from './text.js'
 import { SHELL_CSS, CONVERSATION_CSS, installStyles, installCompiledStyles } from './styles.js'
 import { lookOf } from './mark.js'
 import { TeamSidebar, ConnectPlugins, YouAvatar, AccountLauncher, FooterAccount, BrandMark, BrandName, BotReturn, SIDEBAR_CSS, RETURN_CSS, holdShellShortcuts, openHarnessOnboarding, openHarnessSettings } from './sidebar.js'
-import { HeaderPill } from './header.js'
+import { ProjectBoard, BOARD_CSS } from './project-board.js'
+import { HeaderPill, PlainBack } from './header.js'
 import { ComposerPlus, ComposerVoice, menuIcons } from './composer.js'
+import { ComposerQuote, QUOTE_SOURCE, quoteRef, quoteSource } from './quote.js'
 import { CHATS_SOURCE, atSources } from './at-menu.js'
 import { VOICE_BUNDLE } from './speech.js'
 import { sameVersion } from './dsh-offer.js'
 import { AnsweredCell, QuestionCard, QuestionDock } from './questions.js'
 import { AssistantCell, TriggerCell, TurnProcessCell, Nothing, TurnTailCell, ToolCell } from './cells.js'
-import { Overlays } from './overlays.js'
+import { Overlays, HINT_CSS } from './overlays.js'
 import { createBotBrowsers, serveBrowserReads } from './bot-browsers.js'
 import { BROWSER_CSS } from './browser-pane.js'
 import { SECRET_CSS, SecretDock } from './secret-card.js'
@@ -50,11 +57,23 @@ export function apply(ctx) {
   let seenAt = seenStore.read()
   // `details` is the panel's subject (a Session id); `view` picks details or the
   // subject Bot's browser inside it.
-  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} })
+  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quotes: {}, settings: null, memory: null, toast: null, hint: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} })
   // Bot mode paints the whole team surface; Agent mode withdraws every slot and
   // style so the shell's own interface returns. `plain` stays false until a Bot-mode
   // view hosts a plain session, which drops only the conversation replacements.
   const surface = createSource({ mode: readMode(), plain: false })
+  // A phone gets a two-level navigation: `mobileNav` is the device test (media.js), and
+  // `navLevel` says which of the two levels the Bot surface shows.
+  const mobileNav = createSource(false)
+  const navLevel = createSource('list')
+  // Which level a conversation was entered from, and the page motion in flight. The return
+  // path reads the origin, so a second entry point (a search, a notification) returns to
+  // where it came from instead of to the list page by name.
+  const navOrigin = createSource(null)
+  const navMotion = createSource('idle')
+  // An installed app: no browser chrome, so the styles and the motion default treat it as
+  // the most app-like case there is.
+  const standalone = createSource(false)
   // DSH Agent Session ids from the last pull, so a reload already knows the main
   // view is a plain Session before the team answers.
   let agentSessionCache = new Set()
@@ -275,6 +294,26 @@ export function apply(ctx) {
     return () => { offRoster(); offRegistry(); style.remove() }
   }
 
+  // The shell's viewport and theme-colour metas: the plugin adds what a phone needs (the
+  // safe areas behind viewport-fit=cover, the browser's own colour) and keeps the rest.
+  const viewport = installViewport()
+  ctx.effect(() => () => viewport.dispose(), 'ds-bot: viewport meta')
+  ctx.effect(() => {
+    const watch = watchStandalone(value => standalone.set(value))
+    standalone.set(watch.read())
+    const sync = () => {
+      if (standalone.getSnapshot()) document.body.dataset.btStandalone = ''
+      else delete document.body.dataset.btStandalone
+    }
+    const off = standalone.subscribe(sync)
+    sync()
+    return () => {
+      watch.dispose()
+      off()
+      delete document.body.dataset.btStandalone
+    }
+  }, 'ds-bot: installed app')
+
   // The chosen theme lives in the team state so every device shares it; the local
   // copy only avoids a flash of the default theme before the first state pull.
   const installTheme = () => {
@@ -287,12 +326,15 @@ export function apply(ctx) {
       const themes = allThemes()
       const id = themes[prefs.theme] ? prefs.theme : 'deepseek'
       const accent = isHex(prefs.accent) ? prefs.accent : undefined
-      const motion = prefs.motion === 'quiet' || prefs.motion === 'lively' ? prefs.motion : 'normal'
+      // An installed app has no browser chrome and a shorter attention span for motion:
+      // an explicit choice still wins, otherwise it runs quiet.
+      const motion = prefs.motion === 'quiet' || prefs.motion === 'lively' ? prefs.motion : standalone.getSnapshot() ? 'quiet' : 'normal'
       document.body.dataset.btMotion = motion
       const next = `${id}|${accent ?? ''}|${motion}|${registry.getSnapshot()}`
       if (next === key) return
       key = next
       style.textContent = themeCss(themes[id], accent)
+      viewport.theme({ light: themes[id].light.bg, dark: themes[id].dark.bg })
       const release = releaseTokens
       releaseTokens = ctx.theme.overrideTokens('ds-bot', shellTokens(themes[id]))
       if (typeof release === 'function') release()
@@ -303,9 +345,11 @@ export function apply(ctx) {
     render()
     const offRoster = roster.subscribe(render)
     const offRegistry = registry.subscribe(render)
+    const offStandalone = standalone.subscribe(render)
     return () => {
       offRoster()
       offRegistry()
+      offStandalone()
       try {
         if (typeof releaseTokens === 'function') releaseTokens()
       } finally {
@@ -335,6 +379,14 @@ export function apply(ctx) {
     const bot = roster.getSnapshot().byId[id]
     return bot ? currentPart(bot) : id
   }
+  // The shell refuses a Session it does not know — an archived part, a deleted Bot, or a list
+  // that has not caught up — and a refusal from a timer leaves the view half-open on a
+  // conversation that will never fill. The open is guarded, so a refusal is reported instead
+  // of thrown away, and a target can be checked against the shell's own list first.
+  const knownSession = id => typeof id === 'string' && id !== '' && ctx.sessions.list.getSnapshot().byId?.[id] !== undefined
+  const openTarget = (target) => {
+    try { ctx.uiWorkspace.openSession(target); return true } catch (error) { actions.reportError(error, 'open-session'); return false }
+  }
   // Sessions owned by an Agent, including ones adopted before the roster caught up.
   const agentSessions = (agentId) => {
     const ids = [...(roster.getSnapshot().agentsById[agentId]?.sessions ?? [])]
@@ -343,14 +395,52 @@ export function apply(ctx) {
   }
   const mainView = () => Object.values(ctx.sessions.list.getSnapshot().byId ?? {}).find(session => (session?.retainedBy?.mainView ?? 0) > 0)?.id
   const show = listedOpener({ list: ctx.sessions.list, refresh: () => Promise.resolve(ctx.sessions.refresh?.()).catch(quietly('refresh sessions')), open: (target) => { expected = target; ctx.uiWorkspace.openSession(target) }, current: mainView })
+  // The shell focuses the resident composer whenever a Session opens and again when a turn
+  // ends. On a phone that raises the keyboard over the conversation the reader is looking at,
+  // and the shell has no way to ask for no focus, so the focus is handed straight back —
+  // unless the reader's own finger is on the box, which is the only focus a phone wants.
+  const COMPOSER_TAP_MS = 900
+  let composerTappedAt = 0
+  const composerField = (node) => {
+    if (!(node instanceof HTMLElement)) return null
+    const field = node.closest('[role=textbox],input,textarea,[contenteditable=true]')
+    return field !== null && field.closest('[class*="_centerCol"]') !== null ? field : null
+  }
+  // The phone's levels live on the browser's history so the system's back gesture returns to
+  // the list; every way back still runs the one return, `goBack`.
+  // A return in flight: the pop the browser sends back arrives while the level has not moved
+  // yet, so the guard keeps one press from starting a second return.
+  let returning = false
+  const navHistory = installNavHistory({
+    mobileNav,
+    navLevel,
+    onLeave: () => actions.leaveChat(),
+    onEnter: () => navLevel.set('chat'),
+  })
+  ctx.effect(() => () => navHistory.dispose(), 'ds-bot: the phone levels in history')
   const actions = {
     ...teamActions({ call, after, partFor, roster, ui, live, cards, turnClock }),
+    openBoard: () => ui.set(state => ({ ...state, board: true, settings: null, details: null, newChat: null, palette: null, menu: null })),
+    closeBoard: () => ui.set(state => ({ ...state, board: false })),
     // The full-pane overlays sit above the conversation, so opening one must dismiss them
     // or the click appears to do nothing.
     isAgentSession: id => isAgentSessionId(id),
     openSession: (id) => {
+      actions.closeBoard()
       // A DSH Agent Session id lands on the plain surface, not the Bot skin.
       if (isAgentSessionId(id)) return actions.openAgentSession(id)
+      // Opening a conversation from the list page is the push: the list yields and the
+      // conversation arrives from the right. The origin is what the way back reads.
+      const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === 'list'
+      if (fromList) {
+        navOrigin.set('list')
+        runMotion('push', { from: '100%', to: '0px', listFrom: '0px', listTo: '-18px' })
+        // The arrival gets a history entry of its own, so the system's back gesture has
+        // somewhere to return to instead of leaving the app.
+        navHistory.entered()
+      }
+      // Opening a conversation is what leaves the phone's list page.
+      navLevel.set('chat')
       ui.set(state => (state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state))
       setPlain(false)
       const target = partFor(id)
@@ -359,6 +449,14 @@ export function apply(ctx) {
     // The conversation replacements withdraw for a plain Session; set the surface
     // before the navigation so the Bot skin never flashes.
     openAgentSession: (sessionId) => {
+      actions.closeBoard()
+      const fromList = mobileNav.getSnapshot() && navLevel.getSnapshot() === 'list'
+      if (fromList) {
+        navOrigin.set('list')
+        runMotion('push', { from: '100%', to: '0px', listFrom: '0px', listTo: '-18px' })
+        navHistory.entered()
+      }
+      navLevel.set('chat')
       ui.set(state => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: 'details', renaming: false, tab: null }))
       setPlain(true)
       show(sessionId)
@@ -412,17 +510,64 @@ export function apply(ctx) {
       if (main !== undefined && owned.includes(main) && roster.getSnapshot().mainBotId) actions.openSession(roster.getSnapshot().mainBotId)
       return result
     },
-    // `last` is the Bot conversation the view held before it cleared: when that part
-    // was archived for a fresh one, the view goes on in the fresh one.
+    // `last` is the Bot conversation the view held before it cleared: when that part was
+    // archived for a fresh one, the view goes on in the fresh one. What it lands on has to be
+    // a Session the shell still knows — a part the roster remembers but the shell has dropped
+    // would be refused, and the view would stay on an empty page — so the Bot's current part
+    // and the Main Bot's are tried in turn, and with none of them the reader stays on the
+    // list rather than landing nowhere.
     landOn: async (id, last) => {
-      if (last) await pull().catch(() => {})
-      const bot = last ? roster.getSnapshot().byId[last.botId] : undefined
-      setPlain(false)
-      const target = bot && currentPart(bot) !== last.sessionId ? currentPart(bot) : partFor(id)
-      show(target)
+      try {
+        if (last) await pull().catch(() => {})
+        const snapshot = roster.getSnapshot()
+        const bot = last ? snapshot.byId[last.botId] : undefined
+        setPlain(false)
+        const target = [
+          bot && currentPart(bot) !== last.sessionId ? currentPart(bot) : partFor(id),
+          bot ? currentPart(bot) : undefined,
+          snapshot.mainBotId ? partFor(snapshot.mainBotId) : undefined,
+        ].find(knownSession)
+        if (target === undefined) {
+          // Nothing to land on: the list is a level of its own, and that is where the reader
+          // stays. On a desktop the list is the sidebar, and the view keeps whatever it holds.
+          if (mobileNav.getSnapshot()) navLevel.set('list')
+          return
+        }
+        expected = target
+        show(target)
+      } catch (error) {
+        actions.reportError(error, 'land-on')
+      }
     },
     selectPanel: (id) => { ctx.layout.selectPanel(id) },
     toggleSidebar: () => { ctx.layout.toggleSidebar() },
+    // The one return path: the back control, the edge swipe and anything else that leaves a
+    // conversation come here. The origin says where it lands, and the conversation leaves
+    // the way it arrived — it goes out to the right while the page it came from comes back.
+    goBack: () => {
+      if (navLevel.getSnapshot() !== 'chat') return
+      ui.set(state => (state.details ? { ...state, details: null, view: 'details' } : state))
+      if (!mobileNav.getSnapshot()) {
+        navLevel.set('list')
+        return
+      }
+      // The entry this arrival pushed is popped, and the return starts with the press rather
+      // than with the pop that follows: the pop then finds the level already back.
+      navHistory.returned()
+      actions.leaveChat()
+    },
+    // The conversation leaves the way it arrived: it goes out to the right while the page it
+    // came from comes back. The origin says where it lands. This is what a pop from the
+    // system's back gesture runs too, so every way back is this one return.
+    leaveChat: () => {
+      if (navLevel.getSnapshot() !== 'chat' || returning) return
+      returning = true
+      const origin = navOrigin.getSnapshot() ?? 'list'
+      const from = document.body.style.getPropertyValue('--bt-nav-x') || '0px'
+      const listFrom = document.body.style.getPropertyValue('--bt-nav-list-x') || '-18px'
+      runMotion('pop', { from, to: '100%', listFrom, listTo: '0px', done: () => { returning = false; navOrigin.set(null); navLevel.set(origin) } })
+    },
+    showBotList: () => actions.goBack(),
     // Agent mode hands the surface back to the shell; everything open on the Bot
     // surface closes first so nothing stale reopens on the way back.
     setSurface: (mode) => {
@@ -530,7 +675,31 @@ export function apply(ctx) {
   // The Voice Input plugin's speech Remote; absent while that plugin is off.
   actions.speech = () => ctx.get('remote.speech') ?? undefined
   // DSH's own settings: models, providers, keys and its plugins.
-  actions.openHarnessSettings = openHarnessSettings
+  // The shell's own settings are a desktop surface. On a phone the entries that lead there
+  // say so beside themselves instead of opening something the reader cannot use; the
+  // desktop keeps its path. True means the phone answered the press itself, so a settings
+  // dialog the entry sits in stays where it is.
+  const showHint = (text, anchor) => {
+    const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : null
+    ui.set(state => ({ ...state, hint: {
+      text,
+      token: Date.now(),
+      // The rect is captured now: the hint stays where the entry was, even when the menu it
+      // came from closes on this press.
+      rect: rect === null
+        ? { left: window.innerWidth / 2, top: 0, bottom: 0, width: 0 }
+        : { left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width },
+    } }))
+  }
+  actions.dismissHint = token => ui.set(state => (state.hint && (token === undefined || state.hint.token === token) ? { ...state, hint: null } : state))
+  actions.openHarnessSettings = (anchor) => {
+    if (mobileNav.getSnapshot()) {
+      showHint(t('Open this setting on a desktop.'), anchor)
+      return true
+    }
+    openHarnessSettings()
+    return false
+  }
   actions.openHarnessOnboarding = openHarnessOnboarding
   actions.voiceSetup = () => {
     const navigation = ctx.get('pluginNavigation')
@@ -563,7 +732,121 @@ export function apply(ctx) {
   }
   const browserPages = browsers?.pages ?? createSource({})
   const browserTabs = browsers?.tabs ?? createSource({})
-  const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update } })
+  const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, cards, browserPages, browserTabs, surface, update, mobileNav, navLevel, navMotion } })
+  // The level is published on <body> so the styles, the test bench and a screen reader all
+  // read the same fact; it is absent whenever the navigation is not in effect (a desktop,
+  // or the plain surface an Agent Session gets).
+  // The list page is a layer of its own over the conversation, so while it is up the
+  // covered column is marked inert: its header and messages are neither announced nor
+  // reachable by a tab or a stray click. The list page itself is portalled to the body,
+  // and the shell's overlay layer (the toast, a sign-in) stays outside the column.
+  const coverConversation = (covered) => {
+    for (const column of document.querySelectorAll('[class*="_centerCol"]')) {
+      if (covered) column.setAttribute('inert', '')
+      else column.removeAttribute('inert')
+    }
+  }
+  // The page motion is written straight to the DOM: a page change is a transition, not a
+  // state the reader sees, and the timers are what end it. `hold` seats the start position
+  // without a transition, so the movement runs from there.
+  let motionTimer = 0
+  const setMotion = (phase, x, listX) => {
+    if (navMotion.getSnapshot() !== phase) navMotion.set(phase)
+    if (phase === 'idle') delete document.body.dataset.btNavMotion
+    else document.body.dataset.btNavMotion = phase
+    if (x === undefined) document.body.style.removeProperty('--bt-nav-x')
+    else document.body.style.setProperty('--bt-nav-x', x)
+    // The page that is being left yields a little, so the two move as one gesture.
+    if (listX === undefined) document.body.style.removeProperty('--bt-nav-list-x')
+    else document.body.style.setProperty('--bt-nav-list-x', listX)
+  }
+  const runMotion = (phase, { from, to, listFrom, listTo, done, ms = NAV_MOTION_MS }) => {
+    clearTimeout(motionTimer)
+    const start = () => {
+      setMotion(phase, to, listTo)
+      motionTimer = setTimeout(() => {
+        setMotion('idle')
+        done?.()
+      }, ms + 40)
+    }
+    // Seating the start is only needed when the page is somewhere else: a drag that ends
+    // where it already is, or a return from rest, starts its transition in this frame — the
+    // two ways back have to begin alike.
+    const now = document.body.style.getPropertyValue('--bt-nav-x') || '0px'
+    if (now === from) start()
+    else {
+      setMotion('hold', from, listFrom)
+      requestAnimationFrame(start)
+    }
+  }
+  const syncNav = () => {
+    // A plain (DSH Agent) Session keeps the phone's two levels too: the shell's own
+    // conversation is the page, and the list is the way back to it.
+    const nav = mobileNav.getSnapshot()
+    if (nav) document.body.dataset.btNav = navLevel.getSnapshot()
+    else delete document.body.dataset.btNav
+    coverConversation(nav && navLevel.getSnapshot() === 'list')
+  }
+  ctx.effect(() => {
+    const watch = watchMobileNav((value) => { mobileNav.set(value); navLevel.set('list') })
+    mobileNav.set(watch.read())
+    // The shell's frame is not up yet when the plugin boots, so the level is re-synced on
+    // the state that arrives after it is: the roster and the session list.
+    const offs = [mobileNav.subscribe(syncNav), navLevel.subscribe(syncNav), surface.subscribe(syncNav), roster.subscribe(syncNav), ctx.sessions.list.subscribe(syncNav)]
+    syncNav()
+    return () => {
+      watch.dispose()
+      for (const off of offs) off()
+      delete document.body.dataset.btNav
+      coverConversation(false)
+    }
+  }, 'ds-bot: mobile navigation')
+  ctx.effect(() => installSwipeBack({
+    // Only a conversation the reader is looking at: not a dialog, not the details pane.
+    canStart: () => mobileNav.getSnapshot() && navLevel.getSnapshot() === 'chat'
+      && ui.getSnapshot().details === null && ui.getSnapshot().settings === null && ui.getSnapshot().newChat === null,
+    onStart: () => setMotion('drag', '0px'),
+    onMove: (x, width) => {
+      document.body.style.setProperty('--bt-nav-x', `${x}px`)
+      document.body.style.setProperty('--bt-nav-list-x', `${(-18 * (1 - x / width)).toFixed(1)}px`)
+    },
+    onCommit: () => actions.goBack(),
+    onCancel: () => runMotion('cancel', {
+      from: document.body.style.getPropertyValue('--bt-nav-x') || '0px',
+      to: '0px',
+      listFrom: document.body.style.getPropertyValue('--bt-nav-list-x') || '-18px',
+      listTo: '-18px',
+    }),
+  }), 'ds-bot: edge swipe back')
+  // The shell's right sidebar loads after this plugin, so the rule is installed when it
+  // arrives; it is the shell's own face, never a patched shell.
+  ctx.inject(['sidebarRight'], (scope) => {
+    scope.effect(() => installRightColumns({
+      ui,
+      isDesktop: () => !mobileNav.getSnapshot(),
+      rightbar: scope.sidebarRight,
+      onError: error => actions.reportError(error, 'right-sidebar'),
+    }), 'ds-bot: one right column at a time')
+  })
+  ctx.effect(() => {
+    const onFocusIn = (event) => {
+      if (!mobileNav.getSnapshot()) return
+      const field = composerField(event.target)
+      if (field === null) return
+      if (Date.now() - composerTappedAt < COMPOSER_TAP_MS) return
+      field.blur()
+    }
+    const onPointerDown = (event) => {
+      if (!mobileNav.getSnapshot()) return
+      if (composerField(event.target) !== null) composerTappedAt = Date.now()
+    }
+    document.addEventListener('focusin', onFocusIn, true)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      document.removeEventListener('focusin', onFocusIn, true)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+    }
+  }, 'ds-bot: the phone keeps its keyboard down')
   ctx.effect(() => noticeApprovals({
     work,
     roster,
@@ -608,7 +891,7 @@ export function apply(ctx) {
           return binding === undefined ? undefined : triggers.sessionOf(binding.ctx)
         }
         const launched = sessionId => controllerOf(sessionId)?.launcher.getSnapshot() === CHATS_SOURCE
-        const offs = atSources({ roster, sessions: ctx.sessions, launched, iconFor: menuIcons(roster) }).map(source => triggers.registerSource(source))
+        const offs = [...atSources({ roster, sessions: ctx.sessions, launched, iconFor: menuIcons(roster) }), quoteSource()].map(source => triggers.registerSource(source))
         atMenu = { controllerOf }
         return () => {
           atMenu = null
@@ -618,6 +901,98 @@ export function apply(ctx) {
     })
     return () => fiber.dispose()
   }
+  // A reply quotes the message as a structured reference: the composer shows one compact chip
+  // and the model reads the same `> Name: …` line the quote card parses. A refused insertion
+  // is reported, never replaced with raw text.
+  const quoteFacade = (sessionId) => {
+    const binding = sessionId === undefined ? undefined : ctx.sessions.binding(sessionId)
+    const conversation = ctx.get('conversation')
+    if (binding === undefined || conversation === undefined) return undefined
+    try { return conversation.input.for(binding.ctx) } catch { return undefined }
+  }
+  // One pending reply per Session, kept until the reader cancels it or the draft it quotes in
+  // is gone. A Session switch neither clears the state nor the text the shell restores.
+  const quoteOf = token => Object.values(ui.getSnapshot().quotes ?? {}).find(entry => entry.token === token)
+  const setQuote = (token, patch) => ui.set((state) => {
+    const entry = Object.values(state.quotes ?? {}).find(row => row.token === token)
+    if (entry === undefined) return state
+    const next = patch(entry)
+    if (next === null) {
+      const quotes = { ...state.quotes }
+      delete quotes[entry.sessionId]
+      return { ...state, quotes }
+    }
+    return { ...state, quotes: { ...state.quotes, [entry.sessionId]: next } }
+  })
+  actions.quote = (sessionId, text, bot, target) => {
+    const facade = quoteFacade(sessionId)
+    if (facade === undefined) {
+      actions.reportError(new Error('no composer to quote into'), 'quote')
+      return
+    }
+    const { ref, clipboardText, label, excerpt } = quoteRef(bot, text)
+    const quote = { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, target: target instanceof Element ? target : null, token: Date.now(), inserted: false }
+    ui.set(state => ({ ...state, quotes: { ...state.quotes, [sessionId]: quote } }))
+  }
+  actions.quoteInsert = (token, span, quiet = false) => {
+    const quote = quoteOf(token)
+    if (quote === undefined || span === undefined) return false
+    const facade = quoteFacade(quote.sessionId)
+    if (facade === undefined) return false
+    let inserted = false
+    try {
+      inserted = facade.insertReference({ source: QUOTE_SOURCE, ref: quote.ref, label: quote.label, appearance: 'session', clipboardText: quote.clipboardText }, span) === true
+    } catch (error) {
+      actions.reportError(error, 'quote-reference')
+    }
+    if (!inserted) {
+      if (!quiet) {
+        facade.notify?.('error', t('Could not quote this message'))
+        setQuote(token, () => null)
+      }
+      return false
+    }
+    setQuote(token, entry => ({ ...entry, inserted: true }))
+    return true
+  }
+  // Cancel takes the quoted line out of the draft, keeping whatever the reader typed around it.
+  actions.quoteCancel = (token) => {
+    const quote = quoteOf(token)
+    if (quote === undefined) return
+    const facade = quoteFacade(quote.sessionId)
+    if (facade !== undefined) {
+      const draft = facade.state.getSnapshot().draft
+      if (draft.includes(quote.clipboardText)) {
+        const left = draft.replace(quote.clipboardText, '')
+        facade.setDraft(left.trim() === '' ? '' : left)
+      }
+    }
+    setQuote(token, () => null)
+  }
+  // The bar asks for this when the draft it quoted in no longer holds the quote.
+  actions.clearQuote = token => setQuote(token, () => null)
+  // A restored draft is plain text: these let the composer rebuild the chip and put the
+  // reader's own words back after it, or fall back to the text when the chip is refused.
+  actions.quoteDraft = (sessionId) => {
+    const facade = quoteFacade(sessionId)
+    if (facade === undefined) return null
+    const state = facade.state.getSnapshot()
+    return { draft: state.draft, occurrences: state.occurrences ?? [] }
+  }
+  actions.quoteTakeText = (sessionId, clipboardText) => {
+    const facade = quoteFacade(sessionId)
+    if (facade === undefined) return null
+    const draft = facade.state.getSnapshot().draft
+    const at = draft.indexOf(clipboardText)
+    if (at < 0) return null
+    const rest = `${draft.slice(0, at)}${draft.slice(at + clipboardText.length)}`.replace(/^\s+/, '')
+    facade.setDraft('')
+    return rest
+  }
+  actions.quotePutText = (sessionId, text) => {
+    const facade = quoteFacade(sessionId)
+    if (facade !== undefined) facade.setDraft(text)
+  };
   actions.canReferenceChat = () => atMenu !== null
   actions.referenceChat = (sessionId, span) => {
     const controller = atMenu?.controllerOf(sessionId)
@@ -631,11 +1006,13 @@ export function apply(ctx) {
   const installShell = () => [
     () => installCompiledStyles(SHELL_CSS, 'shell'),
     () => installCompiledStyles(SIDEBAR_CSS, 'sidebar'),
+    () => installCompiledStyles(BOARD_CSS, 'project-board'),
     () => installCompiledStyles(SECRET_CSS, 'secrets'),
     () => installCompiledStyles(MODEL_CSS + FOLDER_CSS + BOT_SETTINGS_CSS + GROUP_SETTINGS_CSS, 'models'),
     () => installCompiledStyles(USAGE_CSS, 'usage'),
     () => installCompiledStyles(SCHEDULE_CSS, 'schedules'),
     () => installCompiledStyles(FEEDBACK_CSS, 'feedback'),
+    () => installCompiledStyles(HINT_CSS, 'hint'),
     () => installCompiledStyles(ABOUT_CSS, 'about'),
     () => installCompiledStyles(MEMBER_CSS, 'members'),
     () => installCompiledStyles(USER_MESSAGE_CSS, 'user-messages'),
@@ -651,8 +1028,12 @@ export function apply(ctx) {
     // Desktop's "··· More"), which comes back in Agent mode.
     () => shadow('settings.launcher', { priority: BOT_PRIORITY, inject: face }, AccountLauncher),
     () => shadow('shell.overlay', { id: 'bot', order: 50, inject: face }, Overlays),
+    () => shadow('shell.overlay', { id: 'bot-project-board', order: 52, inject: face }, ProjectBoard),
     () => shadow('shell.overlay', { id: 'bot-signin', order: 55, inject: face }, DeepSeekSignIn),
     () => shadow('shell.overlay', { id: 'bot-toast', order: 60, inject: face }, ErrorToast),
+    // A plain Session withdraws the conversation group, so the way back to the list lives in
+    // the shell's own header instead: its leading seat, which the Bot surface leaves empty.
+    () => shadow('conversation.header.leading', { priority: BOT_PRIORITY, inject: face }, PlainBack),
   ]
   const installConversation = () => [
     () => installCompiledStyles(CONVERSATION_CSS, 'conversation'),
@@ -684,6 +1065,9 @@ export function apply(ctx) {
       priority: BOT_PRIORITY,
       select: owner => (owner.pendingInteraction?.kind === 'question' ? owner.pendingInteraction : null),
     }, QuestionCard),
+    // The quote bar sits under every other dock, so it always hugs the composer the reader is
+    // about to type in.
+    () => shadow('conversation.input.dock', { id: 'bot-quote', order: 1000, inject: face }, ComposerQuote),
     () => shadow('conversation.input.dock', { id: 'bot-members', order: -120, inject: face }, MemberDock),
     () => shadow('conversation.input.dock', { id: 'bot-model', order: -110, inject: face }, ModelChoiceDock),
     () => shadow('conversation.input.dock', { id: 'bot-question', order: -100, inject: face }, QuestionDock),

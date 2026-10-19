@@ -135,6 +135,17 @@ const until = async (check) => {
   }
 }
 const textOf = message => message.content.map(block => block.text ?? '').join('\n')
+
+test('a requirement task refuses to move to the team folder when its project disappears', async t => {
+  const saved = structuredClone(TEAM)
+  saved.rooms.r1.boardCardId = 'requirement'
+  saved.rooms.r1.workDir = join(tmpdir(), 'missing-board-project-' + Date.now())
+  const fixture = await start({ team: saved })
+  t.after(fixture.stop)
+  await assert.rejects(fixture.preStep('gb'), /requirement project directory/)
+  assert.deepEqual(fixture.created, [])
+  assert.equal(fixture.state().rooms.r1.workDir, saved.rooms.r1.workDir)
+})
 const handoffOf = agent => agent.calls.filter(([kind, message]) => kind === 'followup' && message.source?.role === 'handoff').map(([, message]) => textOf(message)).at(-1)
 
 // Approvals that answer `outcome` and keep every request. Sessions run in `mode`, the

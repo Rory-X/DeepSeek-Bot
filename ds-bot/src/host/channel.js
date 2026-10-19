@@ -31,20 +31,23 @@ export function install(rt) {
   const modelsKey = () => `${rt.cachedCatalog().map(entry => `${entry.ref}${entry.needsKey ? '!' : ''}${entry.reasoning ? `:${JSON.stringify(entry.reasoning)}` : ''}`).join(',')}|${rt.cachedDefault() ?? ''}`
   const view = () => ({
     revision: state.revision,
+    boardPending: rt.boardPending(),
     workspaceId: state.workspaceId ?? null,
     // `mainBotId` is the first Main Bot, which the sidebar shows as its tile.
     mainBotId: state.mainBotIds[0] ?? null,
     mainBotIds: state.mainBotIds,
     // `sessionId` is the Bot's current own-chat part; `parts` its earlier ones.
+    // `lastActivity`: when its newest message came or went, in ms since the epoch.
     // `waiting`: the Bot holds its greeting until the user picks its model.
     bots: Object.values(state.bots).map(({ segments, kickoff, ...bot }) => ({
-      ...bot, sessionId: rt.chatOf(bot.id), parts: (segments ?? []).map(segment => segment.sessionId), ...(kickoff ? { waiting: true } : {}),
+      ...bot, sessionId: rt.chatOf(bot.id), parts: (segments ?? []).map(segment => segment.sessionId), lastActivity: rt.lastActivityOf(bot.id), ...(kickoff ? { waiting: true } : {}),
     })),
     // `parts`: the members' hidden group Sessions and their earlier segments, for usage.
+    // `lastActivity`: when the group's newest line or message was, in ms since the epoch.
     rooms: Object.values(state.rooms).map(({ log, seen, lateRounds, sessions, segments, ...room }) => {
       const parts = [...Object.values(sessions ?? {}), ...Object.values(segments ?? {}).flat().map(segment => segment.sessionId)]
       const last = (log ?? []).filter(line => line.kind === undefined).at(-1)
-      return { ...room, parts, ...(last ? { preview: last.who === 'User' ? last.text : `${last.who}：${last.text}` } : {}) }
+      return { ...room, parts, lastActivity: rt.roomActivityOf(room.id), ...(last ? { preview: last.who === 'User' ? last.text : `${last.who}：${last.text}` } : {}) }
     }),
     exchangeTurns: state.exchangeTurns,
     questions: state.questions,
@@ -82,7 +85,7 @@ export function install(rt) {
   })
   // What a host that only reads the team may still answer.
   // Updates change the dsh profile, not the team, so a reading host may run them too.
-  const READS = new Set(['state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer'])
+  const READS = new Set(['board-view', 'state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer'])
 
   function setPrefs(body) {
     if (body.theme !== undefined) {
@@ -109,6 +112,22 @@ export function install(rt) {
       const readOnly = rt.readOnly()
       if (readOnly !== undefined && !READS.has(endpoint)) return fail(readOnly, 'bot/read-only')
       switch (endpoint) {
+        case 'board-view':
+          await rt.load()
+          return ok(rt.boardView())
+        case 'board-background-resolve':
+          await rt.load()
+          return ok(await rt.boardResolveBackground(body))
+        case 'board-create':
+        case 'board-edit':
+        case 'board-start':
+        case 'board-retry':
+        case 'board-pause':
+        case 'board-resume':
+        case 'board-cancel':
+        case 'board-decide':
+          await rt.load()
+          return ok(await rt.boardMutate(endpoint, body))
         case 'state':
           if (typeof body.locale === 'string' && /^[a-z]{2,3}(-[\w-]+)?$/i.test(body.locale)) uiLocale = body.locale
           if (readOnly === undefined) await rt.bootstrap()
@@ -275,6 +294,7 @@ export function install(rt) {
         case 'connector-connect':
         case 'connector-disconnect':
         case 'connector-retry':
+        case 'connector-set-actions':
           await rt.load()
           return ok(await rt.connectorEndpoint(endpoint, body))
         case 'capability-save':

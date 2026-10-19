@@ -175,6 +175,7 @@ export function install(rt) {
     const log = [...room.log, keepGroupLine(room.id, { ...line, seq: room.seq }, line.text ?? '')]
     for (const gone of log.slice(0, -ROOM_LOG_MAX)) dropGroupLine(room.id, gone)
     room.log = log.slice(-ROOM_LOG_MAX)
+    rt.noteRoomActivity?.(room.id)
   }
   Object.assign(rt, { keepGroupLine, dropGroupLines })
 
@@ -182,13 +183,14 @@ export function install(rt) {
   // a fresh look at the log and a brief of the member's own chat; the brief is the
   // first message, so it stays fixed and the prefix stays cacheable.
   async function groupSessionFor(room, member) {
+    ensureRoomLog(room)
     room.sessions ??= {}
     const known = room.sessions[member.id]
     if (known !== undefined) {
       await rt.ensureCapabilities(known)
       return { id: known, brief: undefined }
     }
-    const id = await rt.createSession(`${member.name} · ${room.name}`, { dir: rt.workDirOf({ botId: member.id, roomId: room.id }) })
+    const id = await rt.createSession(`${member.name} · ${room.name}`, { dir: rt.workDirOf({ botId: member.id, roomId: room.id }), strictDir: Boolean(room.boardCardId) })
     // While the Session was made the member may have left or been deleted, the group been
     // deleted, or another turn made the member's Session first: the new one is not kept.
     // Undefined means the member is gone from the group.
@@ -212,6 +214,7 @@ export function install(rt) {
     await rt.ensureCapabilities(id)
     return { id, brief: await rt.ownChatBrief(member) }
   }
+  rt.groupSessionFor = groupSessionFor
 
   // Lines from before the round's opening message are kept apart from this round, so
   // an earlier round (an old count-off, say) never reads as part of the current one.
