@@ -55,6 +55,9 @@ function ConnectorRow({ connector, actions }) {
     void run(actions.connectorConnect(connector.id, token), () => { setToken(''); setForm(false) })
   }
   const on = connector.state !== 'off'
+  // `actions` is absent for a connector without write actions; a boolean says whether the
+  // Bot may run them, and every run asks the user first.
+  const actionsOn = connector.actions === true
   const Mark = MARKS[connector.id]
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
@@ -69,6 +72,18 @@ function ConnectorRow({ connector, actions }) {
         on
           ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => void run(actions.connectorDisconnect(connector.id)) }, t('Disconnect'))
           : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => setForm(true) }, t('Connect')))),
+    typeof connector.actions === 'boolean'
+      ? h('div', { className: 'bt-connector-action-row', 'data-on': actionsOn || undefined },
+        h('div', { className: 'bt-connector-action-text' },
+          h('div', { className: 'bt-connector-action-title' }, t('Allow actions')),
+          h('div', { className: 'bt-connector-action-note' }, actionsOn
+            ? t('Each run asks for your approval')
+            : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'))),
+        h('button', {
+          type: 'button', role: 'switch', className: 'bt-switch', 'aria-checked': actionsOn, 'aria-label': t('Allow actions'),
+          disabled: busy, onClick: () => void run(actions.connectorSetActions(connector.id, !actionsOn)),
+        }, h('span', { className: 'bt-switch-knob', 'aria-hidden': true })))
+      : null,
     !on && form ? h('div', { className: 'bt-connector-form' },
       h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),
       h('div', { className: 'bt-connector-form-row' },
