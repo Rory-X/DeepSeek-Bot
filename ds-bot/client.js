@@ -2414,6 +2414,8 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-tile[aria-current=page]{background:var(--bt-active)}
 .bt-tile-name{font-size:13px;line-height:18px;font-weight:400;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-chip{font-size:11px;line-height:16px;padding:1px 4px;border-radius:4px;background:var(--bt-hover);border:1px solid var(--bt-line);color:var(--bt-ink-2);white-space:nowrap;max-width:84px;overflow:hidden;text-overflow:ellipsis}
+/* The Main Bot's card while it works: the rows' own line, at the card's width. */
+.bt-tile-state{font-size:11px;line-height:16px;max-width:84px;overflow:hidden}
 .bt-row{display:flex;align-items:center;gap:8px;min-height:54px;padding:8px;border:0;border-radius:10px;background:transparent;color:var(--bt-ink);text-align:left;cursor:pointer;width:100%;box-sizing:border-box;font-family:inherit;transition:background-color .12s ease}
 .bt-row:hover{background:var(--bt-hover)}
 .bt-row[aria-current=page]{background:var(--bt-active)}
@@ -5625,7 +5627,11 @@ var stateLine = (className, at, ...what) => (0, import_react9.createElement)(
   (0, import_react9.createElement)("span", { className: "bt-member-what" }, ...what),
   typeof at === "number" ? (0, import_react9.createElement)(Elapsed, { at, className: "bt-member-time" }) : null
 );
-var workStateLine = (doing, where, className = "bt-member-state") => stateLine(className, doing?.since, (0, import_react9.createElement)(Shimmer, null, `${workPhrase(doing)}…`), where ? ` ${where}` : "");
+var workStateLine = ({ doing, where = "", lead = "", more = 0, className = "bt-member-state" }) => stateLine(className, doing?.since, (0, import_react9.createElement)(
+  Shimmer,
+  null,
+  `${lead ? `${lead} · ` : ""}${workPhrase(doing)}…${more > 0 ? ` +${more}` : ""}${where ? ` ${where}` : ""}`
+));
 function ApprovalCard({ approval, bot, actions }) {
   const [busy, setBusy] = (0, import_react9.useState)(false);
   const answer = (choice) => {
@@ -5655,7 +5661,7 @@ function MemberState({ entry, bot, room: room2, roster }) {
   if (entry?.state === "ask") return stateLine("bt-member-state bt-mw-ask", entry.approvals[0].at, t("Waiting for your approval"));
   if (entry?.state !== "work") return bot.role ? stateLine("bt-member-state", void 0, bot.role) : null;
   const where = entry.doing.roomId === room2.id ? "" : entry.doing.roomId ? t("in {name}", { name: roster.roomsById[entry.doing.roomId]?.name ?? t("a group chat") }) : t("in its own chat");
-  return workStateLine(entry.doing, where);
+  return workStateLine({ doing: entry.doing, where });
 }
 function StopMemberWork({ entry, bot, room: room2, actions }) {
   const [stopping, setStopping] = (0, import_react9.useState)(false);
@@ -5749,7 +5755,6 @@ var useApproval = (useWork, match) => useWork ? useWork((work) => (work.approval
 var useGroupWork = (useWork, pick2) => useWork ? useWork((work) => JSON.stringify(pick2(work.rooms ?? {}))) : "[]";
 var workKeys = (text) => JSON.parse(text);
 var doingOf = ({ tool, said, note, target, switching, since }) => ({ tool, said, note, target, switching, since });
-var workLine = (lead, doing, more) => (0, import_react10.createElement)(Shimmer, null, `${lead} · ${workPhrase(doing)}…${more > 0 ? ` +${more}` : ""}`);
 var waitingFor = (roster, waits) => {
   const names = [...(waits?.bots ?? []).map((id) => roster.byId[id]?.name), ...(waits?.rooms ?? []).map((id) => roster.roomsById[id]?.name)].filter(Boolean);
   return names.length === 0 ? "" : t("Waiting for {names}", { names: names.join(t(" and ")) });
@@ -5772,7 +5777,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   const own = workKeys(useWork ? useWork((work) => JSON.stringify(work.bots?.[id] ?? null)) : "null");
   const state = botState(running || away, doing, alert);
   const busy = running && own !== null && own.roomId === void 0 ? { doing: own, where: t("in its own chat") } : away ? { doing: groups[0], where: t("in {name}", { name: roster.roomsById[groups[0].id]?.name ?? t("a group chat") }) } : null;
-  const busyLine = busy ? workStateLine(busy.doing, busy.where, "bt-member-state bt-row-state") : null;
+  const busyLine = busy ? workStateLine({ ...busy, className: "bt-member-state bt-row-state" }) : null;
   const waits = workKeys(useWork ? useWork((work) => JSON.stringify(work.waiting?.[id] ?? null)) : "null");
   const waitsFor = state === "waiting" ? waitingFor(roster, waits) : "";
   if (bot.hidden && !active && !main) return null;
@@ -5797,7 +5802,9 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
       },
       (0, import_react10.createElement)(BotAvatar, { bot, size: 60, state, main: true }),
       (0, import_react10.createElement)("span", { className: "bt-tile-name" }, bot.name),
-      bot.role ? (0, import_react10.createElement)("span", { className: "bt-chip" }, bot.role) : null
+      bot.role ? (0, import_react10.createElement)("span", { className: "bt-chip" }, bot.role) : null,
+      // While the Main Bot works, its card says so: the rows' own line at the card's size.
+      busy ? workStateLine({ ...busy, className: "bt-member-state bt-tile-state" }) : null
     ));
   }
   return (0, import_react10.createElement)(
@@ -5833,7 +5840,7 @@ function RoomRow({ room: room2, roster, actions, useSessions, useSessionStatus, 
   const approval = useApproval(useWork, (entry) => entry.roomId === id);
   const members = workKeys(useGroupWork(useWork, (rooms) => (rooms[id] ?? []).map((entry) => ({ id: entry.botId, ...doingOf(entry) }))));
   const first = roster.byId[members[0]?.id];
-  const workingLine = first ? workLine(first.name, members[0], members.length - 1) : null;
+  const workingLine = first ? workStateLine({ doing: members[0], lead: first.name, more: members.length - 1, className: "bt-member-state bt-row-state" }) : null;
   if (room2.hidden && !active) return null;
   const pinned = room2.pinned === true;
   const label = [room2.name, pinned ? t("Pinned") : "", members.length > 0 ? t("Working") : "", approval ? t("Waiting for your approval") : ""].filter(Boolean).join(", ");

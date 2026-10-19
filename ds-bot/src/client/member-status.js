@@ -128,10 +128,12 @@ const stateLine = (className, at, ...what) => h('span', { className },
   h('span', { className: 'bt-member-what' }, ...what),
   typeof at === 'number' ? h(Elapsed, { at, className: 'bt-member-time' }) : null)
 
-// What a Bot at work is doing, where, and for how long. The group's member list and the
-// Bot list draw the same line; a caller names its own class for its own size.
-export const workStateLine = (doing, where, className = 'bt-member-state') =>
-  stateLine(className, doing?.since, h(Shimmer, null, `${workPhrase(doing)}…`), where ? ` ${where}` : '')
+// What a Bot at work is doing, where, and for how long. The group's member list, a Bot's
+// row and a group's own row draw the same line; a caller names its own class, and the name
+// in front or the count behind when it has them.
+export const workStateLine = ({ doing, where = '', lead = '', more = 0, className = 'bt-member-state' }) =>
+  stateLine(className, doing?.since, h(Shimmer, null,
+    `${lead ? `${lead} · ` : ''}${workPhrase(doing)}…${more > 0 ? ` +${more}` : ''}${where ? ` ${where}` : ''}`))
 
 function ApprovalCard({ approval, bot, actions }) {
   const [busy, setBusy] = useState(false)
@@ -161,7 +163,7 @@ export function MemberState({ entry, bot, room, roster }) {
   const where = entry.doing.roomId === room.id ? ''
     : entry.doing.roomId ? t('in {name}', { name: roster.roomsById[entry.doing.roomId]?.name ?? t('a group chat') })
       : t('in its own chat')
-  return workStateLine(entry.doing, where)
+  return workStateLine({ doing: entry.doing, where })
 }
 
 // Work in this group can be stopped from its details, since the user cannot reach the
