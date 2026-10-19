@@ -1,6 +1,6 @@
 // A reply quotes the message it answers: the composer shows a bar for the quote while it is
 // still in the draft, and the sent bubble draws the quoted line as a card above the words.
-import { createElement as h, useEffect } from 'react'
+import { createElement as h, useEffect, useLayoutEffect, useRef } from 'react'
 import { BotMark, colorOf } from './mark.js'
 import { inkText } from './inks.js'
 import { t } from './i18n.js'
@@ -8,13 +8,38 @@ import { CloseIcon } from './icons.js'
 
 // The excerpt a quote keeps, in characters; the rest of the message stays out of it.
 const QUOTE_LIMIT = 200
+// The trigger source that carries a quote as a structured reference instead of text: the
+// composer keeps one compact chip, and the model reads the same `> Name: …` line the quote
+// card parses when the message is sent.
+export const QUOTE_SOURCE = 'ds-bot-quote'
 
-// The line Reply puts into the draft. The Bot's name rides along so the sent bubble can
-// show who the reply answers.
-export function quoteLine(bot, text) {
+function excerptOf(text) {
   const excerpt = String(text ?? '').replace(/\s+/g, ' ').trim()
-  const kept = excerpt.length > QUOTE_LIMIT ? `${excerpt.slice(0, QUOTE_LIMIT)}…` : excerpt
-  return bot?.name ? `> ${bot.name}: ${kept}` : `> ${kept}`
+  return excerpt.length > QUOTE_LIMIT ? `${excerpt.slice(0, QUOTE_LIMIT)}…` : excerpt
+}
+
+// What a quote reference becomes in the model's message, and in the draft's clipboard view.
+export function modelText(ref) {
+  let parsed
+  try { parsed = JSON.parse(ref) } catch { parsed = null }
+  if (parsed === null) return ''
+  return parsed.name ? `> ${parsed.name}: ${parsed.excerpt}\n\n` : `> ${parsed.excerpt}\n\n`
+}
+
+export function quoteRef(bot, text) {
+  const excerpt = excerptOf(text)
+  const ref = JSON.stringify({ botId: bot?.id ?? null, name: bot?.name ?? null, excerpt })
+  return { ref, clipboardText: modelText(ref), label: bot?.name ?? '', excerpt }
+}
+
+export function quoteSource() {
+  return {
+    trigger: '@',
+    name: QUOTE_SOURCE,
+    async candidates() { return [] },
+    onPick: () => undefined,
+    codec: { clipboardText: ref => modelText(ref), serialize: async ref => modelText(ref) },
+  }
 }
 
 // Split a message into the quote its leading `> ` lines carry and the words that follow.
@@ -56,38 +81,54 @@ export function QuoteCard({ quote, roster }) {
     h('div', { className: 'bt-quote-text' }, quote.text))
 }
 
-// The bar above the composer: who the reply answers, the quoted line, and a way out.
+// The bar above the composer: who the reply answers, the quoted line, and a way out. It
+// spans exactly the composer's input, so the two line up at both widths.
 export function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, actions }) {
   const roster = useRoster(value => value)
   const quote = useUi(state => (state.quote?.sessionId === sessionId ? state.quote : null))
-  const draft = useInput === undefined ? '' : useInput(state => state.draft)
+  const draft = useInput === undefined ? null : useInput(state => state.draft)
   const bot = quote === null ? undefined : (quote.botId ? roster.byId[quote.botId] : undefined)
-  // The quote is put into the draft once, when the Reply button sets it.
+  const bar = useRef(null)
+  // The quote goes into the composer once, as the reference chip the source defines.
   useEffect(() => {
-    if (quote === null || inputActions === undefined || quote.inserted !== null) return
-    const line = quoteLine(bot ?? { name: quote.botName }, quote.text)
-    if (inputActions.insertText(`${line}\n\n`, inputActions.captureInsertion())) actions.setQuoteInserted(quote.token, line)
-  }, [quote?.token])
-  // Sent, cleared or edited away: the bar leaves with the line.
+    if (quote === null || quote.inserted !== false || inputActions === undefined) return
+    actions.quoteInsert(quote.token, inputActions.captureInsertion())
+  }, [quote?.token, quote?.inserted])
+  // Sent, cleared or deleted: the bar leaves with the chip.
   useEffect(() => {
-    if (quote === null || quote.inserted === null) return
-    if (!draft.includes(quote.inserted)) actions.clearQuote(quote.token)
+    if (quote === null || quote.inserted !== true || draft === null) return
+    if (!draft.includes(quote.clipboardText)) actions.clearQuote(quote.token)
   }, [draft, quote?.token, quote?.inserted])
-  if (quote === null) return null
-  const cancel = () => {
-    if (inputActions !== undefined && quote.inserted !== null && draft.includes(quote.inserted)) {
-      const left = draft.replace(`${quote.inserted}\n\n`, '').replace(quote.inserted, '')
-      inputActions.setDraft(left.trim() === '' ? '' : left)
+  // The bar takes the composer input's own box: width first, then the offset its own layout
+  // left it at, so it lines up with the input at both widths.
+  useLayoutEffect(() => {
+    if (quote === null) return undefined
+    const node = bar.current
+    const input = document.querySelector('[class*="_centerCol"] [role=textbox][contenteditable=true], [class*="_centerCol"] textarea')
+    if (node === null || input === null) return undefined
+    const measure = () => {
+      const inputBox = input.getBoundingClientRect()
+      node.style.marginLeft = '0px'
+      node.style.left = '0px'
+      node.style.width = `${Math.round(inputBox.width)}px`
+      const placed = node.getBoundingClientRect().left
+      node.style.position = 'relative'
+      node.style.left = `${Math.round(inputBox.left - placed)}px`
     }
-    actions.clearQuote(quote.token)
-  }
-  return h('div', { className: 'bt-quote-dock' },
-    bot ? h(BotMark, { bot, size: 18 }) : null,
-    h('div', { className: 'bt-quote-dock-main' },
-      h('div', { className: 'bt-quote-dock-who' }, bot ? t('Replying to {name}', { name: bot.name }) : t('Replying to a message')),
-      h('div', { className: 'bt-quote-dock-text' }, quote.text)),
-    h('button', {
-      type: 'button', className: 'bt-quote-dock-x', 'aria-label': t('Cancel reply'), title: t('Cancel reply'),
-      onClick: cancel,
-    }, h(CloseIcon)))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(input)
+    window.addEventListener('resize', measure)
+    return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
+  }, [quote !== null])
+  if (quote === null) return null
+  return h('div', { ref: bar, className: 'bt-quote-dock' },
+  bot ? h(BotMark, { bot, size: 18 }) : null,
+  h('div', { className: 'bt-quote-dock-main' },
+    h('div', { className: 'bt-quote-dock-who' }, bot ? t('Replying to {name}', { name: bot.name }) : t('Replying to a message')),
+    h('div', { className: 'bt-quote-dock-text' }, quote.excerpt)),
+  h('button', {
+    type: 'button', className: 'bt-quote-dock-x', 'aria-label': t('Cancel reply'), title: t('Cancel reply'),
+    onClick: () => actions.quoteCancel(quote.token),
+  }, h(CloseIcon)))
 }

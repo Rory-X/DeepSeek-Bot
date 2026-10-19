@@ -1121,7 +1121,7 @@ div:has(> nav [class*="_marks"]){display:none!important}
 [data-chat-flow-kind=question-reply]:has(.bt-q-inline),[data-chat-group-key]:has([data-chat-flow-kind=question-reply] .bt-q-inline),[data-chat-group-key]:has(.bt-q-gone){margin-top:0!important}
 .bt-q-inline .bt-q{margin:0;max-width:min(550px,86%);order:0}
 .bt-q-dock{width:100%;display:flex;justify-content:center}
-.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width,748px);margin:0 auto 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
+.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
 .bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px}
 .bt-quote-dock-who{font-size:12px;line-height:16px;font-weight:600;color:var(--bt-ink)}
 .bt-quote-dock-text{font-size:12px;line-height:16px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

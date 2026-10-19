@@ -44,9 +44,6 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, tur
       ui.set(state => (state.details && state.view !== view ? { ...state, view } : state))
     },
     closePanel: () => { ui.set(state => (state.details ? { ...state, details: null, view: 'details', renaming: false, tab: null } : state)) },
-    // `bot`: the Bot the quoted message came from, so the bubble can name it.
-    quote: (sessionId, text, bot) => ui.set(state => ({ ...state, quote: { sessionId, text, botId: bot?.id ?? null, botName: bot?.name ?? null, inserted: null, token: Date.now() } })),
-    setQuoteInserted: (token, line) => ui.set(state => (state.quote?.token === token ? { ...state, quote: { ...state.quote, inserted: line } } : state)),
     clearQuote: token => ui.set(state => (state.quote?.token === token ? { ...state, quote: null } : state)),
     setFlags: (id, flags) => after(call('set-flags', { id, ...flags })),
     deleteRoom: id => after(call('delete-room', { id })),

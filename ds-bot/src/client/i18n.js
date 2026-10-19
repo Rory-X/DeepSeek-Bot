@@ -476,6 +476,7 @@ const ZH = {
   'Replying to {name}': '正在回复 {name}',
   'Replying to a message': '正在回复一条消息',
   'Cancel reply': '取消回复',
+  'Could not quote this message': '这条消息没法引用',
   'Asked to make the tool call it wrote as text': '工具调用被写成了文字，已让它重新调用',
   'A Bot': '一个 Bot',
   '{name} is waiting for your approval': '{name} 等你批准',

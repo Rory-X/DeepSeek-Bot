@@ -15,7 +15,7 @@ import { lookOf } from './mark.js'
 import { TeamSidebar, ConnectPlugins, YouAvatar, AccountLauncher, FooterAccount, BrandMark, BrandName, BotReturn, SIDEBAR_CSS, RETURN_CSS, holdShellShortcuts, openHarnessOnboarding, openHarnessSettings } from './sidebar.js'
 import { HeaderPill, PlainBack } from './header.js'
 import { ComposerPlus, ComposerVoice, menuIcons } from './composer.js'
-import { ComposerQuote } from './quote.js'
+import { ComposerQuote, QUOTE_SOURCE, quoteRef, quoteSource } from './quote.js'
 import { CHATS_SOURCE, atSources } from './at-menu.js'
 import { VOICE_BUNDLE } from './speech.js'
 import { sameVersion } from './dsh-offer.js'
@@ -885,7 +885,7 @@ export function apply(ctx) {
           return binding === undefined ? undefined : triggers.sessionOf(binding.ctx)
         }
         const launched = sessionId => controllerOf(sessionId)?.launcher.getSnapshot() === CHATS_SOURCE
-        const offs = atSources({ roster, sessions: ctx.sessions, launched, iconFor: menuIcons(roster) }).map(source => triggers.registerSource(source))
+        const offs = [...atSources({ roster, sessions: ctx.sessions, launched, iconFor: menuIcons(roster) }), quoteSource()].map(source => triggers.registerSource(source))
         atMenu = { controllerOf }
         return () => {
           atMenu = null
@@ -895,6 +895,55 @@ export function apply(ctx) {
     })
     return () => fiber.dispose()
   }
+  // A reply quotes the message as a structured reference: the composer shows one compact chip
+  // and the model reads the same `> Name: …` line the quote card parses. A refused insertion
+  // is reported, never replaced with raw text.
+  const quoteFacade = (sessionId) => {
+    const binding = sessionId === undefined ? undefined : ctx.sessions.binding(sessionId)
+    const conversation = ctx.get('conversation')
+    if (binding === undefined || conversation === undefined) return undefined
+    try { return conversation.input.for(binding.ctx) } catch { return undefined }
+  }
+  actions.quote = (sessionId, text, bot) => {
+    const facade = quoteFacade(sessionId)
+    if (facade === undefined) {
+      actions.reportError(new Error('no composer to quote into'), 'quote')
+      return
+    }
+    const { ref, clipboardText, label, excerpt } = quoteRef(bot, text)
+    ui.set(state => ({
+      ...state,
+      quote: { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, before: facade.state.getSnapshot().draft, token: Date.now(), inserted: false },
+    }))
+  }
+  actions.quoteInsert = (token, span) => {
+    const quote = ui.getSnapshot().quote
+    if (quote === null || quote.token !== token || span === undefined) return
+    const facade = quoteFacade(quote.sessionId)
+    if (facade === undefined) return
+    let inserted = false
+    try {
+      inserted = facade.insertReference({ source: QUOTE_SOURCE, ref: quote.ref, label: quote.label, appearance: 'session', clipboardText: quote.clipboardText }, span) === true
+    } catch (error) {
+      actions.reportError(error, 'quote-reference')
+    }
+    if (!inserted) {
+      facade.notify?.('error', t('Could not quote this message'))
+      ui.set(state => (state.quote?.token === token ? { ...state, quote: null } : state))
+      return
+    }
+    ui.set(state => (state.quote?.token === token ? { ...state, quote: { ...state.quote, inserted: true } } : state))
+  }
+  // Cancel puts the draft back as it was before the chip, when the chip is still there.
+  actions.quoteCancel = (token) => {
+    const quote = ui.getSnapshot().quote
+    if (quote === null || quote.token !== token) return
+    const facade = quoteFacade(quote.sessionId)
+    if (facade !== undefined && quote.inserted === true && facade.state.getSnapshot().draft.includes(quote.clipboardText)) {
+      facade.setDraft(quote.before ?? '')
+    }
+    ui.set(state => (state.quote?.token === token ? { ...state, quote: null } : state))
+  };
   actions.canReferenceChat = () => atMenu !== null
   actions.referenceChat = (sessionId, span) => {
     const controller = atMenu?.controllerOf(sessionId)

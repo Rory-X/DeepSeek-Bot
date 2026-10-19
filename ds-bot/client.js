@@ -532,6 +532,7 @@ var ZH = {
   "Replying to {name}": "正在回复 {name}",
   "Replying to a message": "正在回复一条消息",
   "Cancel reply": "取消回复",
+  "Could not quote this message": "这条消息没法引用",
   "Asked to make the tool call it wrote as text": "工具调用被写成了文字，已让它重新调用",
   "A Bot": "一个 Bot",
   "{name} is waiting for your approval": "{name} 等你批准",
@@ -1656,9 +1657,6 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     closePanel: () => {
       ui2.set((state) => state.details ? { ...state, details: null, view: "details", renaming: false, tab: null } : state);
     },
-    // `bot`: the Bot the quoted message came from, so the bubble can name it.
-    quote: (sessionId, text, bot) => ui2.set((state) => ({ ...state, quote: { sessionId, text, botId: bot?.id ?? null, botName: bot?.name ?? null, inserted: null, token: Date.now() } })),
-    setQuoteInserted: (token, line) => ui2.set((state) => state.quote?.token === token ? { ...state, quote: { ...state.quote, inserted: line } } : state),
     clearQuote: (token) => ui2.set((state) => state.quote?.token === token ? { ...state, quote: null } : state),
     setFlags: (id, flags) => after(call2("set-flags", { id, ...flags })),
     deleteRoom: (id) => after(call2("delete-room", { id })),
@@ -3457,7 +3455,7 @@ div:has(> nav [class*="_marks"]){display:none!important}
 [data-chat-flow-kind=question-reply]:has(.bt-q-inline),[data-chat-group-key]:has([data-chat-flow-kind=question-reply] .bt-q-inline),[data-chat-group-key]:has(.bt-q-gone){margin-top:0!important}
 .bt-q-inline .bt-q{margin:0;max-width:min(550px,86%);order:0}
 .bt-q-dock{width:100%;display:flex;justify-content:center}
-.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width,748px);margin:0 auto 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
+.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
 .bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px}
 .bt-quote-dock-who{font-size:12px;line-height:16px;font-weight:600;color:var(--bt-ink)}
 .bt-quote-dock-text{font-size:12px;line-height:16px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -3874,10 +3872,40 @@ var SETTINGS_ICONS = { general: GearIcon, bots: PeopleIcon, groups: ChatsIcon, u
 // src/client/quote.js
 var import_react4 = require("react");
 var QUOTE_LIMIT = 200;
-function quoteLine(bot, text) {
+var QUOTE_SOURCE = "ds-bot-quote";
+function excerptOf(text) {
   const excerpt = String(text ?? "").replace(/\s+/g, " ").trim();
-  const kept = excerpt.length > QUOTE_LIMIT ? `${excerpt.slice(0, QUOTE_LIMIT)}…` : excerpt;
-  return bot?.name ? `> ${bot.name}: ${kept}` : `> ${kept}`;
+  return excerpt.length > QUOTE_LIMIT ? `${excerpt.slice(0, QUOTE_LIMIT)}…` : excerpt;
+}
+function modelText(ref) {
+  let parsed;
+  try {
+    parsed = JSON.parse(ref);
+  } catch {
+    parsed = null;
+  }
+  if (parsed === null) return "";
+  return parsed.name ? `> ${parsed.name}: ${parsed.excerpt}
+
+` : `> ${parsed.excerpt}
+
+`;
+}
+function quoteRef(bot, text) {
+  const excerpt = excerptOf(text);
+  const ref = JSON.stringify({ botId: bot?.id ?? null, name: bot?.name ?? null, excerpt });
+  return { ref, clipboardText: modelText(ref), label: bot?.name ?? "", excerpt };
+}
+function quoteSource() {
+  return {
+    trigger: "@",
+    name: QUOTE_SOURCE,
+    async candidates() {
+      return [];
+    },
+    onPick: () => void 0,
+    codec: { clipboardText: (ref) => modelText(ref), serialize: async (ref) => modelText(ref) }
+  };
 }
 function splitQuote(text) {
   const lines = String(text ?? "").split("\n");
@@ -3918,45 +3946,57 @@ function QuoteCard({ quote, roster }) {
 function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, actions }) {
   const roster = useRoster((value) => value);
   const quote = useUi((state) => state.quote?.sessionId === sessionId ? state.quote : null);
-  const draft = useInput === void 0 ? "" : useInput((state) => state.draft);
+  const draft = useInput === void 0 ? null : useInput((state) => state.draft);
   const bot = quote === null ? void 0 : quote.botId ? roster.byId[quote.botId] : void 0;
+  const bar = (0, import_react4.useRef)(null);
   (0, import_react4.useEffect)(() => {
-    if (quote === null || inputActions === void 0 || quote.inserted !== null) return;
-    const line = quoteLine(bot ?? { name: quote.botName }, quote.text);
-    if (inputActions.insertText(`${line}
-
-`, inputActions.captureInsertion())) actions.setQuoteInserted(quote.token, line);
-  }, [quote?.token]);
+    if (quote === null || quote.inserted !== false || inputActions === void 0) return;
+    actions.quoteInsert(quote.token, inputActions.captureInsertion());
+  }, [quote?.token, quote?.inserted]);
   (0, import_react4.useEffect)(() => {
-    if (quote === null || quote.inserted === null) return;
-    if (!draft.includes(quote.inserted)) actions.clearQuote(quote.token);
+    if (quote === null || quote.inserted !== true || draft === null) return;
+    if (!draft.includes(quote.clipboardText)) actions.clearQuote(quote.token);
   }, [draft, quote?.token, quote?.inserted]);
+  (0, import_react4.useLayoutEffect)(() => {
+    if (quote === null) return void 0;
+    const node = bar.current;
+    const input = document.querySelector('[class*="_centerCol"] [role=textbox][contenteditable=true], [class*="_centerCol"] textarea');
+    if (node === null || input === null) return void 0;
+    const measure = () => {
+      const inputBox = input.getBoundingClientRect();
+      node.style.marginLeft = "0px";
+      node.style.left = "0px";
+      node.style.width = `${Math.round(inputBox.width)}px`;
+      const placed = node.getBoundingClientRect().left;
+      node.style.position = "relative";
+      node.style.left = `${Math.round(inputBox.left - placed)}px`;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(input);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [quote !== null]);
   if (quote === null) return null;
-  const cancel = () => {
-    if (inputActions !== void 0 && quote.inserted !== null && draft.includes(quote.inserted)) {
-      const left = draft.replace(`${quote.inserted}
-
-`, "").replace(quote.inserted, "");
-      inputActions.setDraft(left.trim() === "" ? "" : left);
-    }
-    actions.clearQuote(quote.token);
-  };
   return (0, import_react4.createElement)(
     "div",
-    { className: "bt-quote-dock" },
+    { ref: bar, className: "bt-quote-dock" },
     bot ? (0, import_react4.createElement)(BotMark, { bot, size: 18 }) : null,
     (0, import_react4.createElement)(
       "div",
       { className: "bt-quote-dock-main" },
       (0, import_react4.createElement)("div", { className: "bt-quote-dock-who" }, bot ? t("Replying to {name}", { name: bot.name }) : t("Replying to a message")),
-      (0, import_react4.createElement)("div", { className: "bt-quote-dock-text" }, quote.text)
+      (0, import_react4.createElement)("div", { className: "bt-quote-dock-text" }, quote.excerpt)
     ),
     (0, import_react4.createElement)("button", {
       type: "button",
       className: "bt-quote-dock-x",
       "aria-label": t("Cancel reply"),
       title: t("Cancel reply"),
-      onClick: cancel
+      onClick: () => actions.quoteCancel(quote.token)
     }, (0, import_react4.createElement)(CloseIcon))
   );
 }
@@ -15575,7 +15615,7 @@ function apply(ctx) {
           return binding === void 0 ? void 0 : triggers.sessionOf(binding.ctx);
         };
         const launched = (sessionId) => controllerOf(sessionId)?.launcher.getSnapshot() === CHATS_SOURCE;
-        const offs = atSources({ roster, sessions: ctx.sessions, launched, iconFor: menuIcons(roster) }).map((source) => triggers.registerSource(source));
+        const offs = [...atSources({ roster, sessions: ctx.sessions, launched, iconFor: menuIcons(roster) }), quoteSource()].map((source) => triggers.registerSource(source));
         atMenu = { controllerOf };
         return () => {
           atMenu = null;
@@ -15584,6 +15624,55 @@ function apply(ctx) {
       }, "ds-bot: @ menu");
     });
     return () => fiber.dispose();
+  };
+  const quoteFacade = (sessionId) => {
+    const binding = sessionId === void 0 ? void 0 : ctx.sessions.binding(sessionId);
+    const conversation = ctx.get("conversation");
+    if (binding === void 0 || conversation === void 0) return void 0;
+    try {
+      return conversation.input.for(binding.ctx);
+    } catch {
+      return void 0;
+    }
+  };
+  actions.quote = (sessionId, text, bot) => {
+    const facade = quoteFacade(sessionId);
+    if (facade === void 0) {
+      actions.reportError(new Error("no composer to quote into"), "quote");
+      return;
+    }
+    const { ref, clipboardText, label, excerpt } = quoteRef(bot, text);
+    ui2.set((state) => ({
+      ...state,
+      quote: { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, before: facade.state.getSnapshot().draft, token: Date.now(), inserted: false }
+    }));
+  };
+  actions.quoteInsert = (token, span) => {
+    const quote = ui2.getSnapshot().quote;
+    if (quote === null || quote.token !== token || span === void 0) return;
+    const facade = quoteFacade(quote.sessionId);
+    if (facade === void 0) return;
+    let inserted = false;
+    try {
+      inserted = facade.insertReference({ source: QUOTE_SOURCE, ref: quote.ref, label: quote.label, appearance: "session", clipboardText: quote.clipboardText }, span) === true;
+    } catch (error) {
+      actions.reportError(error, "quote-reference");
+    }
+    if (!inserted) {
+      facade.notify?.("error", t("Could not quote this message"));
+      ui2.set((state) => state.quote?.token === token ? { ...state, quote: null } : state);
+      return;
+    }
+    ui2.set((state) => state.quote?.token === token ? { ...state, quote: { ...state.quote, inserted: true } } : state);
+  };
+  actions.quoteCancel = (token) => {
+    const quote = ui2.getSnapshot().quote;
+    if (quote === null || quote.token !== token) return;
+    const facade = quoteFacade(quote.sessionId);
+    if (facade !== void 0 && quote.inserted === true && facade.state.getSnapshot().draft.includes(quote.clipboardText)) {
+      facade.setDraft(quote.before ?? "");
+    }
+    ui2.set((state) => state.quote?.token === token ? { ...state, quote: null } : state);
   };
   actions.canReferenceChat = () => atMenu !== null;
   actions.referenceChat = (sessionId, span) => {
