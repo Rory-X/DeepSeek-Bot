@@ -46,36 +46,46 @@ export function imaError(code, msg) {
   return `ima answered ${code}${named}`
 }
 
-// Turns an ima response body into the tool's answer: the `data` payload on success, a
-// thrown error on a business failure. A body that is not an envelope (a gateway page, an
-// empty body) is passed through unchanged rather than guessed at.
-export function imaAnswer(text) {
-  let body
-  try {
-    body = JSON.parse(text)
-  } catch {
-    return String(text)
-  }
-  if (body === null || typeof body !== 'object' || Array.isArray(body) || !Object.hasOwn(body, 'code')) return String(text)
-  if (body.code === 0) return JSON.stringify(body.data ?? {})
-  throw new Error(imaError(body.code, body.msg))
+// The adapter unwraps this envelope and turns a non-zero code into a tool error, so a
+// refusal never reads as a successful answer. The message field is the fallback for codes
+// that are not mapped here.
+export const IMA_ENVELOPE = {
+  ok: 'code',
+  success: 0,
+  data: 'data',
+  error: 'msg',
+  errors: {
+    20002: imaError(20002),
+    110021: imaError(110021),
+    20004: imaError(20004),
+    200002: imaError(200002),
+    110030: imaError(110030),
+    210005: imaError(210005),
+    210011: imaError(210011),
+    210034: imaError(210034),
+    210002: imaError(210002),
+    210035: imaError(210035),
+  },
 }
 
-// The card and the team file keep two credentials for ima, not one token, so both are
-// named here instead of being folded into `tokenSecret`.
-export const IMA_CREDENTIALS = [IMA_CLIENT_ID_SECRET, IMA_API_KEY_SECRET]
+// The card and the team file keep two credentials for ima, not one token: the client id
+// identifies the key pair and the API key is the secret. Names are DSH secret names.
+export const IMA_CREDENTIALS = [
+  { name: IMA_CLIENT_ID_SECRET, label: 'Client ID' },
+  { name: IMA_API_KEY_SECRET, label: 'API key' },
+]
 
-// The client id is the connector's own stored secret and arrives as `token`; the API key
-// is a second named secret. Both headers travel on every call.
-export const restHeaders = ({ token, readSecret = () => undefined } = {}) => {
-  const clientId = typeof token === 'string' && token !== '' ? token : readSecret(IMA_CLIENT_ID_SECRET)
-  const apiKey = readSecret(IMA_API_KEY_SECRET)
+// Both headers travel on every call, plus the skill version ima's own package sends.
+export const auth = ({ secrets = {} } = {}) => {
+  const clientId = secrets[IMA_CLIENT_ID_SECRET]
+  const apiKey = secrets[IMA_API_KEY_SECRET]
   return {
     ...(typeof clientId === 'string' && clientId !== '' ? { 'ima-openapi-clientid': clientId } : {}),
     ...(typeof apiKey === 'string' && apiKey !== '' ? { 'ima-openapi-apikey': apiKey } : {}),
     'ima-openapi-ctx': `skill_version=${IMA_SKILL_VERSION}`,
   }
 }
+export const restHeaders = auth
 
 const CURSOR = {
   type: 'string',
@@ -252,30 +262,32 @@ export const IMA_REST_TOOLS = [
 ]
 
 // The registry loads this object by its default export, takes `id` as the key, and hands
-// the rest to connectors.js. `extraSecrets` names the second credential the card has to
-// collect (the adapter resolves it through readSecret). `parseAnswer` unwraps ima's
-// envelope: without it a refused business call would read as a successful tool answer.
+// the rest to connectors.js. ima has no MCP server, so it mounts through the REST adapter:
+// `credentials` asks the card for both secrets, `auth` builds both headers, `envelope`
+// unwraps code/msg/data, and `verify` proves the pair without reading user content.
 export const connector = {
   id: IMA_TOOL_PREFIX,
   displayName: 'ima',
   mode: 'rest-tools',
   api: IMA_BASE,
-  tokenSecret: IMA_CLIENT_ID_SECRET,
-  extraSecrets: IMA_CREDENTIALS,
-  restHeaders,
+  credentials: IMA_CREDENTIALS,
+  auth,
   restTools: IMA_REST_TOOLS,
-  parseAnswer: imaAnswer,
-  // ima has no "who is this key" call. A credential check is one empty-query search on
-  // the knowledge base list: code 0 means the pair works, and nothing else is read.
+  envelope: IMA_ENVELOPE,
   verify: verifyIma,
+  // What the card shows. Harmless if this framework version does not read them yet.
+  glyph: 'ima',
+  about: 'Read your ima notes and knowledge bases.',
+  docsUrl: 'https://ima.qq.com/agent-interface',
+  readOnlyNote: 'All tools send POST requests, but they only read: nothing in ima is changed.',
 }
 
 export default connector
 
 // Confirms a client id / API key pair without reading any user content. Returns
-// `{ ok: true }`; the framework shows the connector as connected without an account name.
-export async function verifyIma({ token, readSecret = () => undefined, fetch: request = fetch } = {}) {
-  const headers = restHeaders({ token, readSecret })
+// `{ ok: true }`; ima has no account name to show, so the card stays account-less.
+export async function verifyIma({ secrets = {}, fetch: request = fetch } = {}) {
+  const headers = auth({ secrets })
   const missing = [
     ...(headers['ima-openapi-clientid'] === undefined ? [IMA_CLIENT_ID_SECRET] : []),
     ...(headers['ima-openapi-apikey'] === undefined ? [IMA_API_KEY_SECRET] : []),
@@ -295,6 +307,15 @@ export async function verifyIma({ token, readSecret = () => undefined, fetch: re
   }
   if (response.status === 401) throw new Error('ima did not accept this client id or API key')
   if (!response.ok) throw new Error(`ima answered ${response.status}`)
-  imaAnswer(await response.text())
+  let body
+  try {
+    body = JSON.parse(await response.text())
+  } catch {
+    throw new Error('ima answered something this connector cannot read')
+  }
+  if (body?.code !== 0) {
+    const mapped = IMA_ENVELOPE.errors[String(body?.code)]
+    throw new Error(mapped ?? `ima answered code ${String(body?.code)}${typeof body?.msg === 'string' && body.msg !== '' ? `: ${body.msg.slice(0, 160)}` : ''}`)
+  }
   return { ok: true }
 }

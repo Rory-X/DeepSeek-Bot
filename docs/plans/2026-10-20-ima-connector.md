@@ -25,8 +25,8 @@
 | `ima_get_media` | `/openapi/wiki/v1/get_media_info` | 取原文入口；笔记型返回 `notebook_id` 再走 `ima_get_note` |
 
 - 出站只有 `https://ima.qq.com`。文件上传才需要 COS（`*.myqcloud.com`），只读路线用不到，声明里没有上传相关调用。
-- 鉴权：两个 header + `ima-openapi-ctx: skill_version=1.1.10`。凭据名 `IMA_OPENAPI_CLIENTID`（连接器自己的 secret）与 `IMA_OPENAPI_APIKEY`（第二个具名 secret，经 `readSecret` 取），两个都只进请求头，不写 state / view / diagnostics。
-- 回包是 `{ code, msg, data }`：`code=0` 取 `data`；`code≠0` 抛错，不把失败当工具结果（`20004` / `200002` 鉴权、`20002` / `110021` 限频、`110030` / `210005` / `210011` / `210034` 无权限、其余带 code 与原文）。
+- 鉴权：两个 header + `ima-openapi-ctx: skill_version=1.1.10`。连接器用 `credentials` 声明两个 secret 输入：`IMA_OPENAPI_CLIENTID`（Client ID）与 `IMA_OPENAPI_APIKEY`（API key）；两个都只进请求头，不写 state / view / diagnostics。
+- 回包是 `{ code, msg, data }`，声明为连接器 `envelope`：`code=0` 取 `data`；`code≠0` 抛错，不把失败当工具结果（`20004` / `200002` 鉴权、`20002` / `110021` 限频、`110030` / `210005` / `210011` / `210034` 无权限、其余带 code 与原文）。
 - 连接校验（verify）：`search_knowledge_base` 发 `{query:"",cursor:"",limit:1}`，`code=0` 即通过。ima 没有 whoami 接口，所以卡片不显示账号名。
 - 测试：`ds-bot/test/ima.test.js`，mock fetch 覆盖成功 / 401 / 超时 / 断网 / 业务码 / 半填凭据 / 非信封回包，并静态断言「写入端点不在声明里」「body 只发映射过的字段」。
 
@@ -40,7 +40,8 @@
 
 - 凭证是长期 bearer 且带写权限，只读是客户端白名单保证，不是服务端保证。
 - 限频只有 `20002` 这个码，数值未公开；鉴权失败实测出现过 `200002`（HTTP 401），文档写 `20004`，两种都按鉴权失败处理。
-- 声明依赖 `rest-tools` 契约的三个扩展（待 Forge 确认）：body 映射的 `"query_info.title"` 点号嵌套、连接器级 `parseAnswer`、第二个具名 secret（`extraSecrets` / 卡片两个输入框）。
+- `search_notes` 的请求体需要嵌套 `query_info: { title, content }`，声明用点号键 `"query_info.title"` 表达；当前适配器 `requestBody` 只按字面键写平铺对象（实测发出 `{"query_info.title":"…"}`），需要适配器把点号键展开成嵌套对象（已报 Forge）。这是 9 个工具里唯一一个需要适配器改动的。
+- 卡片无账号名：ima 没有 whoami 接口，`verify` 只回 `{ ok: true }`；卡片应显示「已连接」，不显示账号。
 - 真实 key 下的联调未做；mock 只覆盖协议形状，不覆盖 ima 真实字段演进。
 - `list_note` 的翻页游标语义文档没写清（响应无 `next_cursor`），先按「传 `""` 起页、再传上次结果」声明，联调时校正。
 
