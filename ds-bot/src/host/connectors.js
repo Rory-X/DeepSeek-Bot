@@ -16,11 +16,12 @@
 // An OAuth connector (`mode: 'oauth-mcp'`) has no secret of its own: the user authorizes
 // once in the browser, and the grant lives in DSH's credential store (see oauth/flow.js),
 // outside the team file, the Secrets page and every shell.
+import { buildCloudflareToolIndex, CLOUDFLARE_TOOLBOX_TOOLS, createCloudflareCallTool, createCloudflareSearchTool, isBlockedCloudflareTool } from './cloudflare-toolbox.js'
 import { createApprovalDesk } from './connector-approval.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
 import { createOAuthFlow } from './oauth/flow.js'
 import { output } from './tools.js'
-import { buildToolIndex, createCallTool, createSearchTool, TOOLBOX_TOOLS } from './vercel-toolbox.js'
+import { buildToolIndex, createCallTool, createSearchTool } from './vercel-toolbox.js'
 
 const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 const CHECK_TIMEOUT_MS = 15_000
@@ -123,7 +124,10 @@ const CONNECTORS = {
     mcpUrl: 'https://mcp.cloudflare.com/mcp?codemode=false',
     readTools: CLOUDFLARE_READ_TOOLS,
     oauth: { scopes: CLOUDFLARE_READ_SCOPES },
+    toolbox: true,
+    toolboxKind: 'cloudflare',
     accountTool: 'whoami',
+    accountIdTool: 'get_accounts',
   },
 }
 
@@ -164,8 +168,8 @@ export function install(rt) {
   const ids = Object.keys(options)
   // `token` is what the current mount was made with, so a changed secret mounts again.
   const mounts = new Map()
-  // The catalog index of a connector whose toolbox is mounted, for the approval gate.
-  const toolIndexes = new Map()
+  // The mounted toolboxes, by their call tool's name, for the blocked-target gate.
+  const toolboxes = new Map()
   const statuses = new Map(ids.map(id => [id, { state: 'off' }]))
   let queue = Promise.resolve()
   let stopped = false
@@ -174,14 +178,18 @@ export function install(rt) {
   // Everything else that changes something outside DS Bot asks through the plugin's own
   // card from inside the tool call (see connector-approval.js), because a Session can run
   // with DSH approvals off, where a pre-execute `ask` would simply be rejected.
-  const toolboxCall = TOOLBOX_TOOLS[1]
   ctx.on('tools/pre-execute', async (exec, next) => {
-    if (exec.name !== toolboxCall) return next()
-    const owner = ids.find(id => options[id].toolbox === true)
-    if (owner === undefined) return next()
+    const box = toolboxes.get(exec.name)
+    if (box === undefined) return next()
     const target = typeof exec.arguments?.tool === 'string' ? exec.arguments.tool.trim() : ''
-    const entry = toolIndexes.get(owner)?.find(item => item.name === target)
-    if (entry?.class === 'blocked') return { kind: 'deny', reason: `Vercel tool "${target}" can return environment values or credentials; the toolbox does not run it.` }
+    if (box.blocked.has(target)) {
+      return {
+        kind: 'deny',
+        reason: box.kind === 'cloudflare'
+          ? `Cloudflare tool "${target}" can mint or read credentials, or change who reaches the account; the toolbox does not run it.`
+          : `Vercel tool "${target}" can return environment values or credentials; the toolbox does not run it.`,
+      }
+    }
     return next()
   })
 
@@ -264,7 +272,7 @@ export function install(rt) {
   const unmount = async (id) => {
     const mounted = mounts.get(id)
     mounts.delete(id)
-    toolIndexes.delete(id)
+    for (const [callName, box] of toolboxes) if (box.id === id) toolboxes.delete(callName)
     if (mounted?.dispose !== undefined) for (const dispose of mounted.dispose) dispose()
     mounted?.client?.close()
     const fiber = mounted?.fiber
@@ -293,7 +301,7 @@ export function install(rt) {
 
   // One tool of a `read-tools` connector, as a ToolRuntime definition. `approve` is set
   // for a named write action, which asks the user before it runs.
-  const readOnlyTool = (id, tool, { client, teamId, approve }) => {
+  const readOnlyTool = (id, tool, { client, teamId, approve, defaults }) => {
     const parameters = tool.inputSchema !== null && typeof tool.inputSchema === 'object' ? tool.inputSchema : { type: 'object', properties: {} }
     return {
       name: `${id}_${String(tool.name).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64),
@@ -306,6 +314,11 @@ export function install(rt) {
         // The default team of the token's account answers the calls that need one; an
         // explicit argument wins.
         if (teamId !== undefined && parameters.properties?.teamId !== undefined && call.teamId === undefined) call.teamId = teamId
+        // A connector's own default account answers account-scoped calls; an explicit
+        // argument wins, and a parameter the tool does not take is never added.
+        for (const [name, value] of Object.entries(defaults ?? {})) {
+          if (value !== undefined && parameters.properties?.[name] !== undefined && call[name] === undefined) call[name] = value
+        }
         try {
           return mcpResultText(await client.callTool(tool.name, call))
         } catch (error) {
@@ -332,29 +345,58 @@ export function install(rt) {
     }
   }
 
-  // An OAuth connector has no token to ask who it belongs to; its server's own read tool
-  // does. One call, once per authorization, fills the card's account line.
+  // A Cloudflare account id is 32 hex characters; anything else stored as `accountId` is
+  // the user identity whoami reported and cannot answer an account-scoped call.
+  const looksAccountId = value => typeof value === 'string' && /^[0-9a-f]{32}$/i.test(value)
+
+  const accountsFromText = (text) => {
+    let value
+    try {
+      value = JSON.parse(text)
+    } catch {
+      return []
+    }
+    const list = Array.isArray(value) ? value : Array.isArray(value?.result) ? value.result : []
+    return list.filter(item => item !== null && typeof item === 'object' && looksAccountId(item.id))
+  }
+
+  // An OAuth connector has no token to ask who it belongs to; its server's own read tools
+  // do. One call fills the card's account line, and a second names the account that
+  // account-scoped API calls default to — no re-authorization is needed for either.
   const claimOAuthAccount = async (id, client) => {
     const connector = options[id]
-    if (connector.accountTool === undefined || state.connectors?.[id]?.account !== undefined) return
+    if (connector.accountTool === undefined) return
+    let changed = false
+    const update = (fields) => {
+      state.connectors = { ...state.connectors, [id]: { ...state.connectors?.[id], ...fields } }
+      changed = true
+    }
     try {
-      const text = mcpResultText(await client.callTool(connector.accountTool, {}))
-      let identity
-      try {
-        identity = JSON.parse(text)
-      } catch {
-        identity = undefined
+      if (state.connectors?.[id]?.account === undefined) {
+        const text = mcpResultText(await client.callTool(connector.accountTool, {}))
+        let identity
+        try {
+          identity = JSON.parse(text)
+        } catch {
+          identity = undefined
+        }
+        const account = typeof identity?.email === 'string' && identity.email !== ''
+          ? identity.email
+          : typeof identity?.name === 'string' && identity.name !== '' ? identity.name : undefined
+        const identityId = typeof identity?.id === 'string' && identity.id !== '' ? identity.id : undefined
+        if (account !== undefined) update({ account })
+        if (identityId !== undefined && state.connectors?.[id]?.accountId === undefined) update({ accountId: identityId })
       }
-      const account = typeof identity?.email === 'string' && identity.email !== ''
-        ? identity.email
-        : typeof identity?.name === 'string' && identity.name !== '' ? identity.name : undefined
-      const accountId = typeof identity?.id === 'string' && identity.id !== '' ? identity.id : undefined
-      if (account === undefined && accountId === undefined) return
-      state.connectors = {
-        ...state.connectors,
-        [id]: { ...state.connectors?.[id], ...(account === undefined ? {} : { account }), ...(accountId === undefined ? {} : { accountId }) },
+      // The account list answers the account id the API tools take, even when a previous
+      // run stored the user id from whoami.
+      if (connector.accountIdTool !== undefined && !looksAccountId(state.connectors?.[id]?.accountId)) {
+        const accounts = accountsFromText(mcpResultText(await client.callTool(connector.accountIdTool, {})))
+        const first = accounts[0]
+        if (first !== undefined) {
+          update({ accountId: first.id, ...(typeof first.name === 'string' && first.name !== '' ? { accountName: first.name } : {}) })
+        }
       }
-      await rt.save()
+      if (changed) await rt.save()
     } catch (error) {
       rt.warn('ds-bot: could not read the %s account: %s', connector.displayName, reason(error))
     }
@@ -373,31 +415,49 @@ export function install(rt) {
       const wanted = [...connector.readTools, ...(actions ? connector.actionTools ?? [] : [])]
       const picked = listed.filter(tool => wanted.includes(tool.name))
       if (picked.length === 0) throw new Error(`${connector.displayName} offers none of the read tools DS Bot exposes`)
-      const index = toolbox ? buildToolIndex(listed) : undefined
+      const cloudflareToolbox = toolbox && connector.toolboxKind === 'cloudflare'
+      const index = toolbox ? (cloudflareToolbox ? buildCloudflareToolIndex(listed) : buildToolIndex(listed)) : undefined
       const teamId = state.connectors?.[id]?.teamId ?? connector.teamId
+      const accountId = looksAccountId(state.connectors?.[id]?.accountId) ? state.connectors[id].accountId : undefined
+      const defaults = accountId === undefined ? {} : { account_id: accountId }
       const actionNames = new Set(connector.actionTools ?? [])
       const dispose = []
       try {
         for (const tool of picked) {
           const approve = actionNames.has(tool.name) ? exec => requireApproval(connector, tool.name, exec) : undefined
-          dispose.push(ctx.tools.register(readOnlyTool(id, tool, { client, teamId, approve })))
+          dispose.push(ctx.tools.register(readOnlyTool(id, tool, { client, teamId, approve, defaults })))
         }
         if (index !== undefined) {
-          dispose.push(ctx.tools.register(createSearchTool({ index, output })))
-          dispose.push(ctx.tools.register(createCallTool({
-            client,
-            index,
-            output,
-            redact: rt.redactSecrets,
-            teamId,
-            approve: (name, exec) => requireApproval(connector, name, exec),
-          })))
+          if (cloudflareToolbox) {
+            const blocked = new Set(listed.map(tool => String(tool?.name ?? '')).filter(name => name !== '' && isBlockedCloudflareTool(name)))
+            dispose.push(ctx.tools.register(createCloudflareSearchTool({ index, output })))
+            dispose.push(ctx.tools.register(createCloudflareCallTool({
+              client,
+              index,
+              output,
+              redact: rt.redactSecrets,
+              accountId,
+              approve: (name, exec) => requireApproval(connector, name, exec),
+            })))
+            toolboxes.set(CLOUDFLARE_TOOLBOX_TOOLS[1], { id, connector, blocked, kind: 'cloudflare' })
+          } else {
+            dispose.push(ctx.tools.register(createSearchTool({ index, output })))
+            dispose.push(ctx.tools.register(createCallTool({
+              client,
+              index,
+              output,
+              redact: rt.redactSecrets,
+              teamId,
+              approve: (name, exec) => requireApproval(connector, name, exec),
+            })))
+            const blocked = new Set(index.filter(entry => entry.class === 'blocked').map(entry => entry.name))
+            toolboxes.set('vercel_call', { id, connector, blocked, kind: 'vercel' })
+          }
         }
       } catch (error) {
         for (const undo of dispose) undo()
         throw error
       }
-      if (index !== undefined) toolIndexes.set(id, index)
       return { token, client, dispose }
     } catch (error) {
       client.close()
@@ -528,7 +588,12 @@ export function install(rt) {
       account: accountOf(id),
       ...(oauthConnector ? { oauth: true } : {}),
       ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
-      ...(connector.toolbox === true ? { toolbox: state.connectors?.[id]?.toolbox === true } : {}),
+      ...(connector.toolbox === true
+        ? {
+            toolbox: state.connectors?.[id]?.toolbox === true,
+            toolboxCall: connector.toolboxKind === 'cloudflare' ? CLOUDFLARE_TOOLBOX_TOOLS[1] : 'vercel_call',
+          }
+        : {}),
     }
   })
 
