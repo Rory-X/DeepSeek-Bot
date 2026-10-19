@@ -267,6 +267,8 @@ export function install(rt) {
         case 'connector-connect':
         case 'connector-disconnect':
         case 'connector-retry':
+        case 'connector-test':
+        case 'connector-set-chat':
         case 'connector-set-actions':
         case 'connector-set-toolbox':
         case 'connector-oauth-start':

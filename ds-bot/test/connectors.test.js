@@ -16,6 +16,7 @@ const OFF = {
   github: { id: 'github', name: 'GitHub', ...off('github') },
   vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false },
   cloudflare: { id: 'cloudflare', name: 'Cloudflare', ...off('cloudflare'), oauth: true },
+  telegram: { id: 'telegram', name: 'Telegram', ...off('telegram'), mode: 'notify', chatId: null, canTest: false },
 }
 const statuses = view => view.map(item => [item.id, item.state, item.account])
 
@@ -192,11 +193,11 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   const token = fresh()
 
   const before = await call(ctx, 'state', {})
-  assert.deepEqual(before.value.connectors, [OFF.github, OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(before.value.connectors, [OFF.github, OFF.vercel, OFF.cloudflare, OFF.telegram])
 
   const connected = await call(ctx, 'connector-connect', { id: 'github', token: ` ${token} ` })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo' }, OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(connected.value, [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo' }, OFF.vercel, OFF.cloudflare, OFF.telegram])
   assert.equal(mounts.length, 1)
   assert.deepEqual(mounts[0].config, githubMount(token))
   const state = await call(ctx, 'state', {})
@@ -205,7 +206,7 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes(token))
 
   const disconnected = await call(ctx, 'connector-disconnect', { id: 'github' })
-  assert.deepEqual(disconnected.value, [OFF.github, OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(disconnected.value, [OFF.github, OFF.vercel, OFF.cloudflare, OFF.telegram])
   assert.equal(mounts[0].disposed, true)
   assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
 })
@@ -249,7 +250,7 @@ test('deleting GITHUB_TOKEN on the Secrets page unmounts GitHub', async (t) => {
   await call(ctx, 'secret-delete', { name: 'GITHUB_TOKEN' })
   const state = await call(ctx, 'state', {})
   assert.equal(mounts[0].disposed, true)
-  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['cloudflare', 'off', null]])
+  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['cloudflare', 'off', null], ['telegram', 'off', null]])
 })
 
 test('connecting Vercel mounts only its read tools, and the default team answers what needs one', async (t) => {
@@ -263,7 +264,7 @@ test('connecting Vercel mounts only its read tools, and the default team answers
 
   const connected = await call(ctx, 'connector-connect', { id: 'vercel', token })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false }, OFF.cloudflare])
+  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false }, OFF.cloudflare, OFF.telegram])
   // The write tool is never registered, and Vercel is not mounted through DSH's client.
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts.length, 0)
@@ -561,7 +562,7 @@ test('deleting VERCEL_TOKEN on the Secrets page unmounts Vercel and its tools', 
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   await call(ctx, 'secret-delete', { name: 'VERCEL_TOKEN' })
   const state = await call(ctx, 'state', {})
-  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['cloudflare', 'off', null]])
+  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['cloudflare', 'off', null], ['telegram', 'off', null]])
   assert.deepEqual([...disposed].sort(), vercelNames(VERCEL_READ).sort())
 })
 
@@ -577,12 +578,12 @@ test('each connector mounts and unmounts on its own', async (t) => {
   await call(ctx, 'connector-connect', { id: 'vercel', token: fresh() })
   assert.equal(mounts.length, 1)
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
-  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'ready', 'acme'], ['cloudflare', 'off', null]])
+  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'ready', 'acme'], ['cloudflare', 'off', null], ['telegram', 'off', null]])
 
   await call(ctx, 'connector-disconnect', { id: 'vercel' })
   assert.deepEqual([...disposed].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts[0].disposed, false)
-  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'off', null], ['cloudflare', 'off', null]])
+  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'off', null], ['cloudflare', 'off', null], ['telegram', 'off', null]])
 
   await call(ctx, 'connector-disconnect', { id: 'github' })
   assert.equal(mounts[0].disposed, true)
@@ -591,13 +592,13 @@ test('each connector mounts and unmounts on its own', async (t) => {
 test('github: false hides only the GitHub connector', async (t) => {
   const { ctx, home } = setup({ github: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.vercel, OFF.cloudflare])
+  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.vercel, OFF.cloudflare, OFF.telegram])
 })
 
 test('vercel: false hides only the Vercel connector', async (t) => {
   const { ctx, home } = setup({ vercel: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.github, OFF.cloudflare])
+  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.github, OFF.cloudflare, OFF.telegram])
 })
 
 test('a GitHub address without https refuses to send the token', async (t) => {
@@ -862,4 +863,142 @@ test('Cloudflare connects read-only, mounts exactly its whitelist, names the acc
   }, 'the connector to ask for a reconnect')
   assert.match(broken.error, /connect again/)
   assert.equal(credentials.records.has('ds-bot/connector-cloudflare'), false)
+})
+
+// Telegram: a bot token in Secrets, the chat id in the team file, one sending tool and a
+// test button that sends through the same path.
+const TELEGRAM_TOKEN = '123456789:telegram-secret-token'
+const telegramAnswer = (status, body) => ({
+  status,
+  ok: status >= 200 && status < 300,
+  text: async () => JSON.stringify(body ?? {}),
+  json: async () => body ?? {},
+})
+
+function telegramBench({ chats = [], send } = {}) {
+  const calls = []
+  let updates = chats
+  const fetch = async (url, init = {}) => {
+    const address = String(url)
+    calls.push({ url: address, body: init.body === undefined ? undefined : JSON.parse(init.body) })
+    if (address.endsWith('/getMe')) return telegramAnswer(200, { ok: true, result: { id: 1, username: 'ds_test_bot' } })
+    if (address.includes('/getUpdates')) {
+      const result = updates.map(id => ({ update_id: 1, message: { chat: { id, type: 'private', username: 'ann', first_name: 'Ann' } } }))
+      updates = []
+      return telegramAnswer(200, { ok: true, result })
+    }
+    if (address.endsWith('/sendMessage')) {
+      if (send !== undefined) return send()
+      return telegramAnswer(200, { ok: true, result: { message_id: 1 } })
+    }
+    throw new Error(`unexpected fetch ${address}`)
+  }
+  return { fetch, calls }
+}
+
+test('Telegram connects, finds the one private chat and sends from the tool and the test button', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = telegramBench({ chats: [4242] })
+  globalThis.fetch = bench.fetch
+  const { ctx, home, registered, disposed } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const before = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'telegram')
+  assert.deepEqual([before.state, before.mode, before.chatId, before.canTest, before.account], ['off', 'notify', null, false, null])
+
+  const connected = await call(ctx, 'connector-connect', { id: 'telegram', token: TELEGRAM_TOKEN })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  const card = connected.value.find(connector => connector.id === 'telegram')
+  assert.deepEqual([card.state, card.mode, card.chatId, card.canTest, card.account], ['ready', 'notify', '4242', true, 'ds_test_bot'])
+  assert.deepEqual(registered.filter(name => name === 'notify_telegram'), ['notify_telegram'])
+  assert.deepEqual((await call(ctx, 'state', {})).value.secrets.map(secret => [secret.name, secret.scope]), [['TELEGRAM_BOT_TOKEN', []]])
+  const savedText = readFileSync(join(home, 'state.json'), 'utf8')
+  const saved = JSON.parse(savedText).connectors.telegram
+  assert.deepEqual([saved.username, saved.chatId], ['ds_test_bot', '4242'])
+  assert.ok(!savedText.includes(TELEGRAM_TOKEN))
+  assert.ok(!JSON.stringify(await call(ctx, 'state', {})).includes(TELEGRAM_TOKEN))
+
+  assert.equal(await ctx.registeredTools.get('notify_telegram').execute({ text: ' deploy done ' }), 'Sent to Telegram.')
+  assert.deepEqual(bench.calls.at(-1).body, { chat_id: '4242', text: 'deploy done', disable_web_page_preview: true })
+
+  const tested = await call(ctx, 'connector-test', { id: 'telegram' })
+  assert.equal(tested.ok, true, JSON.stringify(tested))
+  assert.equal(tested.value.find(connector => connector.id === 'telegram').state, 'ready')
+  assert.equal(bench.calls.at(-1).body.text, 'DS Bot: the connection works.')
+  assert.ok(!(await call(ctx, 'diagnostics-log')).value.includes(TELEGRAM_TOKEN))
+
+  const disconnected = await call(ctx, 'connector-disconnect', { id: 'telegram' })
+  const offCard = disconnected.value.find(connector => connector.id === 'telegram')
+  assert.deepEqual([offCard.state, offCard.chatId, offCard.canTest, offCard.account], ['off', null, false, null])
+  assert.deepEqual(disposed.filter(name => name === 'notify_telegram'), ['notify_telegram'])
+})
+
+test('Telegram without a chat says what to do, and Test looks again after the user writes the bot', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = telegramBench({ chats: [] })
+  globalThis.fetch = bench.fetch
+  const { ctx, home, registered } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const connected = await call(ctx, 'connector-connect', { id: 'telegram', token: TELEGRAM_TOKEN })
+  const waiting = connected.value.find(connector => connector.id === 'telegram')
+  assert.deepEqual([waiting.state, waiting.chatId, waiting.canTest], ['error', null, true])
+  assert.match(waiting.error, /Send the bot a message in Telegram first/)
+  assert.deepEqual(registered.filter(name => name === 'notify_telegram'), [])
+
+  // The user writes the bot now; Test discovers the chat and sends.
+  bench.chats = [777]
+  const second = telegramBench({ chats: [777] })
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('/getUpdates')) return second.fetch(url, init)
+    return bench.fetch(url, init)
+  }
+  const tested = await call(ctx, 'connector-test', { id: 'telegram' })
+  assert.equal(tested.ok, true, JSON.stringify(tested))
+  const ready = tested.value.find(connector => connector.id === 'telegram')
+  assert.deepEqual([ready.state, ready.chatId], ['ready', '777'])
+  assert.ok(registered.includes('notify_telegram'))
+
+  // A manually typed chat id wins over discovery, and an empty string clears it.
+  const typed = await call(ctx, 'connector-set-chat', { id: 'telegram', chatId: ' -100200 ' })
+  assert.equal(typed.value.find(connector => connector.id === 'telegram').chatId, '-100200')
+  assert.match((await call(ctx, 'connector-set-chat', { id: 'telegram', chatId: 'abc' })).error.message, /chat id is a number/)
+  const cleared = await call(ctx, 'connector-set-chat', { id: 'telegram', chatId: '' })
+  const empty = cleared.value.find(connector => connector.id === 'telegram')
+  assert.deepEqual([empty.state, empty.chatId], ['error', null])
+})
+
+test('Telegram reports chat and rate-limit failures without the token', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/getMe')) return telegramAnswer(200, { ok: true, result: { username: 'ds_test_bot' } })
+    if (String(url).includes('/getUpdates')) return telegramAnswer(200, { ok: true, result: [] })
+    if (String(url).endsWith('/sendMessage')) return telegramAnswer(400, { ok: false, description: 'Bad Request: chat not found' })
+    throw new Error('unexpected')
+  }
+  const connected = await call(ctx, 'connector-connect', { id: 'telegram', token: TELEGRAM_TOKEN })
+  assert.equal(connected.ok, true)
+  await call(ctx, 'connector-set-chat', { id: 'telegram', chatId: '999' })
+  const failed = await call(ctx, 'connector-test', { id: 'telegram' })
+  assert.equal(failed.ok, false)
+  assert.match(failed.error.message, /chat not found/)
+  assert.ok(!JSON.stringify(failed).includes(TELEGRAM_TOKEN))
+
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/getMe')) return telegramAnswer(200, { ok: true, result: { username: 'ds_test_bot' } })
+    if (String(url).includes('/getUpdates')) return telegramAnswer(200, { ok: true, result: [] })
+    return telegramAnswer(429, { ok: false, description: `Too Many Requests ${TELEGRAM_TOKEN}`, parameters: { retry_after: 9 } })
+  }
+  const limited = await call(ctx, 'connector-retry', { id: 'telegram' })
+  assert.equal(limited.ok, true)
+  const limitedTest = await call(ctx, 'connector-test', { id: 'telegram' })
+  assert.equal(limitedTest.ok, false)
+  assert.match(limitedTest.error.message, /rate-limited; try again in 9s/)
+  assert.ok(!JSON.stringify(limitedTest).includes(TELEGRAM_TOKEN))
 })

@@ -17,6 +17,7 @@
 // once in the browser, and the grant lives in DSH's credential store (see oauth/flow.js),
 // outside the team file, the Secrets page and every shell.
 import { McpHttpClient, mcpResultText } from './mcp.js'
+import { createTelegramTool, discoverTelegramChat, NOTIFY_TEST_TEXT, sendTelegram, verifyTelegram } from './notify.js'
 import { createOAuthFlow } from './oauth/flow.js'
 import { output } from './tools.js'
 import { buildToolIndex, createCallTool, createSearchTool, TOOLBOX_TOOLS } from './vercel-toolbox.js'
@@ -123,6 +124,23 @@ const CONNECTORS = {
     readTools: CLOUDFLARE_READ_TOOLS,
     oauth: { scopes: CLOUDFLARE_READ_SCOPES },
     accountTool: 'whoami',
+  },
+  telegram: {
+    displayName: 'Telegram',
+    mode: 'notify',
+    api: 'https://api.telegram.org',
+    tokenSecret: 'TELEGRAM_BOT_TOKEN',
+    needsChatId: true,
+    accountField: 'username',
+  },
+}
+
+// A notification connector verifies its secret, sends one message and reports what the
+// service said. Slack's sender exists but is not wired to a connector in this release.
+const NOTIFY = {
+  telegram: {
+    verify: (token, { api }) => verifyTelegram(token, { api }),
+    send: ({ token, chatId, text, api }) => sendTelegram({ token, chatId, text, api }),
   },
 }
 
@@ -384,6 +402,32 @@ export function install(rt) {
     }
   }
 
+  // A notification connector registers its one tool as soon as its secret exists. The
+  // Telegram chat id comes from the team file (discovered or typed), so mounting needs no
+  // network call and a chat id added later reaches the next mount.
+  function mountNotify(id, token) {
+    const connector = options[id]
+    if (connector.needsChatId === true && typeof state.connectors?.[id]?.chatId !== 'string') {
+      mounts.set(id, { token })
+      statuses.set(id, { state: 'error', error: 'Send the bot a message in Telegram first, then press Test.' })
+      return undefined
+    }
+    const dispose = []
+    try {
+      dispose.push(ctx.tools.register(createTelegramTool({
+        tokenOf: () => rt.secretValue(connector.tokenSecret),
+        chatIdOf: () => state.connectors?.[id]?.chatId,
+        api: connector.api,
+        output,
+        redact: rt.redactSecrets,
+      })))
+    } catch (error) {
+      for (const undo of dispose) undo()
+      throw error
+    }
+    return { token, dispose }
+  }
+
   async function reconcile(id, force) {
     const connector = options[id]
     const previous = mounts.get(id)?.token
@@ -432,6 +476,24 @@ export function install(rt) {
     if (connector.mode === 'read-tools') {
       await claimAccount(id, token, replaced)
       if (stopped || mounts.get(id) !== attempt) return
+    }
+    if (connector.mode === 'notify') {
+      try {
+        const mounted = mountNotify(id, token)
+        if (mounted === undefined) return
+        if (stopped || mounts.get(id) !== attempt) {
+          for (const undo of mounted.dispose) undo()
+          return
+        }
+        mounts.set(id, mounted)
+        statuses.set(id, { state: 'ready' })
+      } catch (error) {
+        await unmount(id)
+        mounts.set(id, { token })
+        statuses.set(id, { state: 'error', error: reason(error) })
+        rt.warn('ds-bot: %s connector failed: %s', connector.displayName, statuses.get(id).error)
+      }
+      return
     }
     const loader = ctx.get?.('loader')
     if (connector.mode === 'mcp-client' && (typeof loader?.import !== 'function' || typeof ctx.plugin !== 'function')) {
@@ -506,6 +568,13 @@ export function install(rt) {
       // Connect from `oauth` and shows `account` once the server named it.
       account: accountOf(id),
       ...(oauthConnector ? { oauth: true } : {}),
+      ...(connector.mode === 'notify'
+        ? {
+            mode: 'notify',
+            chatId: connector.needsChatId === true ? state.connectors?.[id]?.chatId ?? null : null,
+            canTest: rt.secretValue(connector.tokenSecret) !== undefined,
+          }
+        : {}),
       ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
       ...(connector.toolbox === true ? { toolbox: state.connectors?.[id]?.toolbox === true } : {}),
     }
@@ -523,6 +592,37 @@ export function install(rt) {
       const token = typeof body.token === 'string' ? body.token.trim() : ''
       if (token === '') throw new Error('Paste a token first')
       if (insecure(body.id)) throw new Error(insecureText(body.id))
+      if (connector.mode === 'notify') {
+        await rt.loadSecrets()
+        const kept = rt.secretValue(connector.tokenSecret) !== undefined
+        const account = await NOTIFY[body.id].verify(token, { api: connector.api })
+        state.connectors = { ...state.connectors, [body.id]: { ...switchesOf(body.id), ...account, connectedAt: Date.now() } }
+        try {
+          await rt.secretEndpoint('secret-set', { name: connector.tokenSecret, value: token, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
+        } catch (error) {
+          delete state.connectors[body.id]
+          throw error
+        }
+        // The chat the bot already hears from is filled in now; otherwise the card tells
+        // the user to write the bot first, and Test can look again.
+        if (connector.needsChatId === true) {
+          const found = await discoverTelegramChat({ token, api: connector.api }).catch((error) => {
+            rt.warn('ds-bot: could not look for the %s chat: %s', connector.displayName, reason(error))
+            return {}
+          })
+          if (found.chatId !== undefined) {
+            state.connectors = {
+              ...state.connectors,
+              [body.id]: { ...state.connectors[body.id], chatId: found.chatId, ...(found.username === undefined ? {} : { chatUsername: found.username }) },
+            }
+          }
+        }
+        await rt.save()
+        // The secret change already started a mount; a discovered chat id has to remount
+        // even though the token did not change.
+        await sync(body.id, true)
+        return connectorsView()
+      }
       await rt.loadSecrets()
       const kept = rt.secretValue(connector.tokenSecret) !== undefined
       const account = await signIn(body.id, token, { api: connector.api })
@@ -572,6 +672,50 @@ export function install(rt) {
     async 'connector-retry'(body) {
       known(body.id)
       await rt.loadSecrets()
+      await sync(body.id, true)
+      return connectorsView()
+    },
+    // Send one test message through the connector's real send path, after finding the
+    // Telegram chat when none is known yet.
+    async 'connector-test'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.mode !== 'notify') throw new Error('This connector has no test message')
+      await rt.loadSecrets()
+      const token = rt.secretValue(connector.tokenSecret)
+      if (token === undefined) throw new Error('Connect this connector first')
+      try {
+        if (connector.needsChatId === true && typeof state.connectors?.[body.id]?.chatId !== 'string') {
+          const found = await discoverTelegramChat({ token, api: connector.api })
+          if (found.chatId === undefined) {
+            if (Array.isArray(found.candidates)) throw new Error('Telegram sees several chats: type the chat id you want.')
+            throw new Error('Send the bot a message in Telegram first, then press Test again.')
+          }
+          state.connectors = {
+            ...state.connectors,
+            [body.id]: { ...state.connectors?.[body.id], chatId: found.chatId, ...(found.username === undefined ? {} : { chatUsername: found.username }) },
+          }
+          await rt.save()
+          await sync(body.id, true)
+        }
+        await NOTIFY[body.id].send({ token, chatId: state.connectors?.[body.id]?.chatId, text: NOTIFY_TEST_TEXT, api: connector.api })
+      } catch (error) {
+        throw new Error(rt.redactSecrets(String(error?.message ?? error)).slice(0, 300))
+      }
+      return connectorsView()
+    },
+    // A manually typed Telegram chat id (or an empty string to clear it).
+    async 'connector-set-chat'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.needsChatId !== true) throw new Error('This connector has no chat id')
+      const raw = typeof body.chatId === 'string' ? body.chatId.trim() : ''
+      if (raw !== '' && !/^-?\d+$/.test(raw)) throw new Error('A Telegram chat id is a number, such as 123456789 or -1001234567890.')
+      const prior = { ...state.connectors?.[body.id] }
+      if (raw === '') delete prior.chatId
+      else prior.chatId = raw
+      state.connectors = { ...state.connectors, [body.id]: prior }
+      await rt.save()
       await sync(body.id, true)
       return connectorsView()
     },
