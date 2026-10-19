@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url'
 
 export const CONNECTOR_DIR = import.meta.dirname
 export const CONNECTOR_ID = /^[a-z][a-z0-9-]{0,39}$/
-export const CONNECTOR_MODES = ['mcp-client', 'read-tools', 'oauth-mcp', 'notify', 'rest-tools']
+export const CONNECTOR_MODES = ['mcp-client', 'read-tools', 'oauth-mcp', 'notify', 'rest-tools', 'imap', 'custom']
 // This file and test-only helpers stay out of the registry.
 const NOT_A_CONNECTOR = /^(registry\.js|_.*|.*\.test\.js)$/
 
