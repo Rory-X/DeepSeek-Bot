@@ -12,6 +12,7 @@ import { workStateLine } from './member-status.js'
 import { springEasing, SPRING_SHAPE } from './motion.js'
 import { hostText, t } from './i18n.js'
 import { showsDshRow } from './dsh-offer.js'
+import { useRowMenu } from './hold.js'
 
 // -------------------------------------------------------------------------
 // Sidebar
@@ -70,16 +71,14 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   const waits = workKeys(useWork ? useWork(work => JSON.stringify(work.waiting?.[id] ?? null)) : 'null')
   const waitsFor = state === 'waiting' ? waitingFor(roster, waits) : ''
   if (bot.hidden && !active && !main) return null
-  const onContextMenu = (event) => {
-    event.preventDefault()
-    actions.openMenu({ kind: 'bot', id, x: event.clientX, y: event.clientY })
-  }
+  // A right click and a phone hold open the same menu, at the mouse or the finger.
+  const menu = useRowMenu(point => actions.openMenu({ kind: 'bot', id, x: point.x, y: point.y }))
   const pinned = bot.pinned === true && !tile
   const label = [bot.name, bot.role ?? '', main ? t('Main Bot') : '', pinned ? t('Pinned') : '', running || away ? t('Working') : '', waitsFor, approval ? t('Waiting for your approval') : alert ? t('Waiting for your answer') : '', unread ? t('Unread activity') : ''].filter(Boolean).join(', ')
   if (tile && wide) {
     return h('div', { className: 'bt-tile-wrap' }, h('button', {
       type: 'button', className: 'bt-tile', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
-      'data-bot-id': id, title: preview || bot.name, onClick: () => actions.openSession(id), onContextMenu,
+      'data-bot-id': id, title: preview || bot.name, onClick: () => actions.openSession(id), ...menu,
     },
     h(BotAvatar, { bot, size: 60, state, main: true }),
     h('span', { className: 'bt-tile-name' }, bot.name),
@@ -87,7 +86,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   }
   return h('button', {
     type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
-    'data-bot-id': id, title: wide ? undefined : bot.name, onClick: () => actions.openSession(id), onContextMenu,
+    'data-bot-id': id, title: wide ? undefined : bot.name, onClick: () => actions.openSession(id), ...menu,
   },
   h(BotAvatar, { bot, size: 36, state, main }),
   pinned && !wide ? h(PinMark) : null,
@@ -101,6 +100,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
 
 function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, wide, marked, time }) {
   const id = room.id
+  const menu = useRowMenu(point => actions.openMenu({ kind: 'room', id, x: point.x, y: point.y }))
   const fallback = useSessions(list => previewOf(list, id))
   const preview = room.preview?.replace(/\s+/g, ' ').trim() || fallback
   const active = useSessionRetainInfo(id, info => (info?.retainedBy?.mainView ?? 0) > 0)
@@ -116,8 +116,7 @@ function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSess
   const label = [room.name, pinned ? t('Pinned') : '', members.length > 0 ? t('Working') : '', approval ? t('Waiting for your approval') : ''].filter(Boolean).join(', ')
   return h('button', {
     type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
-    'data-room-id': id, onClick: () => actions.openSession(id),
-    onContextMenu: (event) => { event.preventDefault(); actions.openMenu({ kind: 'room', id, x: event.clientX, y: event.clientY }) },
+    'data-room-id': id, onClick: () => actions.openSession(id), ...menu,
   },
   h(RoomAvatar, { room, roster, size: 36 }),
   pinned && !wide ? h(PinMark) : null,
@@ -132,6 +131,7 @@ function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSess
 // context menu for rename/archive.
 function AgentSessionRow({ session, agent, actions, renaming, index }) {
   const input = useRef(null)
+  const menu = useRowMenu(point => actions.openMenu({ kind: 'agent-session', id: session.id, agentId: agent.id, x: point.x, y: point.y }))
   useLayoutEffect(() => {
     if (!renaming) return
     input.current?.focus()
@@ -164,12 +164,7 @@ function AgentSessionRow({ session, agent, actions, renaming, index }) {
   }
   return h('button', {
     type: 'button', className: 'bt-agent-sub-row', 'aria-current': session.active ? 'page' : undefined, style: { '--i': index },
-    onClick: () => actions.openAgentSession(session.id),
-    onContextMenu: (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      actions.openMenu({ kind: 'agent-session', id: session.id, agentId: agent.id, x: event.clientX, y: event.clientY })
-    },
+    onClick: () => actions.openAgentSession(session.id), ...menu,
   },
   h('span', { className: 'bt-agent-sub-title' }, session.title),
   h('span', { className: 'bt-agent-sub-time' }, session.at > 0 ? relativeShort(session.at) : ''))
@@ -178,6 +173,7 @@ function AgentSessionRow({ session, agent, actions, renaming, index }) {
 // The DSH Agent row: a plain dsh Session list lives in the Bot workspace, so it
 // sits among the Bots with the harness's own whale mark.
 function AgentRow({ agent, actions, useSessions, useSessionStatus, useUi, wide, marked }) {
+  const menu = useRowMenu(point => actions.openMenu({ kind: 'agent', id: agent.id, x: point.x, y: point.y }))
   const info = useSessions(list => JSON.stringify(agent.sessions.map((id) => {
     const row = list.byId[id]
     return {
@@ -211,7 +207,7 @@ function AgentRow({ agent, actions, useSessions, useSessionStatus, useUi, wide, 
     h('button', {
       type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
       'data-agent-id': agent.id, title: wide ? undefined : 'DSH Agent', onClick: () => actions.openAgent(agent.id),
-      onContextMenu: (event) => { event.preventDefault(); actions.openMenu({ kind: 'agent', id: agent.id, x: event.clientX, y: event.clientY }) },
+      ...menu,
     },
     h('span', { className: `bt-agent-ava${running ? ' bt-run' : ''}` }, h(FishLogo, { size: 22 })),
     wide ? h('span', { className: 'bt-row-body' },
