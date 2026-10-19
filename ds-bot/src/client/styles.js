@@ -367,6 +367,11 @@ button.bt-q-opt:active{background:var(--bt-active)}
 .bt-ubody .bt-fold .bt-more:hover,.bt-ububble .bt-fold .bt-more:hover{opacity:1}
 .bt-exchange .bt-dialog-foot{position:absolute;left:0;right:0;bottom:0;height:calc(76px + env(safe-area-inset-bottom));box-sizing:border-box;align-items:flex-end;padding:0 0 calc(28px + env(safe-area-inset-bottom));background:var(--bt-main);z-index:3;animation:bt-foot-in .3s cubic-bezier(.22,1,.36,1) .3s both}
 .bt-exchange .bt-dialog-foot::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:40px;background:linear-gradient(to top,var(--bt-main),transparent);pointer-events:none}
+/* The transcript keeps its newest line in view; a reader who scrolled up gets a way back,
+   floated over the log and clear of the footer and the safe area under it. */
+.bt-exchange-jump{position:absolute;right:max(16px,calc((100% - 960px)/2 + 16px));bottom:calc(76px + env(safe-area-inset-bottom) + 12px);z-index:4;width:40px;height:40px;padding:0;border:1px solid var(--bt-line);border-radius:999px;background:var(--bt-main);color:var(--bt-ink);display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;animation:bt-veil-in .16s ease-out}
+.bt-exchange-jump svg{width:18px;height:18px}
+@media (prefers-reduced-motion:reduce){.bt-exchange-jump{animation:none}}
 .bt-exchange[data-leaving] .bt-dialog-foot{animation:bt-foot-out .22s cubic-bezier(.4,0,1,1) forwards}
 @keyframes bt-foot-in{from{opacity:0;transform:translateY(6px)}}
 @keyframes bt-foot-out{to{opacity:0;transform:translateY(6px)}}

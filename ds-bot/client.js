@@ -528,6 +528,7 @@ var ZH = {
   "{name} was cut off by a restart again and stopped": "{name} 的工作又被重启打断，已停下",
   "Picked up its work after a restart": "重启后接着做之前的工作",
   Answered: "答复了",
+  "Jump to latest": "回到底部",
   "Asked to make the tool call it wrote as text": "工具调用被写成了文字，已让它重新调用",
   "A Bot": "一个 Bot",
   "{name} is waiting for your approval": "{name} 等你批准",
@@ -2697,6 +2698,11 @@ button.bt-q-opt:active{background:var(--bt-active)}
 .bt-ubody .bt-fold .bt-more:hover,.bt-ububble .bt-fold .bt-more:hover{opacity:1}
 .bt-exchange .bt-dialog-foot{position:absolute;left:0;right:0;bottom:0;height:calc(76px + env(safe-area-inset-bottom));box-sizing:border-box;align-items:flex-end;padding:0 0 calc(28px + env(safe-area-inset-bottom));background:var(--bt-main);z-index:3;animation:bt-foot-in .3s cubic-bezier(.22,1,.36,1) .3s both}
 .bt-exchange .bt-dialog-foot::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:40px;background:linear-gradient(to top,var(--bt-main),transparent);pointer-events:none}
+/* The transcript keeps its newest line in view; a reader who scrolled up gets a way back,
+   floated over the log and clear of the footer and the safe area under it. */
+.bt-exchange-jump{position:absolute;right:max(16px,calc((100% - 960px)/2 + 16px));bottom:calc(76px + env(safe-area-inset-bottom) + 12px);z-index:4;width:40px;height:40px;padding:0;border:1px solid var(--bt-line);border-radius:999px;background:var(--bt-main);color:var(--bt-ink);display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;animation:bt-veil-in .16s ease-out}
+.bt-exchange-jump svg{width:18px;height:18px}
+@media (prefers-reduced-motion:reduce){.bt-exchange-jump{animation:none}}
 .bt-exchange[data-leaving] .bt-dialog-foot{animation:bt-foot-out .22s cubic-bezier(.4,0,1,1) forwards}
 @keyframes bt-foot-in{from{opacity:0;transform:translateY(6px)}}
 @keyframes bt-foot-out{to{opacity:0;transform:translateY(6px)}}
@@ -9922,9 +9928,35 @@ ${listed}`, { axis: "y", ...QUICK_EDGES });
 // src/client/exchange.js
 var import_react24 = require("react");
 var SHEET_EXIT_MS = 220;
+var STICK_PX = 24;
 function ExchangeDialog({ pair, roster, actions }) {
   const [entries2, setEntries] = (0, import_react24.useState)(null);
   const [leaving, setLeaving] = (0, import_react24.useState)(false);
+  const [offBottom, setOffBottom] = (0, import_react24.useState)(false);
+  const log = (0, import_react24.useRef)(null);
+  const stick = (0, import_react24.useRef)(true);
+  const first = (0, import_react24.useRef)(true);
+  const measure = () => {
+    const node = log.current;
+    if (node === null) return;
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+    stick.current = distance <= STICK_PX;
+    setOffBottom(!stick.current);
+  };
+  (0, import_react24.useLayoutEffect)(() => {
+    const node = log.current;
+    if (node === null) return;
+    if (first.current || stick.current) {
+      node.scrollTop = node.scrollHeight;
+      first.current = false;
+    }
+    measure();
+  }, [entries2]);
+  const toLatest = () => {
+    const node = log.current;
+    if (node === null) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: reducedMotion() ? "auto" : "smooth" });
+  };
   const close = () => {
     if (leaving) return;
     setLeaving(true);
@@ -9972,7 +10004,7 @@ function ExchangeDialog({ pair, roster, actions }) {
       )),
       (0, import_react24.createElement)(
         "div",
-        { className: "bt-dialog-log", role: "log", "aria-label": t("Bot exchange transcript") },
+        { ref: log, onScroll: measure, className: "bt-dialog-log", role: "log", "aria-label": t("Bot exchange transcript") },
         entries2 === null ? (0, import_react24.createElement)("div", { className: "bt-hint" }, t("Loading…")) : entries2.length === 0 ? (0, import_react24.createElement)("div", { className: "bt-hint" }, t("No messages yet")) : entries2.map((entry) => {
           const bot = roster.byId[entry.from] ?? { id: entry.from, name: t("You"), color: "gray" };
           const showDay = entry.time - lastDay > 30 * 60 * 1e3;
@@ -9991,7 +10023,14 @@ function ExchangeDialog({ pair, roster, actions }) {
           );
         })
       ),
-      (0, import_react24.createElement)("div", { className: "bt-dialog-foot" }, (0, import_react24.createElement)("button", { type: "button", className: "bt-soft", onClick: close }, t("Close Chat")))
+      (0, import_react24.createElement)("div", { className: "bt-dialog-foot" }, (0, import_react24.createElement)("button", { type: "button", className: "bt-soft", onClick: close }, t("Close Chat"))),
+      entries2 !== null && offBottom ? (0, import_react24.createElement)("button", {
+        type: "button",
+        className: "bt-exchange-jump",
+        "aria-label": t("Jump to latest"),
+        title: t("Jump to latest"),
+        onClick: toLatest
+      }, (0, import_react24.createElement)(ArrowDownIcon)) : null
     )
   );
 }

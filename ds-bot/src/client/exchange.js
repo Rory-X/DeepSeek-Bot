@@ -1,4 +1,4 @@
-import { createElement as h, Fragment, useEffect, useState } from 'react'
+import { createElement as h, Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { inkText } from './inks.js'
 import { dayLabel } from './text.js'
 import { colorOf, BotMark } from './mark.js'
@@ -6,12 +6,44 @@ import { Bubbles } from './cells.js'
 import { stripLongNote } from './fold.js'
 import { useEscape, usePaneLeft } from './overlay-hooks.js'
 import { t } from './i18n.js'
+import { ArrowDownIcon } from './icons.js'
+import { reducedMotion } from './activity-row.js'
 
 const SHEET_EXIT_MS = 220
+// How close to the bottom still counts as reading the newest line.
+const STICK_PX = 24
 
 export function ExchangeDialog({ pair, roster, actions }) {
   const [entries, setEntries] = useState(null)
   const [leaving, setLeaving] = useState(false)
+  const [offBottom, setOffBottom] = useState(false)
+  const log = useRef(null)
+  const stick = useRef(true)
+  const first = useRef(true)
+  // The newest line is what the reader opened the transcript for, and the polling keeps it
+  // there while the reader stays at the bottom; a reader who scrolled up keeps their place.
+  const measure = () => {
+    const node = log.current
+    if (node === null) return
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight
+    stick.current = distance <= STICK_PX
+    setOffBottom(!stick.current)
+  }
+  useLayoutEffect(() => {
+    const node = log.current
+    if (node === null) return
+    // The first paint opens at the bottom instead of sliding down from the top.
+    if (first.current || stick.current) {
+      node.scrollTop = node.scrollHeight
+      first.current = false
+    }
+    measure()
+  }, [entries])
+  const toLatest = () => {
+    const node = log.current
+    if (node === null) return
+    node.scrollTo({ top: node.scrollHeight, behavior: reducedMotion() ? 'auto' : 'smooth' })
+  }
   // The sheet slides back down before it unmounts.
   const close = () => {
     if (leaving) return
@@ -43,7 +75,7 @@ export function ExchangeDialog({ pair, roster, actions }) {
         left ? h(BotMark, { bot: left, size: 22 }) : null, left?.name ?? '?',
         h('span', { className: 'bt-swap' }, '⇄'),
         right ? h(BotMark, { bot: right, size: 22 }) : null, right?.name ?? '?')),
-      h('div', { className: 'bt-dialog-log', role: 'log', 'aria-label': t('Bot exchange transcript') },
+      h('div', { ref: log, onScroll: measure, className: 'bt-dialog-log', role: 'log', 'aria-label': t('Bot exchange transcript') },
         entries === null ? h('div', { className: 'bt-hint' }, t('Loading…'))
           : entries.length === 0 ? h('div', { className: 'bt-hint' }, t('No messages yet'))
             : entries.map((entry) => {
@@ -58,5 +90,11 @@ export function ExchangeDialog({ pair, roster, actions }) {
                   h('span', { className: 'bt-group-name', style: { color: inkText(colorOf(bot)) } }, bot.name),
                   h(Bubbles, { texts: [stripLongNote(entry.text)], roster, selfId: bot.id, actions, whole, lead: h('span', { className: 'bt-lead' }, h(BotMark, { bot: bot, size: 22 })) })))
             })),
-      h('div', { className: 'bt-dialog-foot' }, h('button', { type: 'button', className: 'bt-soft', onClick: close }, t('Close Chat')))))
+      h('div', { className: 'bt-dialog-foot' }, h('button', { type: 'button', className: 'bt-soft', onClick: close }, t('Close Chat'))),
+      entries !== null && offBottom
+        ? h('button', {
+          type: 'button', className: 'bt-exchange-jump', 'aria-label': t('Jump to latest'), title: t('Jump to latest'),
+          onClick: toLatest,
+        }, h(ArrowDownIcon))
+        : null))
 }

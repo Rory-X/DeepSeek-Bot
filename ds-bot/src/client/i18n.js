@@ -472,6 +472,7 @@ const ZH = {
   '{name} was cut off by a restart again and stopped': '{name} 的工作又被重启打断，已停下',
   'Picked up its work after a restart': '重启后接着做之前的工作',
   Answered: '答复了',
+  'Jump to latest': '回到底部',
   'Asked to make the tool call it wrote as text': '工具调用被写成了文字，已让它重新调用',
   'A Bot': '一个 Bot',
   '{name} is waiting for your approval': '{name} 等你批准',
