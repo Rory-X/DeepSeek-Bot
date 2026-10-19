@@ -1,0 +1,142 @@
+// REST tools for a connector whose service has no usable MCP endpoint. One definition maps
+// one model tool to one request: placeholders in the path, query names, connector-owned auth
+// headers, a bounded and redacted answer, and plain error text.
+//
+// A GET is read-only by construction. A service whose read calls are POST (WeRead, ima) uses
+// POST, and that is never a passthrough: the definition must say `readOnly: true` and name
+// every body field it sends, with an argument name or a constant. An argument the definition
+// does not name never reaches the request, and nothing but the mapped scalars can enter the
+// body. Any other method is refused when the tools are built.
+export const REST_RESULT_MAX = 20_000
+export const REST_ERROR_MAX = 2_000
+export const REST_BODY_MAX_BYTES = 8_192
+const TIMEOUT_MS = 20_000
+const METHODS = new Set(['GET', 'POST'])
+const SCALAR = new Set(['string', 'number', 'boolean'])
+
+const safeName = (id, name) => `${id}_${String(name).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64)
+const cut = (text, redact) => {
+  const safe = redact(String(text))
+  if (safe.length <= REST_RESULT_MAX) return safe
+  return `${safe.slice(0, REST_RESULT_MAX)}\n… (result cut: ${safe.length} characters in all; narrow the request with fewer or smaller parameters)`
+}
+
+function errorText(connector, response) {
+  const name = connector.displayName
+  switch (response.status) {
+    case 401: return `${name} did not accept this token or key`
+    case 403: return `${name} refused this call (403)`
+    case 404: return `${name} did not find it (404)`
+    case 429: return `${name} is rate limited; try again later (429)`
+    default: return `${name} answered ${response.status}`
+  }
+}
+
+function requestUrl(connector, definition, args) {
+  let path = definition.path
+  for (const match of path.matchAll(/\{([A-Za-z0-9_-]+)\}/g)) {
+    const value = args?.[match[1]]
+    if (value === undefined || value === null || value === '') throw new Error(`Missing "${match[1]}" for this call.`)
+    path = path.replace(match[0], encodeURIComponent(String(value)))
+  }
+  const url = new URL(`${String(connector.api).replace(/\/$/, '')}${path}`)
+  for (const [argument, query] of Object.entries(definition.query ?? {})) {
+    const value = args?.[argument]
+    if (value === undefined || value === null) continue
+    url.searchParams.set(query, String(value))
+  }
+  return url
+}
+
+const isScalar = value => SCALAR.has(typeof value)
+const isScalarList = value => Array.isArray(value) && value.every(isScalar)
+
+// Only the definition's own fields are sent, built from the arguments it names (or a fixed
+// constant). Everything else in `args` is ignored, so a model cannot widen the request.
+function requestBody(connector, definition, args) {
+  const body = {}
+  for (const [field, mapping] of Object.entries(definition.body ?? {})) {
+    if (mapping !== null && typeof mapping === 'object') {
+      if (!Object.hasOwn(mapping, 'const')) throw new Error(`${connector.displayName} REST tool "${definition.name}" body field "${field}" must name an argument or a constant.`)
+      body[field] = mapping.const
+      continue
+    }
+    if (typeof mapping !== 'string' || mapping === '') throw new Error(`${connector.displayName} REST tool "${definition.name}" body field "${field}" must name an argument or a constant.`)
+    const value = args?.[mapping]
+    if (value === undefined || value === null) continue
+    if (!isScalar(value) && !isScalarList(value)) throw new Error(`"${mapping}" must be text, a number, a boolean or a list of those.`)
+    body[field] = value
+  }
+  const text = JSON.stringify(body)
+  if (Buffer.byteLength(text) > REST_BODY_MAX_BYTES) throw new Error(`The request body is too large; keep it under ${REST_BODY_MAX_BYTES} bytes.`)
+  return text
+}
+
+function headers(connector, definition, { token, readSecret }) {
+  const own = connector.restHeaders?.({ token, readSecret }) ?? { Authorization: `Bearer ${token}` }
+  return { accept: 'application/json', ...(definition.headers ?? {}), ...own }
+}
+
+function validate(connector, definition) {
+  const method = String(definition.method ?? 'GET').toUpperCase()
+  if (!METHODS.has(method)) throw new Error(`${connector.displayName} REST tool "${definition.name}" must be GET or POST`)
+  if (method === 'POST') {
+    if (definition.readOnly !== true) throw new Error(`${connector.displayName} REST tool "${definition.name}" POST must declare readOnly: true`)
+    const body = definition.body
+    if (body === null || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length === 0) {
+      throw new Error(`${connector.displayName} REST tool "${definition.name}" POST needs an explicit body mapping`)
+    }
+  }
+  if (typeof definition.path !== 'string' || !definition.path.startsWith('/')) {
+    throw new Error(`${connector.displayName} REST tool "${definition.name}" needs a path`)
+  }
+  return method
+}
+
+// Builds the connector's tools. `definition.parameters` is the model-facing JSON schema;
+// `path` may carry `{argument}` placeholders, `query` maps argument names to query names,
+// and a POST's `body` maps body fields to argument names or `{ const }`. `connector.api` is
+// the service origin, `connector.restHeaders({ token, readSecret })` supplies auth headers,
+// and `readSecret(name)` resolves any extra named secret the connector needs.
+export function createRestTools(id, connector, { token, readSecret = () => undefined, output, redact = text => String(text), fetch: request = fetch } = {}) {
+  return (connector.restTools ?? []).map((definition) => {
+    const method = validate(connector, definition)
+    const name = safeName(id, definition.name)
+    return {
+      name,
+      description: String(definition.description ?? ''),
+      parameters: definition.parameters ?? { type: 'object', properties: {} },
+      output,
+      async execute(args) {
+        let url
+        let body
+        try {
+          url = requestUrl(connector, definition, args)
+          if (method === 'POST') body = requestBody(connector, definition, args)
+        } catch (error) {
+          throw new Error(redact(String(error?.message ?? error)).slice(0, REST_ERROR_MAX))
+        }
+        let response
+        try {
+          response = await request(url, {
+            method,
+            headers: method === 'POST' ? { ...headers(connector, definition, { token, readSecret }), 'content-type': 'application/json' } : headers(connector, definition, { token, readSecret }),
+            ...(method === 'POST' ? { body } : {}),
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+          })
+        } catch {
+          throw new Error(`Could not reach ${connector.displayName}`)
+        }
+        if (!response.ok) throw new Error(errorText(connector, response))
+        const text = await response.text()
+        let answer = text
+        try {
+          answer = JSON.stringify(JSON.parse(text))
+        } catch {
+          // A plain-text answer is returned as it is.
+        }
+        return cut(answer, redact)
+      },
+    }
+  })
+}
