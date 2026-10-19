@@ -11,7 +11,8 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, tur
     openPalette: (query = '') => { ui.set(state => ({ ...state, palette: { query, token: Date.now() }, newChat: null, menu: null })) },
     // The token keeps a late exit timer from closing a palette opened again since.
     closePalette: (token) => { ui.set(state => (state.palette && (token === undefined || state.palette.token === token) ? { ...state, palette: null } : state)) },
-    openExchange: (a, b) => { if (a && b) ui.set(state => ({ ...state, exchange: [a, b] })) },
+    // `at` names the exchange line that was tapped, so the dialog can open on it.
+    openExchange: (a, b, at) => { if (a && b) ui.set(state => ({ ...state, exchange: [a, b], exchangeAt: at ?? null })) },
     openVoice: (id) => { if (id) ui.set(state => ({ ...state, voice: id, menu: null })) },
     closeVoice: () => { ui.set(state => (state.voice ? { ...state, voice: null } : state)) },
     toggleDetails: (id, force) => {

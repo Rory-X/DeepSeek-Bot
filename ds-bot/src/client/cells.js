@@ -178,7 +178,7 @@ export function AssistantCell({ node, groupPart, sessionId, openFile, fileMentio
         key: relay.seq,
         prefix: source.role === 'stopped' ? t('Stopped by') : source.role === 'reply' ? t('Reply from') : t('Message from'),
         bots: [sender],
-        onOpen: () => { if (sender.id) actions.openExchange(selfId, sender.id) },
+        onOpen: () => { if (sender.id) actions.openExchange(selfId, sender.id, source.exchangeId) },
         whole: true,
       })
     }),
@@ -360,7 +360,7 @@ function chatRow(row, key, { sessionId, selfId, roster, actions, useUi }) {
       if (row.role === 'report') return h(GroupEvent, { key, prefix: t('Replies from'), room: roster.roomsById[row.roomId], name: t('a group chat'), roster, actions })
       const other = roster.byId[row.botId] ?? { id: row.botId, name: row.name ?? t('a Bot'), color: 'gray' }
       const prefix = { stopped: t('Stopped by'), reply: t('Reply from') }[row.role] ?? t('Message from')
-      return h(EventLine, { key, prefix, bots: [other], onOpen: () => { if (selfId && other.id) actions.openExchange(selfId, other.id) }, whole: true })
+      return h(EventLine, { key, prefix, bots: [other], onOpen: () => { if (selfId && other.id) actions.openExchange(selfId, other.id, row.id) }, whole: true })
     }
     default: return null
   }
@@ -416,7 +416,7 @@ export function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnCl
       // where it was read, so this turn names who it answers instead of repeating the text.
       if (deferred) {
         const asker = roster.byId[source.senderSessionId] ?? { id: source.senderSessionId, name: source.senderName ?? t('a Bot'), color: 'gray' }
-        return h(EventLine, { prefix: t('Answered'), bots: [asker], onOpen: bot => bot.id && actions.openExchange(selfId, bot.id), whole: true })
+        return h(EventLine, { prefix: t('Answered'), bots: [asker], onOpen: bot => bot.id && actions.openExchange(selfId, bot.id, source.exchangeId), whole: true })
       }
       if (source.role === 'post') {
         // A post logged into a running round already shows there, not again as a trigger.
@@ -458,7 +458,7 @@ export function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnCl
       return h(EventLine, {
         prefix: source.role === 'stopped' ? t('Stopped by') : count > 1 ? t('{count} messages with', { count }) : t('Message from'),
         bots,
-        onOpen: bot => actions.openExchange(selfId, bot.id),
+        onOpen: bot => actions.openExchange(selfId, bot.id, source.exchangeId),
         whole: true,
       })
     }

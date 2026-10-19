@@ -1598,8 +1598,9 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     closePalette: (token) => {
       ui2.set((state) => state.palette && (token === void 0 || state.palette.token === token) ? { ...state, palette: null } : state);
     },
-    openExchange: (a, b) => {
-      if (a && b) ui2.set((state) => ({ ...state, exchange: [a, b] }));
+    // `at` names the exchange line that was tapped, so the dialog can open on it.
+    openExchange: (a, b, at) => {
+      if (a && b) ui2.set((state) => ({ ...state, exchange: [a, b], exchangeAt: at ?? null }));
     },
     openVoice: (id) => {
       if (id) ui2.set((state) => ({ ...state, voice: id, menu: null }));
@@ -2702,6 +2703,10 @@ button.bt-q-opt:active{background:var(--bt-active)}
    floated over the log and clear of the footer and the safe area under it. */
 .bt-exchange-jump{position:absolute;right:max(16px,calc((100% - 960px)/2 + 16px));bottom:calc(76px + env(safe-area-inset-bottom) + 12px);z-index:4;width:40px;height:40px;padding:0;border:1px solid var(--bt-line);border-radius:999px;background:var(--bt-main);color:var(--bt-ink);display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;animation:bt-veil-in .16s ease-out}
 .bt-exchange-jump svg{width:18px;height:18px}
+/* The line a tapped event opened the dialog on flashes once, so the eye lands on it. */
+@keyframes bt-exchange-hit{from{background-color:color-mix(in srgb,var(--bt-accent) 16%,transparent)}to{background-color:transparent}}
+.bt-exchange .bt-exchange-hit{border-radius:12px;animation:bt-exchange-hit 1.2s ease-out}
+@media (prefers-reduced-motion:reduce){.bt-exchange .bt-exchange-hit{animation:none;background-color:color-mix(in srgb,var(--bt-accent) 12%,transparent)}}
 @media (prefers-reduced-motion:reduce){.bt-exchange-jump{animation:none}}
 .bt-exchange[data-leaving] .bt-dialog-foot{animation:bt-foot-out .22s cubic-bezier(.4,0,1,1) forwards}
 @keyframes bt-foot-in{from{opacity:0;transform:translateY(6px)}}
@@ -4758,7 +4763,7 @@ function AssistantCell({ node, groupPart, sessionId, openFile, fileMentions, use
         prefix: source.role === "stopped" ? t("Stopped by") : source.role === "reply" ? t("Reply from") : t("Message from"),
         bots: [sender],
         onOpen: () => {
-          if (sender.id) actions.openExchange(selfId, sender.id);
+          if (sender.id) actions.openExchange(selfId, sender.id, source.exchangeId);
         },
         whole: true
       });
@@ -4955,7 +4960,7 @@ function chatRow(row, key, { sessionId, selfId, roster, actions, useUi }) {
       const other = roster.byId[row.botId] ?? { id: row.botId, name: row.name ?? t("a Bot"), color: "gray" };
       const prefix = { stopped: t("Stopped by"), reply: t("Reply from") }[row.role] ?? t("Message from");
       return (0, import_react7.createElement)(EventLine, { key, prefix, bots: [other], onOpen: () => {
-        if (selfId && other.id) actions.openExchange(selfId, other.id);
+        if (selfId && other.id) actions.openExchange(selfId, other.id, row.id);
       }, whole: true });
     }
     default:
@@ -4997,7 +5002,7 @@ function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnClock, us
       if (source.role === "secret") return null;
       if (deferred) {
         const asker = roster.byId[source.senderSessionId] ?? { id: source.senderSessionId, name: source.senderName ?? t("a Bot"), color: "gray" };
-        return (0, import_react7.createElement)(EventLine, { prefix: t("Answered"), bots: [asker], onOpen: (bot) => bot.id && actions.openExchange(selfId, bot.id), whole: true });
+        return (0, import_react7.createElement)(EventLine, { prefix: t("Answered"), bots: [asker], onOpen: (bot) => bot.id && actions.openExchange(selfId, bot.id, source.exchangeId), whole: true });
       }
       if (source.role === "post") {
         if (source.logged !== void 0) return null;
@@ -5038,7 +5043,7 @@ function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnClock, us
       return (0, import_react7.createElement)(EventLine, {
         prefix: source.role === "stopped" ? t("Stopped by") : count > 1 ? t("{count} messages with", { count }) : t("Message from"),
         bots,
-        onOpen: (bot) => actions.openExchange(selfId, bot.id),
+        onOpen: (bot) => actions.openExchange(selfId, bot.id, source.exchangeId),
         whole: true
       });
     }
@@ -9929,13 +9934,15 @@ ${listed}`, { axis: "y", ...QUICK_EDGES });
 var import_react24 = require("react");
 var SHEET_EXIT_MS = 220;
 var STICK_PX = 24;
-function ExchangeDialog({ pair, roster, actions }) {
+function ExchangeDialog({ pair, roster, actions, at }) {
   const [entries2, setEntries] = (0, import_react24.useState)(null);
   const [leaving, setLeaving] = (0, import_react24.useState)(false);
   const [offBottom, setOffBottom] = (0, import_react24.useState)(false);
+  const [hit, setHit] = (0, import_react24.useState)(null);
   const log = (0, import_react24.useRef)(null);
   const stick = (0, import_react24.useRef)(true);
   const first = (0, import_react24.useRef)(true);
+  const aimed = (0, import_react24.useRef)(at ?? null);
   const measure = () => {
     const node = log.current;
     if (node === null) return;
@@ -9944,14 +9951,31 @@ function ExchangeDialog({ pair, roster, actions }) {
     setOffBottom(!stick.current);
   };
   (0, import_react24.useLayoutEffect)(() => {
+    if (entries2 === null) return;
     const node = log.current;
     if (node === null) return;
-    if (first.current || stick.current) {
-      node.scrollTop = node.scrollHeight;
+    if (first.current) {
       first.current = false;
+      const target = aimed.current === null ? null : [...node.querySelectorAll("[data-exchange-id]")].find((row) => row.dataset.exchangeId === aimed.current);
+      if (target === null || target === void 0) {
+        node.scrollTop = node.scrollHeight;
+      } else {
+        const box = target.getBoundingClientRect();
+        const logBox = node.getBoundingClientRect();
+        const centered = node.scrollTop + (box.top - logBox.top) - Math.max(12, (node.clientHeight - box.height) / 2);
+        node.scrollTop = Math.max(0, Math.min(centered, node.scrollHeight - node.clientHeight));
+        setHit(aimed.current);
+      }
+    } else if (stick.current) {
+      node.scrollTop = node.scrollHeight;
     }
     measure();
   }, [entries2]);
+  (0, import_react24.useEffect)(() => {
+    if (hit === null) return void 0;
+    const timer = setTimeout(() => setHit(null), 1200);
+    return () => clearTimeout(timer);
+  }, [hit]);
   const toLatest = () => {
     const node = log.current;
     if (node === null) return;
@@ -10016,7 +10040,7 @@ function ExchangeDialog({ pair, roster, actions }) {
             showDay ? (0, import_react24.createElement)("time", { className: "bt-time" }, dayLabel(entry.time)) : null,
             (0, import_react24.createElement)(
               "div",
-              { className: "bt-group-msg" },
+              { className: `bt-group-msg${hit === entry.id ? " bt-exchange-hit" : ""}`, "data-exchange-id": entry.id },
               (0, import_react24.createElement)("span", { className: "bt-group-name", style: { color: inkText(colorOf(bot)) } }, bot.name),
               (0, import_react24.createElement)(Bubbles, { texts: [stripLongNote(entry.text)], roster, selfId: bot.id, actions, whole, lead: (0, import_react24.createElement)("span", { className: "bt-lead" }, (0, import_react24.createElement)(BotMark, { bot, size: 22 })) })
             )
@@ -13610,7 +13634,7 @@ function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity
     pane ? (0, import_react_dom10.createPortal)((0, import_react36.createElement)(BotPanel, { pane, leaving: open === null, roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages }), document.body) : null,
     ui2.newChat ? (0, import_react_dom10.createPortal)((0, import_react36.createElement)(NewChat, { key: ui2.newChat, mode: ui2.newChat, roster, actions }), document.body) : null,
     ui2.palette ? (0, import_react_dom10.createPortal)((0, import_react36.createElement)(CommandPalette, { key: ui2.palette.token, start: ui2.palette.query, token: ui2.palette.token, roster, actions, useSessions }), document.body) : null,
-    ui2.exchange ? (0, import_react_dom10.createPortal)((0, import_react36.createElement)(ExchangeDialog, { pair: ui2.exchange, roster, actions }), document.body) : null,
+    ui2.exchange ? (0, import_react_dom10.createPortal)((0, import_react36.createElement)(ExchangeDialog, { pair: ui2.exchange, at: ui2.exchangeAt ?? void 0, roster, actions }), document.body) : null,
     ui2.voice ? (0, import_react_dom10.createPortal)((0, import_react36.createElement)(VoiceMode, { key: ui2.voice, sessionId: ui2.voice, roster, actions, useSessions, useSessionStatus }), document.body) : null,
     menu ? (0, import_react_dom10.createPortal)((0, import_react36.createElement)(ContextMenu, { key: `${menu.kind ?? ""}:${menu.id}:${menu.x}:${menu.y}`, menu, roster, actions, leaving: menuLeaving }), document.body) : null,
     settings ? (0, import_react_dom10.createPortal)((0, import_react36.createElement)(SettingsDialog, { page: settings.page, id: settings.id, roster, actions, useUpdate, leaving: settingsLeaving }), document.body) : null,

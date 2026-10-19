@@ -13,13 +13,16 @@ const SHEET_EXIT_MS = 220
 // How close to the bottom still counts as reading the newest line.
 const STICK_PX = 24
 
-export function ExchangeDialog({ pair, roster, actions }) {
+export function ExchangeDialog({ pair, roster, actions, at }) {
   const [entries, setEntries] = useState(null)
   const [leaving, setLeaving] = useState(false)
   const [offBottom, setOffBottom] = useState(false)
+  const [hit, setHit] = useState(null)
   const log = useRef(null)
   const stick = useRef(true)
   const first = useRef(true)
+  // The line the reader tapped: the dialog opens on it instead of on the newest line.
+  const aimed = useRef(at ?? null)
   // The newest line is what the reader opened the transcript for, and the polling keeps it
   // there while the reader stays at the bottom; a reader who scrolled up keeps their place.
   const measure = () => {
@@ -30,15 +33,36 @@ export function ExchangeDialog({ pair, roster, actions }) {
     setOffBottom(!stick.current)
   }
   useLayoutEffect(() => {
+    if (entries === null) return
     const node = log.current
     if (node === null) return
-    // The first paint opens at the bottom instead of sliding down from the top.
-    if (first.current || stick.current) {
-      node.scrollTop = node.scrollHeight
+    if (first.current) {
       first.current = false
+      // The line the reader tapped, centered with room above and below; without one the
+      // transcript opens at the bottom instead of sliding down from the top.
+      const target = aimed.current === null ? null : [...node.querySelectorAll('[data-exchange-id]')]
+        .find(row => row.dataset.exchangeId === aimed.current)
+      if (target === null || target === undefined) {
+        node.scrollTop = node.scrollHeight
+      } else {
+        const box = target.getBoundingClientRect()
+        const logBox = node.getBoundingClientRect()
+        const centered = node.scrollTop + (box.top - logBox.top) - Math.max(12, (node.clientHeight - box.height) / 2)
+        node.scrollTop = Math.max(0, Math.min(centered, node.scrollHeight - node.clientHeight))
+        setHit(aimed.current)
+      }
+    } else if (stick.current) {
+      node.scrollTop = node.scrollHeight
     }
     measure()
   }, [entries])
+  // The tapped line flashes once; the animation, or a still tint under reduced motion, is
+  // carried by the class and the state drops it again.
+  useEffect(() => {
+    if (hit === null) return undefined
+    const timer = setTimeout(() => setHit(null), 1200)
+    return () => clearTimeout(timer)
+  }, [hit])
   const toLatest = () => {
     const node = log.current
     if (node === null) return
@@ -86,7 +110,7 @@ export function ExchangeDialog({ pair, roster, actions }) {
               const whole = entry.length === undefined ? undefined : { length: entry.length, load: () => actions.exchangeText(entry.id) }
               return h(Fragment, { key: entry.id },
                 showDay ? h('time', { className: 'bt-time' }, dayLabel(entry.time)) : null,
-                h('div', { className: 'bt-group-msg' },
+                h('div', { className: `bt-group-msg${hit === entry.id ? ' bt-exchange-hit' : ''}`, 'data-exchange-id': entry.id },
                   h('span', { className: 'bt-group-name', style: { color: inkText(colorOf(bot)) } }, bot.name),
                   h(Bubbles, { texts: [stripLongNote(entry.text)], roster, selfId: bot.id, actions, whole, lead: h('span', { className: 'bt-lead' }, h(BotMark, { bot: bot, size: 22 })) })))
             })),

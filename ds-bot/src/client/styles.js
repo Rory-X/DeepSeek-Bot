@@ -371,6 +371,10 @@ button.bt-q-opt:active{background:var(--bt-active)}
    floated over the log and clear of the footer and the safe area under it. */
 .bt-exchange-jump{position:absolute;right:max(16px,calc((100% - 960px)/2 + 16px));bottom:calc(76px + env(safe-area-inset-bottom) + 12px);z-index:4;width:40px;height:40px;padding:0;border:1px solid var(--bt-line);border-radius:999px;background:var(--bt-main);color:var(--bt-ink);display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;animation:bt-veil-in .16s ease-out}
 .bt-exchange-jump svg{width:18px;height:18px}
+/* The line a tapped event opened the dialog on flashes once, so the eye lands on it. */
+@keyframes bt-exchange-hit{from{background-color:color-mix(in srgb,var(--bt-accent) 16%,transparent)}to{background-color:transparent}}
+.bt-exchange .bt-exchange-hit{border-radius:12px;animation:bt-exchange-hit 1.2s ease-out}
+@media (prefers-reduced-motion:reduce){.bt-exchange .bt-exchange-hit{animation:none;background-color:color-mix(in srgb,var(--bt-accent) 12%,transparent)}}
 @media (prefers-reduced-motion:reduce){.bt-exchange-jump{animation:none}}
 .bt-exchange[data-leaving] .bt-dialog-foot{animation:bt-foot-out .22s cubic-bezier(.4,0,1,1) forwards}
 @keyframes bt-foot-in{from{opacity:0;transform:translateY(6px)}}
