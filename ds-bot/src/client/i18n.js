@@ -111,6 +111,7 @@ const ZH = {
   Off: '关闭',
   On: '开启',
   'Allow actions': '允许执行操作',
+  'Connector settings': '连接器设置',
   'Each run asks for your approval': '每次执行都会弹出审批',
   'Let the Bots deploy, cancel, promote and roll back; every run asks for your approval': '允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准',
   'Projects, deployments, and logs': '项目、部署和日志',

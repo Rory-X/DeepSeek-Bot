@@ -147,6 +147,7 @@ var ZH = {
   Off: "关闭",
   On: "开启",
   "Allow actions": "允许执行操作",
+  "Connector settings": "连接器设置",
   "Each run asks for your approval": "每次执行都会弹出审批",
   "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
   "Projects, deployments, and logs": "项目、部署和日志",
@@ -2910,15 +2911,15 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector[data-state=ready] .bt-connector-status{color:var(--bt-ink-2)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
 .bt-connector-actions{flex:none;display:flex;gap:6px}
-.bt-connector-options{display:flex;flex-direction:column;padding-top:10px;border-top:1px solid var(--bt-line)}
-.bt-connector-options-toggle{display:flex;align-items:center;gap:8px;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
-.bt-connector-options-toggle:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
-.bt-connector-options-label{font-size:13px;line-height:18px;font-weight:500}
-.bt-connector-options-summary{margin-left:auto;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
-.bt-connector-options-summary[data-tone=on]{color:var(--bt-accent);font-weight:500}
-.bt-connector-options-chevron{flex:none;display:inline-flex;color:var(--bt-ink-3);transition:transform .15s ease}
-.bt-connector-options[data-open] .bt-connector-options-chevron{transform:rotate(90deg)}
-.bt-connector-options-body{display:flex;flex-direction:column;gap:8px;padding-top:10px}
+/* A connected connector opens its settings from its own row: the row is the control, the
+   chevron says which way it goes, and the panel below holds one section per setting. */
+.bt-connector-main{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 auto;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;border-radius:10px}
+button.bt-connector-main{cursor:pointer;min-height:24px}
+button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-connector-chevron{flex:none;display:inline-flex;color:var(--bt-ink-3);transition:transform .15s ease}
+.bt-connector[data-open] .bt-connector-chevron{transform:rotate(90deg)}
+.bt-connector-panel{display:flex;flex-direction:column;gap:12px;padding-top:10px;border-top:1px solid var(--bt-line);animation:bt-veil-in .16s ease-out}
+@media (prefers-reduced-motion:reduce){.bt-connector-chevron{transition:none}.bt-connector-panel{animation:none}}
 .bt-connector-action-row{display:flex;align-items:center;gap:12px}
 .bt-connector-action-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
@@ -11921,24 +11922,29 @@ var TOKEN_CREATE = {
 };
 var tokenLabel = (id) => (TOKEN_LABELS[id] ?? (() => t("Token")))();
 var tokenCreate = (id) => (TOKEN_CREATE[id] ?? (() => t("Create a token")))();
-function ConnectorOptions({ summary, tone = "off", children }) {
-  const [open, setOpen] = (0, import_react30.useState)(false);
+function ConnectorOption({ title, note, checked, disabled = false, describedby, onChange }) {
   return (0, import_react30.createElement)(
     "div",
-    { className: "bt-connector-options", "data-open": open || void 0 },
+    { className: "bt-connector-action-row" },
     (0, import_react30.createElement)(
-      "button",
-      {
-        type: "button",
-        className: "bt-connector-options-toggle",
-        "aria-expanded": open,
-        onClick: () => setOpen((value) => !value)
-      },
-      (0, import_react30.createElement)("span", { className: "bt-connector-options-label" }, t("Actions")),
-      (0, import_react30.createElement)("span", { className: "bt-connector-options-summary", "data-tone": tone }, summary),
-      (0, import_react30.createElement)("span", { className: "bt-connector-options-chevron", "aria-hidden": true }, (0, import_react30.createElement)(ChevronRightIcon))
+      "div",
+      { className: "bt-connector-action-text" },
+      (0, import_react30.createElement)("div", { className: "bt-connector-action-title" }, title),
+      (0, import_react30.createElement)("div", { className: "bt-connector-action-note" }, note)
     ),
-    open ? (0, import_react30.createElement)("div", { className: "bt-connector-options-body" }, children) : null
+    (0, import_react30.createElement)("button", {
+      type: "button",
+      role: "switch",
+      className: "bt-switch",
+      "aria-checked": checked,
+      "aria-label": title,
+      disabled,
+      ...describedby ? { "aria-describedby": describedby } : {},
+      onClick: (event) => {
+        event.stopPropagation();
+        onChange(!checked);
+      }
+    }, (0, import_react30.createElement)("span", { className: "bt-switch-knob", "aria-hidden": true }))
   );
 }
 function statusText2(connector) {
@@ -11968,54 +11974,58 @@ function ConnectorRow({ connector, actions }) {
   };
   const on = connector.state !== "off";
   const actionsOn = connector.actions === true;
+  const hasOptions = on && typeof connector.actions === "boolean";
+  const [details, setDetails] = (0, import_react30.useState)(false);
+  const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = MARKS[connector.id];
   const row = (0, import_react30.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
+  const mark = (0, import_react30.createElement)("span", { className: "bt-connector-mark" }, Mark ? (0, import_react30.createElement)(Mark) : null);
+  const text = (0, import_react30.createElement)(
+    "span",
+    { className: "bt-connector-text" },
+    (0, import_react30.createElement)("span", { className: "bt-connector-name" }, connector.name),
+    (0, import_react30.createElement)("span", { className: "bt-connector-status" }, statusText2(connector))
+  );
   return (0, import_react30.createElement)(
     "div",
-    { ref: row, className: "bt-connector", "data-state": connector.state },
+    { ref: row, className: "bt-connector", "data-state": connector.state, "data-open": details || void 0 },
     (0, import_react30.createElement)(
       "div",
       { className: "bt-connector-head" },
-      (0, import_react30.createElement)("span", { className: "bt-connector-mark" }, Mark ? (0, import_react30.createElement)(Mark) : null),
-      (0, import_react30.createElement)(
-        "span",
-        { className: "bt-connector-text" },
-        (0, import_react30.createElement)("span", { className: "bt-connector-name" }, connector.name),
-        (0, import_react30.createElement)("span", { className: "bt-connector-status" }, statusText2(connector))
-      ),
+      hasOptions ? (0, import_react30.createElement)("button", {
+        type: "button",
+        className: "bt-connector-main",
+        "aria-expanded": details,
+        ...details ? { "aria-controls": panelId } : {},
+        onClick: () => setDetails((value) => !value)
+      }, mark, text, (0, import_react30.createElement)("span", { className: "bt-connector-chevron", "aria-hidden": true }, (0, import_react30.createElement)(ChevronRightIcon))) : (0, import_react30.createElement)("div", { className: "bt-connector-main" }, mark, text),
       (0, import_react30.createElement)(
         "span",
         { className: "bt-connector-actions" },
-        connector.state === "error" ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => void run(actions.connectorRetry(connector.id)) }, t("Try again")) : null,
-        on ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => void run(actions.connectorDisconnect(connector.id)) }, t("Disconnect")) : form ? null : (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: () => setForm(true) }, t("Connect"))
+        connector.state === "error" ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+          event.stopPropagation();
+          void run(actions.connectorRetry(connector.id));
+        } }, t("Try again")) : null,
+        on ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+          event.stopPropagation();
+          void run(actions.connectorDisconnect(connector.id));
+        } }, t("Disconnect")) : form ? null : (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: (event) => {
+          event.stopPropagation();
+          setForm(true);
+        } }, t("Connect"))
       )
     ),
-    on && typeof connector.actions === "boolean" ? (0, import_react30.createElement)(
-      ConnectorOptions,
-      { summary: actionsOn ? t("On") : t("Off"), tone: actionsOn ? "on" : "off" },
-      (0, import_react30.createElement)(
-        "div",
-        { className: "bt-connector-action-row", "data-on": actionsOn || void 0 },
-        (0, import_react30.createElement)(
-          "div",
-          { className: "bt-connector-action-text" },
-          (0, import_react30.createElement)("div", { className: "bt-connector-action-title" }, t("Allow actions")),
-          (0, import_react30.createElement)("div", { className: "bt-connector-action-note" }, actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"))
-        ),
-        (0, import_react30.createElement)("button", {
-          type: "button",
-          role: "switch",
-          className: "bt-switch",
-          "aria-checked": actionsOn,
-          "aria-label": t("Allow actions"),
-          disabled: busy,
-          onClick: (event) => {
-            event.stopPropagation();
-            void run(actions.connectorSetActions(connector.id, !actionsOn));
-          }
-        }, (0, import_react30.createElement)("span", { className: "bt-switch-knob", "aria-hidden": true }))
-      )
+    hasOptions && details ? (0, import_react30.createElement)(
+      "div",
+      { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings") },
+      (0, import_react30.createElement)(ConnectorOption, {
+        title: t("Allow actions"),
+        note: actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"),
+        checked: actionsOn,
+        disabled: busy,
+        onChange: (next) => void run(actions.connectorSetActions(connector.id, next))
+      })
     ) : null,
     !on && form ? (0, import_react30.createElement)(
       "div",

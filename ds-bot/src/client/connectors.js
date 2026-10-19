@@ -34,20 +34,19 @@ const TOKEN_CREATE = {
 const tokenLabel = id => (TOKEN_LABELS[id] ?? (() => t('Token')))()
 const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
 
-// A connector's secondary options stay folded under its main line: the row names them and
-// carries their current summary, and the details open only when asked. Reused by any
-// connector that grows options later.
-export function ConnectorOptions({ summary, tone = 'off', children }) {
-  const [open, setOpen] = useState(false)
-  return h('div', { className: 'bt-connector-options', 'data-open': open || undefined },
+// One settings section inside a connector's panel: a title, what the switch does, and the
+// switch itself. Any connector with settings renders these; the card owns the panel.
+export function ConnectorOption({ title, note, checked, disabled = false, describedby, onChange }) {
+  return h('div', { className: 'bt-connector-action-row' },
+    h('div', { className: 'bt-connector-action-text' },
+      h('div', { className: 'bt-connector-action-title' }, title),
+      h('div', { className: 'bt-connector-action-note' }, note)),
     h('button', {
-      type: 'button', className: 'bt-connector-options-toggle', 'aria-expanded': open,
-      onClick: () => setOpen(value => !value),
-    },
-    h('span', { className: 'bt-connector-options-label' }, t('Actions')),
-    h('span', { className: 'bt-connector-options-summary', 'data-tone': tone }, summary),
-    h('span', { className: 'bt-connector-options-chevron', 'aria-hidden': true }, h(ChevronRightIcon))),
-  open ? h('div', { className: 'bt-connector-options-body' }, children) : null)
+      type: 'button', role: 'switch', className: 'bt-switch', 'aria-checked': checked, 'aria-label': title,
+      disabled,
+      ...(describedby ? { 'aria-describedby': describedby } : {}),
+      onClick: (event) => { event.stopPropagation(); onChange(!checked) },
+    }, h('span', { className: 'bt-switch-knob', 'aria-hidden': true })))
 }
 
 function statusText(connector) {
@@ -75,33 +74,43 @@ function ConnectorRow({ connector, actions }) {
   // `actions` is absent for a connector without write actions; a boolean says whether the
   // Bot may run them, and every run asks the user first.
   const actionsOn = connector.actions === true
+  // A connected connector that has settings opens them from its own row; without either
+  // there is nothing to open and the row stays what it was.
+  const hasOptions = on && typeof connector.actions === 'boolean'
+  const [details, setDetails] = useState(false)
+  const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   const Mark = MARKS[connector.id]
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
-  return h('div', { ref: row, className: 'bt-connector', 'data-state': connector.state },
+  const mark = h('span', { className: 'bt-connector-mark' }, Mark ? h(Mark) : null)
+  const text = h('span', { className: 'bt-connector-text' },
+    h('span', { className: 'bt-connector-name' }, connector.name),
+    h('span', { className: 'bt-connector-status' }, statusText(connector)))
+  return h('div', { ref: row, className: 'bt-connector', 'data-state': connector.state, 'data-open': details || undefined },
     h('div', { className: 'bt-connector-head' },
-      h('span', { className: 'bt-connector-mark' }, Mark ? h(Mark) : null),
-      h('span', { className: 'bt-connector-text' },
-        h('span', { className: 'bt-connector-name' }, connector.name),
-        h('span', { className: 'bt-connector-status' }, statusText(connector))),
+      hasOptions
+        ? h('button', {
+          type: 'button', className: 'bt-connector-main', 'aria-expanded': details,
+          ...(details ? { 'aria-controls': panelId } : {}),
+          onClick: () => setDetails(value => !value),
+        }, mark, text, h('span', { className: 'bt-connector-chevron', 'aria-hidden': true }, h(ChevronRightIcon)))
+        : h('div', { className: 'bt-connector-main' }, mark, text),
       h('span', { className: 'bt-connector-actions' },
-        connector.state === 'error' ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => void run(actions.connectorRetry(connector.id)) }, t('Try again')) : null,
+        connector.state === 'error' ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorRetry(connector.id)) } }, t('Try again')) : null,
         on
-          ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => void run(actions.connectorDisconnect(connector.id)) }, t('Disconnect'))
-          : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => setForm(true) }, t('Connect')))),
-    on && typeof connector.actions === 'boolean'
-      ? h(ConnectorOptions, { summary: actionsOn ? t('On') : t('Off'), tone: actionsOn ? 'on' : 'off' },
-        h('div', { className: 'bt-connector-action-row', 'data-on': actionsOn || undefined },
-          h('div', { className: 'bt-connector-action-text' },
-            h('div', { className: 'bt-connector-action-title' }, t('Allow actions')),
-            h('div', { className: 'bt-connector-action-note' }, actionsOn
-              ? t('Each run asks for your approval')
-              : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'))),
-          h('button', {
-            type: 'button', role: 'switch', className: 'bt-switch', 'aria-checked': actionsOn, 'aria-label': t('Allow actions'),
-            disabled: busy,
-            onClick: (event) => { event.stopPropagation(); void run(actions.connectorSetActions(connector.id, !actionsOn)) },
-          }, h('span', { className: 'bt-switch-knob', 'aria-hidden': true }))))
+          ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(connector.id)) } }, t('Disconnect'))
+          : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: (event) => { event.stopPropagation(); setForm(true) } }, t('Connect')))),
+    hasOptions && details
+      ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
+        h(ConnectorOption, {
+          title: t('Allow actions'),
+          note: actionsOn
+            ? t('Each run asks for your approval')
+            : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'),
+          checked: actionsOn,
+          disabled: busy,
+          onChange: (next) => void run(actions.connectorSetActions(connector.id, next)),
+        }))
       : null,
     !on && form ? h('div', { className: 'bt-connector-form' },
       h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenLabel(connector.id), autoFocus: true })),
