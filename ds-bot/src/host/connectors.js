@@ -19,6 +19,7 @@
 import { buildCloudflareToolIndex, CLOUDFLARE_TOOLBOX_TOOLS, createCloudflareCallTool, createCloudflareSearchTool, isBlockedCloudflareTool } from './cloudflare-toolbox.js'
 import { createApprovalDesk } from './connector-approval.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
+import { externalConnectors } from './connectors/registry.js'
 import { createOAuthFlow } from './oauth/flow.js'
 import { output } from './tools.js'
 import { buildToolIndex, createCallTool, createSearchTool } from './vercel-toolbox.js'
@@ -90,7 +91,7 @@ const CLOUDFLARE_READ_SCOPES = [
 // ask for). `toolsets` is a server-side filter header; `accountField` is the field signIn
 // reads, and `accountExtra` keeps what else the answer carries (Vercel's default team).
 // `accountTool` is a read tool that names the connected account after an OAuth mount.
-const CONNECTORS = {
+const BUILTIN_CONNECTORS = {
   github: {
     displayName: 'GitHub',
     mode: 'mcp-client',
@@ -130,6 +131,14 @@ const CONNECTORS = {
     accountIdTool: 'get_accounts',
   },
 }
+
+// Connector modules under ./connectors/ register themselves when the plugin loads, so a
+// connector line adds one file and never edits this one. A module that takes a built-in id
+// is a configuration error, refused here rather than silently shadowing GitHub or Vercel.
+for (const id of Object.keys(externalConnectors)) {
+  if (Object.hasOwn(BUILTIN_CONNECTORS, id)) throw new Error(`Connector module "${id}" collides with a built-in connector`)
+}
+const CONNECTORS = { ...BUILTIN_CONNECTORS, ...externalConnectors }
 
 export const GITHUB = 'github'
 export const GITHUB_SECRET = 'GITHUB_TOKEN'
