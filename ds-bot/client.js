@@ -3443,12 +3443,25 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 [data-composer-card] [class*="_tools"]{order:1!important;flex:none!important;align-self:flex-end!important;margin:0!important}
 [data-composer-card]>[data-input-scroll]{order:2!important;flex:1 1 0!important;min-width:0!important;padding:0 8px!important;margin:0!important}
 [data-composer-card] [class*="_trailing"]{order:3!important;flex:none!important;align-self:flex-end!important;margin:0!important}
-[data-composer-card]>[data-slot="conversation.input.attachments"]{order:0!important;flex-basis:100%!important}
+/* The shell renders the attachments slot with display:contents, so the rail inside it is
+   the real flex item: left inline, one 240px file card takes the text row's width and the
+   send button wraps away from the input. The rail takes a line of its own and scrolls there. */
+[data-composer-card]>[data-slot="conversation.input.attachments"]{order:-1!important}
+[data-composer-card]>[data-slot="conversation.input.attachments"]>*{order:-1!important;flex:0 0 100%!important;min-width:0!important;max-width:100%!important;margin-bottom:2px!important;box-sizing:border-box}
 [data-composer-card] [data-composer-input]{min-height:24px!important;padding:2px 0!important}
 [data-composer-card] [data-composer-placeholder]{left:0!important;top:2px!important}
 [data-composer-placeholder]{font-size:0!important;line-height:0!important}
 /* The name sits on ::before so that ::after stays free for other composer skins. */
 [data-composer-placeholder]::before{content:var(--bt-placeholder,"Message")!important;display:block!important;font-size:14px!important;line-height:24px!important;color:color-mix(in srgb,var(--bt-ink) 36%,transparent)!important}
+/* The shell drops its placeholder while the draft holds an attachment, so an empty text
+   row under the rail reads as a composer that lost its input. Keep the same quiet hint. */
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]:empty)::after,
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]>p:only-child:empty)::after,
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-input-scroll]>[class*="_grow"]:not(:has(>[data-composer-placeholder])):has(>[data-composer-input]>p:only-child>br:only-child)::after{content:var(--bt-placeholder,"Message");position:absolute;top:2px;left:0;right:0;color:color-mix(in srgb,var(--bt-ink) 36%,transparent);font-size:var(--dsh-content-font-size,14px);line-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+/* With the rail above it, the text row keeps a real tap target instead of a hairline. */
+[data-composer-card]:has([data-slot="conversation.input.attachments"]>*:not([hidden])) [data-composer-input]{min-height:32px!important}
+/* A very long draft scrolls inside five lines on a touch screen instead of eating the page. */
+@media (max-width:700px),(pointer:coarse){[data-composer-card]{--dsh-composer-text-max-height:min(140px,38vh)}}
 /* The team's "+" (ComposerPlus) takes the seat of the shell's command-menu button. */
 [data-composer-card] button[class*="_add"]{display:none!important}
 .bt-plus{flex:none;width:28px;height:28px;padding:0;border:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--bt-ink) 5%,transparent);box-shadow:inset 0 0 0 .5px var(--bt-line);color:var(--bt-ink-2);cursor:pointer;transition:background-color .15s ease,color .15s ease,${spring(SPRING_TAP, "scale")}}
