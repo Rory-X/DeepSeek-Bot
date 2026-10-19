@@ -2476,12 +2476,13 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-tile[aria-current=page]{background:var(--bt-active)}
 .bt-tile-name{font-size:13px;line-height:18px;font-weight:400;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-chip{font-size:11px;line-height:16px;padding:1px 4px;border-radius:4px;background:var(--bt-hover);border:1px solid var(--bt-line);color:var(--bt-ink-2);white-space:nowrap;max-width:84px;overflow:hidden;text-overflow:ellipsis}
+.bt-row-role{flex:none;max-width:84px;font-size:11px;line-height:16px;font-weight:400;padding:0 5px;border-radius:4px;background:var(--bt-hover);border:1px solid var(--bt-line);color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-row{display:flex;align-items:center;gap:8px;min-height:54px;padding:8px;border:0;border-radius:10px;background:transparent;color:var(--bt-ink);text-align:left;cursor:pointer;width:100%;box-sizing:border-box;font-family:inherit;transition:background-color .12s ease}
 .bt-row:hover{background:var(--bt-hover)}
 .bt-row[aria-current=page]{background:var(--bt-active)}
 .bt-row-body{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
 .bt-row-name{display:flex;align-items:center;gap:6px;min-width:0;font-size:14px;line-height:20px;font-weight:400}
-.bt-row-title{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bt-row-title{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-tag{flex:none;max-width:96px;font-size:12px;line-height:16px;font-weight:400;padding:1px 6px;border-radius:4px;background:var(--bt-tag-bg);color:var(--bt-tag-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-row-preview{font-size:13px;line-height:18px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* A busy row's line is the group's member state at the row's own size: what it is doing
@@ -5859,7 +5860,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
     actions.openMenu({ kind: "bot", id, x: event.clientX, y: event.clientY });
   };
   const pinned = bot.pinned === true && !tile;
-  const label = [bot.name, main ? t("Main Bot") : "", pinned ? t("Pinned") : "", running || away ? t("Working") : "", waitsFor, approval ? t("Waiting for your approval") : alert ? t("Waiting for your answer") : "", unread ? t("Unread activity") : ""].filter(Boolean).join(", ");
+  const label = [bot.name, bot.role ?? "", main ? t("Main Bot") : "", pinned ? t("Pinned") : "", running || away ? t("Working") : "", waitsFor, approval ? t("Waiting for your approval") : alert ? t("Waiting for your answer") : "", unread ? t("Unread activity") : ""].filter(Boolean).join(", ");
   if (tile && wide) {
     return (0, import_react10.createElement)("div", { className: "bt-tile-wrap" }, (0, import_react10.createElement)(
       "button",
@@ -5895,7 +5896,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
     wide ? (0, import_react10.createElement)(
       "span",
       { className: "bt-row-body" },
-      (0, import_react10.createElement)("span", { className: "bt-row-name" }, (0, import_react10.createElement)("span", { className: "bt-row-title" }, bot.name), pinned ? (0, import_react10.createElement)(PinMark) : null, time ? (0, import_react10.createElement)("span", { className: "bt-row-time" }, time) : null),
+      (0, import_react10.createElement)("span", { className: "bt-row-name" }, (0, import_react10.createElement)("span", { className: "bt-row-title" }, bot.name), bot.role ? (0, import_react10.createElement)("span", { className: "bt-row-role" }, bot.role) : null, pinned ? (0, import_react10.createElement)(PinMark) : null, time ? (0, import_react10.createElement)("span", { className: "bt-row-time" }, time) : null),
       busyLine ? busyLine : waitsFor ? (0, import_react10.createElement)("span", { className: "bt-row-preview" }, waitsFor) : preview ? (0, import_react10.createElement)("span", { className: "bt-row-preview" }, preview) : null
     ) : null,
     wide && unread && !active ? (0, import_react10.createElement)("span", { className: "bt-unread", "aria-hidden": true }) : null
