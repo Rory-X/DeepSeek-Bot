@@ -143,6 +143,9 @@ var ZH = {
   "Create a token": "创建 Token",
   "Vercel token": "Vercel 令牌",
   "Create a token on Vercel": "去 Vercel 创建 Token",
+  "Allow actions": "允许执行操作",
+  "Each run asks for your approval": "每次执行都会弹出审批",
+  "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
   "Projects, deployments, and logs": "项目、部署和日志",
   "Could not reach GitHub": "连不上 GitHub",
   "GitHub did not accept this token": "GitHub 不接受这个 token",
@@ -1703,6 +1706,7 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     connectorConnect: (id, token) => after(call2("connector-connect", { id, token })),
     connectorDisconnect: (id) => after(call2("connector-disconnect", { id })),
     connectorRetry: (id) => after(call2("connector-retry", { id })),
+    connectorSetActions: (id, enabled) => after(call2("connector-set-actions", { id, enabled })),
     saveCapability: (capability) => after(call2("capability-save", capability)),
     deleteCapability: (name) => after(call2("capability-delete", { name })),
     approveCapability: (name) => after(call2("capability-approve", { name })),
@@ -2903,6 +2907,11 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector[data-state=ready] .bt-connector-status{color:var(--bt-ink-2)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
 .bt-connector-actions{flex:none;display:flex;gap:6px}
+.bt-connector-action-row{display:flex;align-items:center;gap:12px;padding-top:10px;border-top:1px solid var(--bt-line)}
+.bt-connector-action-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
+.bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+.bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
@@ -11881,6 +11890,7 @@ function ConnectorRow({ connector, actions }) {
     });
   };
   const on = connector.state !== "off";
+  const actionsOn = connector.actions === true;
   const Mark = MARKS[connector.id];
   const row = (0, import_react30.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
@@ -11904,6 +11914,25 @@ function ConnectorRow({ connector, actions }) {
         on ? (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => void run(actions.connectorDisconnect(connector.id)) }, t("Disconnect")) : form ? null : (0, import_react30.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: () => setForm(true) }, t("Connect"))
       )
     ),
+    typeof connector.actions === "boolean" ? (0, import_react30.createElement)(
+      "div",
+      { className: "bt-connector-action-row", "data-on": actionsOn || void 0 },
+      (0, import_react30.createElement)(
+        "div",
+        { className: "bt-connector-action-text" },
+        (0, import_react30.createElement)("div", { className: "bt-connector-action-title" }, t("Allow actions")),
+        (0, import_react30.createElement)("div", { className: "bt-connector-action-note" }, actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"))
+      ),
+      (0, import_react30.createElement)("button", {
+        type: "button",
+        role: "switch",
+        className: "bt-switch",
+        "aria-checked": actionsOn,
+        "aria-label": t("Allow actions"),
+        disabled: busy,
+        onClick: () => void run(actions.connectorSetActions(connector.id, !actionsOn))
+      }, (0, import_react30.createElement)("span", { className: "bt-switch-knob", "aria-hidden": true }))
+    ) : null,
     !on && form ? (0, import_react30.createElement)(
       "div",
       { className: "bt-connector-form" },

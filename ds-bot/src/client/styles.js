@@ -562,6 +562,11 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector[data-state=ready] .bt-connector-status{color:var(--bt-ink-2)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
 .bt-connector-actions{flex:none;display:flex;gap:6px}
+.bt-connector-action-row{display:flex;align-items:center;gap:12px;padding-top:10px;border-top:1px solid var(--bt-line)}
+.bt-connector-action-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.bt-connector-action-title{font-size:13px;line-height:18px;font-weight:500}
+.bt-connector-action-note{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+.bt-connector-action-row[data-on] .bt-connector-action-note{color:var(--bt-accent)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}

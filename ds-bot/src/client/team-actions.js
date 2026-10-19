@@ -77,6 +77,7 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, tur
     connectorConnect: (id, token) => after(call('connector-connect', { id, token })),
     connectorDisconnect: id => after(call('connector-disconnect', { id })),
     connectorRetry: id => after(call('connector-retry', { id })),
+    connectorSetActions: (id, enabled) => after(call('connector-set-actions', { id, enabled })),
     saveCapability: capability => after(call('capability-save', capability)),
     deleteCapability: name => after(call('capability-delete', { name })),
     approveCapability: name => after(call('capability-approve', { name })),
