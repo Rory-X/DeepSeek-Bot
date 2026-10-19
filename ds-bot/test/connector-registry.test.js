@@ -35,7 +35,7 @@ test('this plugin ships no external connector modules yet', () => {
   assert.equal(typeof externalConnectors, 'object')
   assert.equal(Array.isArray(externalConnectors), false)
   assert.ok(CONNECTOR_ID instanceof RegExp)
-  assert.deepEqual(CONNECTOR_MODES, ['mcp-client', 'read-tools', 'oauth-mcp', 'notify', 'rest-tools'])
+  assert.deepEqual(CONNECTOR_MODES, ['mcp-client', 'read-tools', 'oauth-mcp', 'notify', 'rest-tools', 'imap', 'custom'])
 })
 
 test('helpers and tests beside a connector are not loaded', async () => {

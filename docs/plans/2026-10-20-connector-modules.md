@@ -23,10 +23,29 @@ connector lets a line add one file and nothing else.
   The id names the tools (`<id>_<tool>`), the team-file entry, the profile config key and
   the view row.
 - Required fields: `id`, `displayName`, `mode`. Modes: `mcp-client`, `read-tools`,
-  `oauth-mcp`, `notify`, `rest-tools`.
+  `oauth-mcp`, `notify`, `rest-tools`, `imap`, `custom`.
 - The rest of the object is the definition `connectors.js` already understands, by mode:
   `api`, `mcpUrl`/`url`, `tokenSecret`, `readTools`, `actionTools`, `oauth` scopes,
   `toolbox`/`toolboxKind`, `restTools`, `accountField`/`accountTool`, `needsChatId`, …
+- A connector may carry `card: { glyph, about, docsUrl, readOnlyNote, consent?: { title, body, acknowledge? } }`;
+  the view passes it through untouched and the client draws the card from it. It is display
+  data only and never reaches the tool surface.
+- A module that needs more than one secret declares
+  `credentials: [{ name, label?, required? }]`; the card then gets `inputs` in the view and
+  `connector-connect` takes `{ id, values: { <name>: <value> } }` (the single-token card
+  keeps `{ id, token }`). Secret names are DSH secret names; values are written through the
+  Secrets seam, never into the team file or a view.
+- `verify({ secrets, api })` may replace the GET `checkPath` sign-in (a POST login, an IMAP
+  login); it returns `{ account? }`. A connector with neither hook nor `checkPath` is
+  accepted once its credentials exist — the service has no "who am I" endpoint to ask.
+- Modes `rest-tools`, `imap-read` and `custom` mount through the module:
+  - `rest-tools` uses `restTools` definitions (see below), `auth({ token, secrets })`
+    headers and an optional `envelope` / `answer` (per connector or per tool);
+  - `imap-read` and `custom` use `mountTools({ ctx, rt, connector, secrets, state, output,
+    redact })`, returning `{ dispose: [...], close? }`; `close` runs on unmount.
+- The `answer` hook or `envelope` turns a service's HTTP-200 error body into a tool error:
+  `envelope: { ok, success?, data?, error?, errors? }` (WeRead `errcode`, ima `code`) or
+  `answer({ body, status })` for anything more custom.
 - A module that fails to import, has a bad id, repeats an id, lacks a display name, has an
   unknown mode, or claims a built-in id (GitHub, Vercel, Cloudflare) fails **plugin load**
   with an error naming the file. Nothing is skipped silently.
