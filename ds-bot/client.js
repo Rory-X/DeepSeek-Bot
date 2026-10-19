@@ -41,6 +41,7 @@ module.exports = __toCommonJS(index_exports);
 
 // src/client/board-i18n.js
 var BOARD_ZH = {
+  "{count} items need your attention": "{count} 项需要你处理",
   "Background tasks": "后台任务",
   "Verify background task shutdown": "核对后台任务是否停止",
   "Check that the old processes stopped and inspect their saved effects. Record your evidence before allowing recovery. This does not stop an unknown process for you.": "请确认旧进程已经停止，并检查已产生的效果，记录核对依据后再继续恢复。此操作不会替你终止状态未知的进程。",
@@ -4150,6 +4151,7 @@ var DuplicateIcon = lineIcon(["M7 7h8.5v9.5H7z", "M4.5 13V3.5H13", "M11.25 9.5v4
 var SlidersIcon = lineIcon(["M4 6.5h5M12.5 6.5H16M4 13.5h4M11.5 13.5H16", "M10.5 4.5v4M9.5 11.5v4"]);
 var MemoryIcon = lineIcon(["M5.5 3.5h8A1.5 1.5 0 0 1 15 5v10a1.5 1.5 0 0 1-1.5 1.5h-8z", "M5.5 3.5v13", "M8.5 7.5h3.5M8.5 10.5h2.5", "M12 3.5v4l1-.8 1 .8"]);
 var SidePanelIcon = lineIcon(["M4.5 4h11A1.5 1.5 0 0 1 17 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5v-9A1.5 1.5 0 0 1 4.5 4z", "M12.5 4v12"]);
+var KanbanIcon = lineIcon(["M4.5 3.5h11A1.5 1.5 0 0 1 17 5v10a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15V5a1.5 1.5 0 0 1 1.5-1.5z", "M6.5 6.5V13M10 6.5v3M13.5 6.5v5"]);
 var FolderIcon = lineIcon(["M3 6A1.5 1.5 0 0 1 4.5 4.5h3.2l1.8 2h6A1.5 1.5 0 0 1 17 8v6.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5z"]);
 var ChatsIcon = lineIcon(["M3.5 5.5A1.5 1.5 0 0 1 5 4h7a1.5 1.5 0 0 1 1.5 1.5V10A1.5 1.5 0 0 1 12 11.5H8L5 14v-2.5A1.5 1.5 0 0 1 3.5 10z", "M13.5 7.5H15A1.5 1.5 0 0 1 16.5 9v4.5A1.5 1.5 0 0 1 15 15v2l-2.5-2h-3A1.5 1.5 0 0 1 8 13.5V13"]);
 var SETTINGS_ICONS = { general: GearIcon, bots: PeopleIcon, groups: ChatsIcon, usage: GaugeIcon };
@@ -8342,13 +8344,12 @@ function remember(patch) {
   } catch {
   }
 }
-function BoardEntry({ actions, wide = true, pending = 0 }) {
+function BoardEntry({ actions, pending = 0 }) {
   return (0, import_react19.createElement)(
     "button",
-    { type: "button", className: "bt-board-entry", onClick: actions.openBoard, title: t("Project board"), "aria-label": t("Project board") },
-    (0, import_react19.createElement)(SidePanelIcon),
-    wide ? (0, import_react19.createElement)("span", null, t("Project board")) : null,
-    pending > 0 ? (0, import_react19.createElement)("span", { className: "bt-board-count" }, pending) : null
+    { type: "button", className: "bt-round bt-board-entry", onClick: actions.openBoard, title: t("Project board"), "aria-label": t("Project board"), "aria-description": pending > 0 ? t("{count} items need your attention", { count: pending }) : void 0 },
+    (0, import_react19.createElement)(KanbanIcon),
+    pending > 0 ? (0, import_react19.createElement)("span", { className: "bt-board-count", "aria-hidden": true }, pending > 99 ? "99+" : pending) : null
   );
 }
 function ProjectBoard({ useUi, useRoster, actions }) {
@@ -8438,7 +8439,7 @@ function BoardPage({ roster, actions }) {
     (0, import_react19.createElement)(
       "header",
       { className: "bt-board-header" },
-      (0, import_react19.createElement)("div", { className: "bt-board-heading" }, (0, import_react19.createElement)(SidePanelIcon), (0, import_react19.createElement)("h1", null, t("Project board"))),
+      (0, import_react19.createElement)("div", { className: "bt-board-heading" }, (0, import_react19.createElement)(KanbanIcon), (0, import_react19.createElement)("h1", null, t("Project board"))),
       (0, import_react19.createElement)(
         "div",
         { className: "bt-board-header-actions" },
@@ -8922,7 +8923,7 @@ function DraftDialog({ card, project, roster, onClose, onSaved }) {
 var BOARD_CSS = [
   ".bt-board-cancel-filter{display:flex;gap:7px;align-items:center;padding:4px 24px 14px;font-size:12px;color:var(--bt-ink-2)}.bt-board-queue{list-style:none;margin:0;padding:0}.bt-board-queue li{padding:14px;border-bottom:1px solid var(--bt-line);font-size:12px}.bt-board-queue-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.bt-board-queue-top strong{font-weight:550}.bt-board-queue p{margin:8px 0;overflow-wrap:anywhere}.bt-board-queue small{color:var(--bt-ink-3)}.bt-board-queue-link{border:0;padding:8px 0 0;background:transparent;color:var(--bt-accent);text-align:left}.bt-board-control-state{padding:12px;border:1px solid var(--bt-line);border-radius:8px;background:var(--bt-card);font-size:12px;color:var(--bt-star)}@media(max-width:899px){.bt-board-header-actions{max-width:70%;flex-wrap:wrap;justify-content:flex-end}.bt-board-detail-actions .bt-board-button{font-size:11px;padding:8px}.bt-board-cancel-filter{padding-left:16px}}",
   ".bt-board-detail-actions,.bt-board-decision-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.bt-board-answer{display:block;font-size:12px;margin:16px 0}.bt-board-answer textarea{display:block;width:100%;resize:vertical;margin-top:7px}.bt-board-decision-text{white-space:pre-wrap}.bt-board-reference{display:block;overflow-wrap:anywhere;font-size:11px;color:var(--bt-accent);margin-top:6px}.bt-board-evidence{padding:14px 16px;border-bottom:1px solid var(--bt-line);font-size:12px;overflow-wrap:anywhere}.bt-board-evidence strong{font-weight:550}.bt-board-evidence svg{display:inline-block;width:14px;height:14px;color:var(--bt-green);vertical-align:middle;margin-right:6px}.bt-board-evidence p{white-space:pre-wrap;color:var(--bt-ink-2);line-height:1.6}.bt-board-decision .bt-board-error{margin:12px 0 0}",
-  ".bt-board-entry{display:flex;align-items:center;gap:10px;flex:none;margin:6px 12px 10px;padding:10px 12px;border:1px solid var(--bt-line);border-radius:10px;background:var(--bt-card);color:var(--bt-ink);font:inherit;cursor:pointer;text-align:left}.bt-board-entry:hover{background:var(--bt-hover)}.bt-board-entry>span:first-of-type{flex:1}.bt-board-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--bt-tag-bg);color:var(--bt-star);font-size:12px;font-weight:600}",
+  ".bt-board-entry{position:relative;flex:none}.bt-board-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--bt-tag-bg);color:var(--bt-star);font-size:12px;font-weight:600}.bt-board-entry .bt-board-count{position:absolute;top:-3px;right:-4px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;font-size:10px;line-height:14px;box-shadow:0 0 0 2px var(--bt-main)}",
   '.bt-board{position:fixed;z-index:65;top:0;right:0;bottom:0;display:flex;flex-direction:column;background:var(--bt-main);color:var(--bt-ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;isolation:isolate}.bt-board *{box-sizing:border-box}.bt-board button,.bt-board input,.bt-board textarea,.bt-board select{font:inherit}.bt-board button{cursor:pointer}.bt-board button:disabled{cursor:default;opacity:.5}.bt-board :focus-visible{outline:2px solid var(--bt-accent);outline-offset:3px}.bt-board-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 24px 18px;border-bottom:1px solid var(--bt-line)}.bt-board-heading{display:flex;align-items:center;gap:10px}.bt-board-heading>svg{width:22px;height:22px;color:var(--bt-ink-2)}.bt-board h1{font-size:19px;font-weight:650;margin:0}.bt-board-header-actions{display:flex;gap:10px}.bt-board-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 14px;min-height:38px;border:1px solid var(--bt-line-2);border-radius:10px;background:var(--bt-card);color:var(--bt-ink);white-space:nowrap}.bt-board-primary{background:var(--bt-accent);color:var(--bt-accent-ink);border-color:var(--bt-accent)}',
   ".bt-board-toolbar{display:flex;align-items:center;gap:20px;padding:16px 24px 8px}.bt-board-projects{display:flex;flex:1;gap:6px;min-width:0;overflow:auto;padding:3px}.bt-board-project{display:flex;align-items:center;gap:8px;flex:none;padding:8px 12px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--bt-ink-2);white-space:nowrap}.bt-board-project[aria-pressed=true]{background:var(--bt-card);color:var(--bt-ink);border-color:var(--bt-line-2)}.bt-board-search{display:flex;align-items:center;gap:8px;max-width:230px;color:var(--bt-ink-3);padding:8px 10px;border:1px solid var(--bt-line);border-radius:8px;background:var(--bt-card)}.bt-board-search input{border:0;outline:none;background:transparent;color:var(--bt-ink);width:100%;min-width:0}.bt-board-project-info{display:flex;justify-content:space-between;gap:16px;padding:2px 27px 16px;font-size:12px;color:var(--bt-ink-3)}.bt-board-project-info>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bt-board-project-info>span:last-child{flex:none}",
   ".bt-board-columns{display:grid;grid-template-columns:repeat(4,minmax(240px,1fr));align-items:stretch;gap:14px;flex:1;min-height:0;overflow:auto;padding:0 24px 24px}.bt-board-column{display:flex;flex-direction:column;min-height:0;border:1px solid var(--bt-line);border-radius:16px;background:var(--bt-sidebar);--board-dot:var(--bt-ink-3)}.bt-board-column[data-column=in-progress]{--board-dot:var(--bt-accent)}.bt-board-column[data-column=needs-you]{--board-dot:var(--bt-star)}.bt-board-column[data-column=done]{--board-dot:var(--bt-green)}.bt-board-column-title{display:flex;align-items:center;gap:8px;padding:18px 16px 14px}.bt-board-column-title h2{font-size:14px;font-weight:600;margin:0}.bt-board-dot{display:inline-block;width:7px;height:7px;flex:none;border-radius:50%;background:var(--board-dot,var(--bt-ink-3))}.bt-board-column-count{margin-left:auto;color:var(--bt-ink-3);font-size:12px}.bt-board-column-cards{padding:0 10px 12px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:10px}.bt-board-card{display:flex;flex-direction:column;gap:12px;text-align:left;flex:none;width:100%;padding:16px 14px;border:1px solid var(--bt-line);border-radius:12px;background:var(--bt-card);color:var(--bt-ink)}.bt-board-card:hover{border-color:var(--bt-line-2);background:var(--bt-main)}.bt-board-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--bt-ink-3);font-size:11px}.bt-board-stage{color:var(--bt-ink-2)}.bt-board-card-title{font-size:15px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}.bt-board-card-summary{font-size:12px;color:var(--bt-ink-2);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.bt-board-waiting{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--bt-star);--board-dot:var(--bt-star)}.bt-board-step-count{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--bt-ink-3)}.bt-board-step-count svg{width:13px;height:13px}.bt-board-card-foot{display:flex;align-items:center;gap:8px;padding-top:3px}.bt-board-owners{display:flex;align-items:center;gap:3px;flex:none}.bt-board-owner-name{font-size:13px;margin-left:8px;color:var(--bt-ink-2)}.bt-board-time{color:var(--bt-ink-3);font-size:10px;white-space:nowrap}.bt-board-card-action{margin-left:auto;font-size:11px;padding:4px 8px;border-radius:6px;background:var(--bt-hover);color:var(--bt-ink-2)}.bt-board-action-review{color:var(--bt-accent);background:var(--bt-tag-bg)}.bt-board-attachment{display:flex;align-items:center;font-size:10px;color:var(--bt-ink-3)}.bt-board-attachment svg{width:13px}.bt-board-empty-column{margin:22px 8px;font-size:12px;text-align:center;color:var(--bt-ink-3)}.bt-board-empty{margin:auto;text-align:center;padding:40px;color:var(--bt-ink-2)}.bt-board-error{margin:10px 24px;color:var(--bt-danger);font-size:13px}",
@@ -9267,6 +9268,7 @@ function TeamSidebar(props) {
       "div",
       { className: "bt-side-top" },
       (0, import_react20.createElement)("span", { className: "bt-brand" }, (0, import_react20.createElement)(BrandMark, { size: 22 }), (0, import_react20.createElement)(BrandName)),
+      (0, import_react20.createElement)(BoardEntry, { actions, pending: roster.boardPending ?? 0 }),
       (0, import_react20.createElement)(UpdateButton, { useUpdate: props.useUpdate, actions }),
       (0, import_react20.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Search"), title: t("Search"), onClick: () => actions.openPalette() }, (0, import_react20.createElement)(SearchIcon)),
       (0, import_react20.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react20.createElement)(PlusIcon)),
@@ -9274,11 +9276,11 @@ function TeamSidebar(props) {
     ) : (0, import_react20.createElement)(
       import_react20.Fragment,
       null,
+      (0, import_react20.createElement)(BoardEntry, { actions, pending: roster.boardPending ?? 0 }),
       (0, import_react20.createElement)(UpdateButton, { useUpdate: props.useUpdate, actions }),
       (0, import_react20.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react20.createElement)(PlusIcon))
     ),
     wide && roster.readOnly ? (0, import_react20.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
-    (0, import_react20.createElement)(BoardEntry, { actions, wide, pending: roster.boardPending ?? 0 }),
     (0, import_react20.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps })
   );
 }
@@ -9370,12 +9372,12 @@ function MobileNavList({ roster, actions, listRef, main, order, markedUnread, ro
         "data-bt-settings-entry": "",
         onClick: menu.toggle
       }, (0, import_react20.createElement)(BrandMark, { size: 22 }), (0, import_react20.createElement)(BrandName)),
+      (0, import_react20.createElement)(BoardEntry, { actions, pending: roster.boardPending ?? 0 }),
       (0, import_react20.createElement)(UpdateButton, { useUpdate, actions }),
       (0, import_react20.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Search"), title: t("Search"), onClick: () => actions.openPalette() }, (0, import_react20.createElement)(SearchIcon)),
       (0, import_react20.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react20.createElement)(PlusIcon))
     ),
     roster.readOnly ? (0, import_react20.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
-    (0, import_react20.createElement)(BoardEntry, { actions, pending: roster.boardPending ?? 0 }),
     (0, import_react20.createElement)(
       "div",
       { className: "bt-nav-body" },

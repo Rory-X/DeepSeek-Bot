@@ -1,4 +1,5 @@
 export const BOARD_ZH = {
+  '{count} items need your attention': '{count} 项需要你处理',
   'Background tasks': '后台任务',
   'Verify background task shutdown': '核对后台任务是否停止',
   'Check that the old processes stopped and inspect their saved effects. Record your evidence before allowing recovery. This does not stop an unknown process for you.': '请确认旧进程已经停止，并检查已产生的效果，记录核对依据后再继续恢复。此操作不会替你终止状态未知的进程。',
