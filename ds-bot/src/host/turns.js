@@ -487,6 +487,7 @@ export function install(rt) {
           if (own !== undefined) rt.dropKickoff(own)
           // Any user message answers or supersedes the open question card.
           if (state.questions[id] !== undefined) {
+            void rt.cancelConnectorApprovals?.(id, 'cancelled')
             delete state.questions[id]
             void rt.save().catch(() => {})
           }

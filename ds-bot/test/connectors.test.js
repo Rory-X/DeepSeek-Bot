@@ -65,7 +65,7 @@ const teamHome = (state = TEAM) => {
 }
 
 // A loader that hands out a fake MCP client and records each mount.
-function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, cloudflare, secrets = [], state = TEAM, services = {} } = {}) {
+function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, cloudflare, secrets = [], state = TEAM, services = {}, config = {} } = {}) {
   const home = teamHome(state)
   if (secrets.length > 0) {
     writeFileSync(join(home, 'secrets.json'), JSON.stringify({
@@ -98,7 +98,7 @@ function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { a
     return () => { disposed.push(tool.name); undo() }
   }
   capture(ctx)
-  apply(ctx, { home, github, vercel, ...(cloudflare === undefined ? {} : { cloudflare }) })
+  apply(ctx, { home, github, vercel, ...(cloudflare === undefined ? {} : { cloudflare }), ...config })
   // Only what a mount registers later matters here; the team tools come with apply().
   registered.length = 0
   disposed.length = 0
@@ -383,22 +383,86 @@ test('the action tools stay off until the switch turns them on', async (t) => {
   assert.ok(!registered.slice(-13).includes('vercel_create_deployment'))
 })
 
-test('an action tool asks before it runs, and a read tool does not', async (t) => {
-  const { ctx, home } = setup()
+const actionsState = () => ({ ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', actions: true, connectedAt: 1 } } })
+
+// The approval card a connector write leaves in the dock for the running Bot's session.
+const approvalCard = async (ctx) => (await call(ctx, 'state', {})).value.questions.m1
+const answerCard = (ctx, questionId, selected) => call(ctx, 'answer-question', { sessionId: 'm1', questionId, answer: { selected } })
+
+test('a named action asks on the approval card before it runs, and a read tool does not', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = vercelBench()
+  globalThis.fetch = bench.fetch
+  const { ctx, home } = setup({ state: actionsState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const [approve] = ctx.listeners.get('tools/pre-execute')
-  assert.equal(typeof approve, 'function')
-  let passed = 0
-  const next = () => { passed += 1; return Promise.resolve({ kind: 'allow' }) }
-  const asked = await approve({ name: 'vercel_create_deployment', arguments: {} }, next)
-  assert.equal(asked.kind, 'ask')
-  assert.match(asked.reason, /Vercel: create_deployment/)
-  assert.ok(asked.displayReason.en.includes('create_deployment'))
-  assert.ok(asked.displayReason.zh.includes('create_deployment'))
-  assert.equal(passed, 0)
-  assert.deepEqual(await approve({ name: 'vercel_list_projects', arguments: {} }, next), { kind: 'allow' })
-  assert.deepEqual(await approve({ name: 'bash', arguments: {} }, next), { kind: 'allow' })
-  assert.equal(passed, 2)
+  await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    return item?.state === 'ready' && item.actions === true ? item : undefined
+  }, 'Vercel with its actions')
+
+  // A read tool runs with no card and no wait.
+  assert.equal(await ctx.registeredTools.get('vercel_list_projects').execute({}, { agent: { id: 'm1' } }), 'called list_projects')
+  assert.equal(await approvalCard(ctx), undefined)
+
+  // The write waits on the plugin's own card: it has not reached the server.
+  const calls = () => bench.calls.filter(entry => entry.method === 'tools/call').length
+  const pending = ctx.registeredTools.get('vercel_create_deployment').execute({}, { agent: { id: 'm1' } })
+  const card = await until(() => approvalCard(ctx), 'the approval card')
+  assert.equal(card.kind, 'connector-approval')
+  assert.equal(card.question, "Allow Chief to run Vercel's create_deployment?")
+  assert.deepEqual(card.options.map(option => option.label), ['Allow once', 'Deny'])
+  assert.equal(calls(), 1)
+
+  // Allow once: the call goes out and the card goes away.
+  assert.equal((await answerCard(ctx, card.id, ['Allow once'])).ok, true)
+  assert.equal(await pending, 'called create_deployment')
+  assert.equal(calls(), 2)
+  assert.equal(await approvalCard(ctx), undefined)
+
+  // Deny: the call never reaches the server and the model sees why.
+  const refused = ctx.registeredTools.get('vercel_cancel_deployment').execute({}, { agent: { id: 'm1' } })
+  const second = await until(() => approvalCard(ctx), 'the second card')
+  assert.equal((await answerCard(ctx, second.id, ['Deny'])).ok, true)
+  await assert.rejects(refused, /The user denied Vercel's cancel_deployment; nothing was sent/)
+  assert.equal(calls(), 2)
+
+  // Every decision is in diagnostics, and no argument is.
+  const log = (await call(ctx, 'diagnostics-log')).value
+  assert.match(log, /connector-approval/)
+  assert.match(log, /allowed: Vercel's create_deployment/)
+  assert.match(log, /denied: Vercel's cancel_deployment/)
+})
+
+test('an approval card left by an earlier host can still be dismissed', async (t) => {
+  const { ctx, home } = setup({
+    state: { ...TEAM, questions: { m1: { id: 'q-left', kind: 'connector-approval', question: "Allow Chief to run Vercel's create_deployment?", options: [{ label: 'Allow once' }, { label: 'Deny' }], askedAt: Date.now() } } },
+  })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  assert.equal((await call(ctx, 'state', {})).value.questions.m1.id, 'q-left')
+  assert.equal((await call(ctx, 'dismiss-question', { sessionId: 'm1' })).ok, true)
+  assert.equal((await call(ctx, 'state', {})).value.questions.m1, undefined)
+})
+
+test('an unanswered approval is refused after the timeout, and nothing is sent', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = vercelBench()
+  globalThis.fetch = bench.fetch
+  const { ctx, home } = setup({ state: actionsState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }], config: { connectorApprovalTimeoutMs: 60 } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    return item?.state === 'ready' && item.actions === true ? item : undefined
+  }, 'Vercel with its actions')
+
+  const pending = ctx.registeredTools.get('vercel_create_deployment').execute({}, { agent: { id: 'm1' } })
+  await until(() => approvalCard(ctx), 'the approval card')
+  await assert.rejects(pending, /did not answer in time/)
+  assert.equal(await approvalCard(ctx), undefined)
+  assert.equal(bench.calls.filter(entry => entry.method === 'tools/call').length, 0)
+  const log = (await call(ctx, 'diagnostics-log')).value
+  assert.match(log, /timed out: Vercel's create_deployment/)
 })
 
 test('a saved actions switch survives a restart', async (t) => {
@@ -450,7 +514,7 @@ test('the toolbox replaces the named actions and comes back off again', async (t
   assert.deepEqual(registered.slice(-17).sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
 })
 
-test('vercel_call goes through the same approval gate as a named action', async (t) => {
+test('vercel_call asks on the approval card for a write target; blocked targets are still refused outright', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
   const bench = vercelBench()
@@ -461,26 +525,30 @@ test('vercel_call goes through the same approval gate as a named action', async 
     const item = (await call(ctx, 'state', {})).value.connectors[1]
     return item?.state === 'ready' && item.toolbox === true ? item : undefined
   }, 'the toolbox to connect')
-  const [approve] = ctx.listeners.get('tools/pre-execute')
+  const [gate] = ctx.listeners.get('tools/pre-execute')
   let passed = 0
   const next = () => { passed += 1; return Promise.resolve({ kind: 'allow' }) }
 
-  const asked = await approve({ name: 'vercel_call', arguments: { tool: 'create_deployment', args: { project: 'shh-do-not-show' } } }, next)
-  assert.equal(asked.kind, 'ask')
-  assert.match(asked.reason, /create_deployment/)
-  assert.ok(asked.displayReason.en.includes('create_deployment'))
-  assert.ok(!JSON.stringify(asked).includes('shh-do-not-show'))
-  assert.equal(passed, 0)
-
-  assert.deepEqual(await approve({ name: 'vercel_call', arguments: { tool: 'list_projects' } }, next), { kind: 'allow' })
-  assert.equal(passed, 1)
-
-  const denied = await approve({ name: 'vercel_call', arguments: { tool: 'get_project_env' } }, next)
+  // A blocked target needs no card: it can never run.
+  const denied = await gate({ name: 'vercel_call', arguments: { tool: 'get_project_env' } }, next)
   assert.equal(denied.kind, 'deny')
   assert.match(denied.reason, /environment values or credentials/)
+  assert.equal(passed, 0)
+  // A write target passes pre-execute; the card is made inside the call, without arguments.
+  assert.deepEqual(await gate({ name: 'vercel_call', arguments: { tool: 'create_deployment' } }, next), { kind: 'allow' })
   assert.equal(passed, 1)
+  const pending = ctx.registeredTools.get('vercel_call').execute({ tool: 'create_deployment', args: { project: 'shh-do-not-show' } }, { agent: { id: 'm1' } })
+  const card = await until(() => approvalCard(ctx), 'the approval card')
+  assert.ok(card.question.includes('create_deployment'))
+  assert.ok(!JSON.stringify(card).includes('shh-do-not-show'))
+  assert.equal(bench.calls.filter(entry => entry.method === 'tools/call').length, 0)
+  await answerCard(ctx, card.id, ['Allow once'])
+  assert.equal(await pending, 'called create_deployment')
+  assert.equal(bench.calls.filter(entry => entry.method === 'tools/call').length, 1)
 
-  assert.deepEqual(await approve({ name: 'vercel_call', arguments: { tool: 'not_a_tool' } }, next), { kind: 'allow' })
+  // A read target runs with no card.
+  assert.equal(await ctx.registeredTools.get('vercel_call').execute({ tool: 'list_projects' }, { agent: { id: 'm1' } }), 'called list_projects')
+  assert.equal(await approvalCard(ctx), undefined)
 })
 
 test('a saved toolbox switch survives a restart', async (t) => {

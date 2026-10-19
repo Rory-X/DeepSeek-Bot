@@ -537,6 +537,7 @@ export function install(rt) {
     await rt.releaseBot(id, [...parts, ...rt.groupSessionsOf(id)])
     delete state.bots[id]
     for (const part of parts) {
+      void rt.cancelConnectorApprovals?.(part, 'cancelled')
       delete state.questions[part]
       delete state.exchangeTurns[part]
       delete state.switching[part]
