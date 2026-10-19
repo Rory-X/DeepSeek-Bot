@@ -3341,12 +3341,18 @@ var CONVERSATION_CSS = `
 [class*="_flowItem"]:has(> [data-slot="conversation.chat.node"]:empty){display:none!important}
 [class*="_header"]:has(.bt-head){border-bottom-color:transparent!important;box-shadow:none!important}
 /* The transcript runs under a floating header pill. */
-header[class*="_header"]:has(.bt-head){position:absolute!important;top:0;left:0;right:0;z-index:8;display:flex!important;padding:10px 0 0!important;background:transparent!important;pointer-events:none;justify-content:center}
-header[class*="_header"]:has(.bt-head)::before{content:"";position:absolute;inset:0 0 auto;height:60px;background:linear-gradient(to bottom,var(--bt-main),color-mix(in srgb,var(--bt-main) 0%,transparent));pointer-events:none;z-index:-1}
-header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{position:absolute;left:12px;top:10px;pointer-events:auto}
+/* An installed app on a notched phone has no browser chrome above the conversation: the
+   header keeps its own row clear of the safe area, which is nothing at all where env() has
+   no value. The fade grows with it so the column still scrolls out under it. */
+header[class*="_header"]:has(.bt-head){position:absolute!important;top:0;left:0;right:0;z-index:8;display:flex!important;padding:calc(10px + env(safe-area-inset-top,0px)) 0 0!important;background:transparent!important;pointer-events:none;justify-content:center}
+header[class*="_header"]:has(.bt-head)::before{content:"";position:absolute;inset:0 0 auto;height:calc(60px + env(safe-area-inset-top,0px));background:linear-gradient(to bottom,var(--bt-main),color-mix(in srgb,var(--bt-main) 0%,transparent));pointer-events:none;z-index:-1}
+header[class*="_header"]:has(.bt-head)>[class*="_headerLeading"]{position:absolute;left:12px;top:calc(10px + env(safe-area-inset-top,0px));pointer-events:auto}
 /* The back control takes the corner; anything the shell or another plugin put in the
    leading seat moves aside rather than sitting under it. */
 header[class*="_header"]:has(.bt-back)>[class*="_headerLeading"]{left:52px}
+/* A plain Session keeps the shell's own header, so its way back is the only chrome of ours
+   in there: it keeps clear of the safe area on its own. */
+${NOT_DESKTOP} header[class*="_header"]>[class*="_headerLeading"]:has(.bt-plain-back){top:calc(10px + env(safe-area-inset-top,0px))}
 header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 [class*="_body"]:has(> [class*="_scrollBody"]){--dsh-chat-content-width:min(960px,100%)}
 /* The shell writes the column's width on the conversation root at every resize, only to
