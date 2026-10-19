@@ -2,7 +2,7 @@
 // still in the draft, and the sent bubble draws the quoted line as a card above the words.
 import { createElement as h, useEffect, useLayoutEffect, useRef } from 'react'
 import { BotMark, colorOf } from './mark.js'
-import { inkText } from './inks.js'
+import { inkFill, inkText } from './inks.js'
 import { t } from './i18n.js'
 import { CloseIcon } from './icons.js'
 import { reducedMotion } from './activity-row.js'
@@ -64,6 +64,10 @@ export function splitQuote(text) {
   }
 }
 
+// The accent edge of a quote is the quoted Bot's own ink, so the card reads as that Bot's
+// message; a quote with no Bot to name keeps the interface accent.
+const quoteInk = bot => (bot ? inkFill(colorOf(bot)) : 'var(--bt-accent)')
+
 // A Bot the quote names, when the roster still holds it; otherwise the card keeps only its
 // edge and text.
 function quotedBot(quote, roster) {
@@ -108,6 +112,7 @@ export function QuoteCard({ quote, roster }) {
   return h('div', {
     ref: card, className: 'bt-quote', role: 'button', tabIndex: 0,
     'aria-label': t('Go to the quoted message'), title: t('Go to the quoted message'),
+    style: { '--bt-quote-ink': quoteInk(bot) },
     'data-compact': bot ? undefined : true,
     onClick: jump,
     onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); jump(event) } },
@@ -122,7 +127,7 @@ export function QuoteCard({ quote, roster }) {
 // spans exactly the composer's input, so the two line up at both widths.
 export function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, actions }) {
   const roster = useRoster(value => value)
-  const quote = useUi(state => (state.quote?.sessionId === sessionId ? state.quote : null))
+  const quote = useUi(state => (state.quotes?.[sessionId] ?? null))
   const draft = useInput === undefined ? null : useInput(state => state.draft)
   const bot = quote === null ? undefined : (quote.botId ? roster.byId[quote.botId] : undefined)
   const bar = useRef(null)
@@ -131,10 +136,18 @@ export function ComposerQuote({ sessionId, inputActions, useInput, useRoster, us
     if (quote === null || quote.inserted !== false || inputActions === undefined) return
     actions.quoteInsert(quote.token, inputActions.captureInsertion())
   }, [quote?.token, quote?.inserted])
-  // Sent, cleared or deleted: the bar leaves with the chip.
+  // The bar leaves only when the draft settled without the quote while this composer watched
+  // it — sent, or the line deleted. A Session switch unmounts the bar before that, and the
+  // draft the shell restores on the way back still holds the quote.
+  const draftNow = useRef(draft)
+  draftNow.current = draft
   useEffect(() => {
-    if (quote === null || quote.inserted !== true || draft === null) return
-    if (!draft.includes(quote.clipboardText)) actions.clearQuote(quote.token)
+    if (quote === null || quote.inserted !== true) return undefined
+    const timer = setTimeout(() => {
+      const current = draftNow.current ?? ''
+      if (!current.includes(quote.clipboardText)) actions.clearQuote(quote.token)
+    }, 400)
+    return () => clearTimeout(timer)
   }, [draft, quote?.token, quote?.inserted])
   // The bar takes the composer input's own box: width first, then the offset its own layout
   // left it at, so it lines up with the input at both widths.
@@ -178,7 +191,7 @@ export function ComposerQuote({ sessionId, inputActions, useInput, useRoster, us
     target.classList.add('bt-quote-target')
     setTimeout(() => target.classList.remove('bt-quote-target'), 1200)
   }
-  return h('div', { ref: bar, className: 'bt-quote-dock' },
+  return h('div', { ref: bar, className: 'bt-quote-dock', style: { '--bt-quote-ink': quoteInk(bot) } },
   bot ? h(BotMark, { bot, size: 18 }) : null,
   h('button', {
     type: 'button', className: 'bt-quote-dock-main', 'aria-label': t('Go to the quoted message'), title: t('Go to the quoted message'),

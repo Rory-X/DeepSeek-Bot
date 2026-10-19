@@ -1670,7 +1670,6 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     closePanel: () => {
       ui2.set((state) => state.details ? { ...state, details: null, view: "details", renaming: false, tab: null } : state);
     },
-    clearQuote: (token) => ui2.set((state) => state.quote?.token === token ? { ...state, quote: null } : state),
     setFlags: (id, flags) => after(call2("set-flags", { id, ...flags })),
     deleteRoom: (id) => after(call2("delete-room", { id })),
     openMenu: (menu) => {
@@ -3483,7 +3482,7 @@ div:has(> nav [class*="_marks"]){display:none!important}
 [data-chat-flow-kind=question-reply]:has(.bt-q-inline),[data-chat-group-key]:has([data-chat-flow-kind=question-reply] .bt-q-inline),[data-chat-group-key]:has(.bt-q-gone){margin-top:0!important}
 .bt-q-inline .bt-q{margin:0;max-width:min(550px,86%);order:0}
 .bt-q-dock{width:100%;display:flex;justify-content:center}
-.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
+.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-quote-ink,var(--bt-accent));border-radius:12px;background:var(--bt-card)}
 .bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px;margin:0;padding:0;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;border-radius:8px;transition:background-color .12s ease}
 .bt-quote-dock-main:hover{background:var(--bt-hover)}
 .bt-quote-dock-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
@@ -3527,12 +3526,12 @@ div:has(> nav [class*="_marks"]){display:none!important}
 /* A reply keeps the message it answers above its words: a left accent edge, the Bot that
    sent it, and two lines of the quote. Tokens only; inside the dark user bubble the veil
    and the text come from the bubble's own ink so they stay readable in both themes. */
-.bt-quote{margin:0 0 6px;padding:6px 10px 6px 9px;border-left:3px solid var(--bt-accent);border-radius:10px;background:var(--bt-hover);color:var(--bt-ink);white-space:normal;box-sizing:border-box}
+.bt-quote{margin:0 0 6px;padding:6px 10px 6px 9px;border-left:3px solid var(--bt-quote-ink,var(--bt-accent));border-radius:10px;background:var(--bt-hover);color:var(--bt-ink);white-space:normal;box-sizing:border-box}
 .bt-quote-who{display:flex;align-items:center;gap:5px;min-width:0;font-size:12px;line-height:16px;font-weight:600;margin-bottom:2px}
 .bt-quote-who>:first-child{flex:none}
 .bt-quote-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-quote-text{font-size:13px;line-height:18px;color:var(--bt-ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
-.bt-ubody .bt-quote{background:color-mix(in srgb,var(--bt-user-ink) 14%,transparent)}
+.bt-ubody .bt-quote{background:color-mix(in srgb,var(--bt-user-ink) 14%,transparent);border-left-color:color-mix(in srgb,var(--bt-quote-ink,var(--bt-accent)) 72%,var(--bt-user-ink))}
 .bt-ubody .bt-quote-text{color:color-mix(in srgb,var(--bt-user-ink) 78%,transparent)}
 .bt-quote[data-compact]{padding:5px 9px 5px 8px}
 .bt-quote[data-compact] .bt-quote-who{display:none}
@@ -3964,6 +3963,7 @@ function splitQuote(text) {
     body
   };
 }
+var quoteInk = (bot) => bot ? inkFill(colorOf(bot)) : "var(--bt-accent)";
 function quotedBot(quote, roster) {
   if (quote.bot !== void 0) return quote.bot;
   if (quote.name === null || quote.name === "") return void 0;
@@ -4004,6 +4004,7 @@ function QuoteCard({ quote, roster }) {
       tabIndex: 0,
       "aria-label": t("Go to the quoted message"),
       title: t("Go to the quoted message"),
+      style: { "--bt-quote-ink": quoteInk(bot) },
       "data-compact": bot ? void 0 : true,
       onClick: jump,
       onKeyDown: (event) => {
@@ -4024,7 +4025,7 @@ function QuoteCard({ quote, roster }) {
 }
 function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, actions }) {
   const roster = useRoster((value) => value);
-  const quote = useUi((state) => state.quote?.sessionId === sessionId ? state.quote : null);
+  const quote = useUi((state) => state.quotes?.[sessionId] ?? null);
   const draft = useInput === void 0 ? null : useInput((state) => state.draft);
   const bot = quote === null ? void 0 : quote.botId ? roster.byId[quote.botId] : void 0;
   const bar = (0, import_react4.useRef)(null);
@@ -4032,9 +4033,15 @@ function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, ac
     if (quote === null || quote.inserted !== false || inputActions === void 0) return;
     actions.quoteInsert(quote.token, inputActions.captureInsertion());
   }, [quote?.token, quote?.inserted]);
+  const draftNow = (0, import_react4.useRef)(draft);
+  draftNow.current = draft;
   (0, import_react4.useEffect)(() => {
-    if (quote === null || quote.inserted !== true || draft === null) return;
-    if (!draft.includes(quote.clipboardText)) actions.clearQuote(quote.token);
+    if (quote === null || quote.inserted !== true) return void 0;
+    const timer = setTimeout(() => {
+      const current = draftNow.current ?? "";
+      if (!current.includes(quote.clipboardText)) actions.clearQuote(quote.token);
+    }, 400);
+    return () => clearTimeout(timer);
   }, [draft, quote?.token, quote?.inserted]);
   (0, import_react4.useLayoutEffect)(() => {
     if (quote === null) return void 0;
@@ -4078,7 +4085,7 @@ function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, ac
   };
   return (0, import_react4.createElement)(
     "div",
-    { ref: bar, className: "bt-quote-dock" },
+    { ref: bar, className: "bt-quote-dock", style: { "--bt-quote-ink": quoteInk(bot) } },
     bot ? (0, import_react4.createElement)(BotMark, { bot, size: 18 }) : null,
     (0, import_react4.createElement)(
       "button",
@@ -15007,7 +15014,7 @@ function apply(ctx) {
   const reactionStore = sharedMap(STORAGE.reactions);
   const seenStore = sharedMap(STORAGE.seen);
   let seenAt = seenStore.read();
-  const ui2 = createSource({ details: null, view: "details", renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, hint: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} });
+  const ui2 = createSource({ details: null, view: "details", renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quotes: {}, settings: null, memory: null, toast: null, hint: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} });
   const surface = createSource({ mode: readMode(), plain: false });
   const mobileNav = createSource(false);
   const navLevel = createSource("list");
@@ -15813,6 +15820,18 @@ function apply(ctx) {
       return void 0;
     }
   };
+  const quoteOf = (token) => Object.values(ui2.getSnapshot().quotes ?? {}).find((entry) => entry.token === token);
+  const setQuote = (token, patch) => ui2.set((state) => {
+    const entry = Object.values(state.quotes ?? {}).find((row) => row.token === token);
+    if (entry === void 0) return state;
+    const next = patch(entry);
+    if (next === null) {
+      const quotes = { ...state.quotes };
+      delete quotes[entry.sessionId];
+      return { ...state, quotes };
+    }
+    return { ...state, quotes: { ...state.quotes, [entry.sessionId]: next } };
+  });
   actions.quote = (sessionId, text, bot, target) => {
     const facade = quoteFacade(sessionId);
     if (facade === void 0) {
@@ -15820,14 +15839,12 @@ function apply(ctx) {
       return;
     }
     const { ref, clipboardText, label, excerpt } = quoteRef(bot, text);
-    ui2.set((state) => ({
-      ...state,
-      quote: { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, before: facade.state.getSnapshot().draft, target: target instanceof Element ? target : null, token: Date.now(), inserted: false }
-    }));
+    const quote = { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, target: target instanceof Element ? target : null, token: Date.now(), inserted: false };
+    ui2.set((state) => ({ ...state, quotes: { ...state.quotes, [sessionId]: quote } }));
   };
   actions.quoteInsert = (token, span) => {
-    const quote = ui2.getSnapshot().quote;
-    if (quote === null || quote.token !== token || span === void 0) return;
+    const quote = quoteOf(token);
+    if (quote === void 0 || span === void 0) return;
     const facade = quoteFacade(quote.sessionId);
     if (facade === void 0) return;
     let inserted = false;
@@ -15838,20 +15855,25 @@ function apply(ctx) {
     }
     if (!inserted) {
       facade.notify?.("error", t("Could not quote this message"));
-      ui2.set((state) => state.quote?.token === token ? { ...state, quote: null } : state);
+      setQuote(token, () => null);
       return;
     }
-    ui2.set((state) => state.quote?.token === token ? { ...state, quote: { ...state.quote, inserted: true } } : state);
+    setQuote(token, (entry) => ({ ...entry, inserted: true }));
   };
   actions.quoteCancel = (token) => {
-    const quote = ui2.getSnapshot().quote;
-    if (quote === null || quote.token !== token) return;
+    const quote = quoteOf(token);
+    if (quote === void 0) return;
     const facade = quoteFacade(quote.sessionId);
-    if (facade !== void 0 && quote.inserted === true && facade.state.getSnapshot().draft.includes(quote.clipboardText)) {
-      facade.setDraft(quote.before ?? "");
+    if (facade !== void 0) {
+      const draft = facade.state.getSnapshot().draft;
+      if (draft.includes(quote.clipboardText)) {
+        const left = draft.replace(quote.clipboardText, "");
+        facade.setDraft(left.trim() === "" ? "" : left);
+      }
     }
-    ui2.set((state) => state.quote?.token === token ? { ...state, quote: null } : state);
+    setQuote(token, () => null);
   };
+  actions.clearQuote = (token) => setQuote(token, () => null);
   actions.canReferenceChat = () => atMenu !== null;
   actions.referenceChat = (sessionId, span) => {
     const controller = atMenu?.controllerOf(sessionId);

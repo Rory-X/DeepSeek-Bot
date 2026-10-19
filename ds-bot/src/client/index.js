@@ -55,7 +55,7 @@ export function apply(ctx) {
   let seenAt = seenStore.read()
   // `details` is the panel's subject (a Session id); `view` picks details or the
   // subject Bot's browser inside it.
-  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quote: null, settings: null, memory: null, toast: null, hint: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} })
+  const ui = createSource({ details: null, view: 'details', renaming: false, tab: null, newChat: null, exchange: null, menu: null, voice: null, palette: null, quotes: {}, settings: null, memory: null, toast: null, hint: null, signIn: null, renameAgent: null, unread: unreadStore.read(), reactions: reactionStore.read(), visits: {} })
   // Bot mode paints the whole team surface; Agent mode withdraws every slot and
   // style so the shell's own interface returns. `plain` stays false until a Bot-mode
   // view hosts a plain session, which drops only the conversation replacements.
@@ -904,6 +904,20 @@ export function apply(ctx) {
     if (binding === undefined || conversation === undefined) return undefined
     try { return conversation.input.for(binding.ctx) } catch { return undefined }
   }
+  // One pending reply per Session, kept until the reader cancels it or the draft it quotes in
+  // is gone. A Session switch neither clears the state nor the text the shell restores.
+  const quoteOf = token => Object.values(ui.getSnapshot().quotes ?? {}).find(entry => entry.token === token)
+  const setQuote = (token, patch) => ui.set((state) => {
+    const entry = Object.values(state.quotes ?? {}).find(row => row.token === token)
+    if (entry === undefined) return state
+    const next = patch(entry)
+    if (next === null) {
+      const quotes = { ...state.quotes }
+      delete quotes[entry.sessionId]
+      return { ...state, quotes }
+    }
+    return { ...state, quotes: { ...state.quotes, [entry.sessionId]: next } }
+  })
   actions.quote = (sessionId, text, bot, target) => {
     const facade = quoteFacade(sessionId)
     if (facade === undefined) {
@@ -911,14 +925,12 @@ export function apply(ctx) {
       return
     }
     const { ref, clipboardText, label, excerpt } = quoteRef(bot, text)
-    ui.set(state => ({
-      ...state,
-      quote: { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, before: facade.state.getSnapshot().draft, target: target instanceof Element ? target : null, token: Date.now(), inserted: false },
-    }))
+    const quote = { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, target: target instanceof Element ? target : null, token: Date.now(), inserted: false }
+    ui.set(state => ({ ...state, quotes: { ...state.quotes, [sessionId]: quote } }))
   }
   actions.quoteInsert = (token, span) => {
-    const quote = ui.getSnapshot().quote
-    if (quote === null || quote.token !== token || span === undefined) return
+    const quote = quoteOf(token)
+    if (quote === undefined || span === undefined) return
     const facade = quoteFacade(quote.sessionId)
     if (facade === undefined) return
     let inserted = false
@@ -929,21 +941,27 @@ export function apply(ctx) {
     }
     if (!inserted) {
       facade.notify?.('error', t('Could not quote this message'))
-      ui.set(state => (state.quote?.token === token ? { ...state, quote: null } : state))
+      setQuote(token, () => null)
       return
     }
-    ui.set(state => (state.quote?.token === token ? { ...state, quote: { ...state.quote, inserted: true } } : state))
+    setQuote(token, entry => ({ ...entry, inserted: true }))
   }
-  // Cancel puts the draft back as it was before the chip, when the chip is still there.
+  // Cancel takes the quoted line out of the draft, keeping whatever the reader typed around it.
   actions.quoteCancel = (token) => {
-    const quote = ui.getSnapshot().quote
-    if (quote === null || quote.token !== token) return
+    const quote = quoteOf(token)
+    if (quote === undefined) return
     const facade = quoteFacade(quote.sessionId)
-    if (facade !== undefined && quote.inserted === true && facade.state.getSnapshot().draft.includes(quote.clipboardText)) {
-      facade.setDraft(quote.before ?? '')
+    if (facade !== undefined) {
+      const draft = facade.state.getSnapshot().draft
+      if (draft.includes(quote.clipboardText)) {
+        const left = draft.replace(quote.clipboardText, '')
+        facade.setDraft(left.trim() === '' ? '' : left)
+      }
     }
-    ui.set(state => (state.quote?.token === token ? { ...state, quote: null } : state))
-  };
+    setQuote(token, () => null)
+  }
+  // The bar asks for this when the draft it quoted in no longer holds the quote.
+  actions.clearQuote = token => setQuote(token, () => null);
   actions.canReferenceChat = () => atMenu !== null
   actions.referenceChat = (sessionId, span) => {
     const controller = atMenu?.controllerOf(sessionId)

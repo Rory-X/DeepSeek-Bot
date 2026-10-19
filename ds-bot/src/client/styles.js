@@ -1135,7 +1135,7 @@ div:has(> nav [class*="_marks"]){display:none!important}
 [data-chat-flow-kind=question-reply]:has(.bt-q-inline),[data-chat-group-key]:has([data-chat-flow-kind=question-reply] .bt-q-inline),[data-chat-group-key]:has(.bt-q-gone){margin-top:0!important}
 .bt-q-inline .bt-q{margin:0;max-width:min(550px,86%);order:0}
 .bt-q-dock{width:100%;display:flex;justify-content:center}
-.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-accent);border-radius:12px;background:var(--bt-card)}
+.bt-quote-dock{display:flex;align-items:center;gap:8px;box-sizing:border-box;margin:0 0 6px;padding:7px 8px 7px 10px;border:1px solid var(--bt-line-2);border-left:3px solid var(--bt-quote-ink,var(--bt-accent));border-radius:12px;background:var(--bt-card)}
 .bt-quote-dock-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px;margin:0;padding:0;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;border-radius:8px;transition:background-color .12s ease}
 .bt-quote-dock-main:hover{background:var(--bt-hover)}
 .bt-quote-dock-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
@@ -1179,12 +1179,12 @@ div:has(> nav [class*="_marks"]){display:none!important}
 /* A reply keeps the message it answers above its words: a left accent edge, the Bot that
    sent it, and two lines of the quote. Tokens only; inside the dark user bubble the veil
    and the text come from the bubble's own ink so they stay readable in both themes. */
-.bt-quote{margin:0 0 6px;padding:6px 10px 6px 9px;border-left:3px solid var(--bt-accent);border-radius:10px;background:var(--bt-hover);color:var(--bt-ink);white-space:normal;box-sizing:border-box}
+.bt-quote{margin:0 0 6px;padding:6px 10px 6px 9px;border-left:3px solid var(--bt-quote-ink,var(--bt-accent));border-radius:10px;background:var(--bt-hover);color:var(--bt-ink);white-space:normal;box-sizing:border-box}
 .bt-quote-who{display:flex;align-items:center;gap:5px;min-width:0;font-size:12px;line-height:16px;font-weight:600;margin-bottom:2px}
 .bt-quote-who>:first-child{flex:none}
 .bt-quote-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-quote-text{font-size:13px;line-height:18px;color:var(--bt-ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
-.bt-ubody .bt-quote{background:color-mix(in srgb,var(--bt-user-ink) 14%,transparent)}
+.bt-ubody .bt-quote{background:color-mix(in srgb,var(--bt-user-ink) 14%,transparent);border-left-color:color-mix(in srgb,var(--bt-quote-ink,var(--bt-accent)) 72%,var(--bt-user-ink))}
 .bt-ubody .bt-quote-text{color:color-mix(in srgb,var(--bt-user-ink) 78%,transparent)}
 .bt-quote[data-compact]{padding:5px 9px 5px 8px}
 .bt-quote[data-compact] .bt-quote-who{display:none}
