@@ -60,8 +60,14 @@ const teamHome = () => {
 }
 
 // A loader that hands out a fake MCP client and records each mount.
-function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' } } = {}) {
+function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, secrets = [] } = {}) {
   const home = teamHome()
+  if (secrets.length > 0) {
+    writeFileSync(join(home, 'secrets.json'), JSON.stringify({
+      version: 1,
+      secrets: secrets.map(entry => ({ name: entry.name, value: entry.value, purpose: entry.purpose ?? '', scope: entry.scope ?? 'all' })),
+    }))
+  }
   const mounts = []
   const registered = []
   const disposed = []
@@ -92,6 +98,16 @@ function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { a
   registered.length = 0
   disposed.length = 0
   return { ctx, home, mounts, registered, disposed }
+}
+
+// Waits for the background mount a saved token starts.
+async function until(check, label) {
+  for (let count = 0; count < 200; count += 1) {
+    const value = await check()
+    if (value !== undefined) return value
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  throw new Error(`timed out: ${label}`)
 }
 
 function capture(ctx) {
@@ -250,6 +266,49 @@ test('connecting Vercel mounts only its read tools, and the default team answers
   await tool.execute({ projectId: 'p1', teamId: 'team_2' }, { agent: { id: 'm1' } })
   assert.deepEqual(bench.calls.filter(entry => entry.method === 'tools/call').at(-1).params.arguments, { projectId: 'p1', teamId: 'team_2' })
   assert.deepEqual((await call(ctx, 'state', {})).value.secrets.map(secret => [secret.name, secret.scope]), [['VERCEL_TOKEN', []]])
+})
+
+test('a saved Vercel token connects on its own and fills the account and team', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = vercelBench()
+  globalThis.fetch = bench.fetch
+  const token = fresh()
+  const { ctx, home, registered } = setup({ secrets: [{ name: 'VERCEL_TOKEN', value: token }] })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const connectors = await until(async () => {
+    const view = (await call(ctx, 'state', {})).value.connectors
+    return view[1]?.state === 'ready' ? view : undefined
+  }, 'Vercel to connect from its saved token')
+  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme' })
+  assert.deepEqual(registered, ['vercel_list_projects', 'vercel_get_runtime_logs'])
+  // The account and its default team are kept in the team file, without the token.
+  const savedText = readFileSync(join(home, 'state.json'), 'utf8')
+  const saved = JSON.parse(savedText)
+  assert.deepEqual([saved.connectors.vercel.username, saved.connectors.vercel.teamId], ['acme', 'team_1'])
+  assert.ok(!savedText.includes(token))
+  // The default team answers the tools that need one.
+  const tool = ctx.registeredTools.get('vercel_get_runtime_logs')
+  await tool.execute({ projectId: 'p1' }, { agent: { id: 'm1' } })
+  assert.deepEqual(bench.calls.filter(entry => entry.method === 'tools/call').at(-1).params.arguments, { projectId: 'p1', teamId: 'team_1' })
+})
+
+test('a failed account check does not stop the saved-token mount', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = vercelBench({ status: 500 })
+  globalThis.fetch = bench.fetch
+  const { ctx, home, registered } = setup({ secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const connectors = await until(async () => {
+    const view = (await call(ctx, 'state', {})).value.connectors
+    return view[1]?.state === 'ready' ? view : undefined
+  }, 'Vercel to mount without an account')
+  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: null })
+  assert.deepEqual(registered, ['vercel_list_projects', 'vercel_get_runtime_logs'])
+  assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors?.vercel, undefined)
 })
 
 test('a Vercel token that is refused or cannot name the account is not saved', async (t) => {
