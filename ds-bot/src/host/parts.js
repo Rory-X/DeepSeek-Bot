@@ -787,6 +787,9 @@ export function install(rt) {
         })
         await rt.save()
       })
+      // A state write that fails here (full disk, a file another program holds, a lost lock)
+      // must not end up as an unhandled rejection, which stops the whole host.
+      .catch(error => rt.warn('ds-bot: the switch of %s did not finish: %s', agent.id, error))
   }
 
   async function runSwitch(agent, job) {
@@ -1002,7 +1005,11 @@ export function install(rt) {
     const cwd = agent.session.header?.cwd
     if (place === undefined || cwd === undefined || (midTurn && place.roomId !== undefined) || Date.now() < (folderRetry.get(agent.id) ?? 0)) return undefined
     const wanted = rt.workDirOf(place)
-    const target = wanted !== undefined && await rt.isFolder(wanted) ? wanted : rt.teamFolder()
+    const usable = wanted !== undefined && await rt.isFolder(wanted)
+    // A team copied from another DSH_HOME has no team workspace here until one is made, and its
+    // Sessions still work in the old one.
+    if (!usable && rt.teamFolder() === undefined) await rt.ensureWorkspace()
+    const target = usable ? wanted : rt.teamFolder()
     return target === undefined || target === cwd ? undefined : target
   }
 

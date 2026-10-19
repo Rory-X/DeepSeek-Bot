@@ -7,8 +7,6 @@ directories:
 files:
   - package.json
   - src/**
-  - engine/**
-  - ui/dist/**
   - assets/**
 # The Host runs pnpm as a separate Node process to install plugins, so it must be a plain file.
 asarUnpack:
@@ -31,5 +29,15 @@ nsis:
   multiLanguageInstaller: true
 mac:
   target: dmg
+  # Ad-hoc signing seals the bundle; no Developer ID or notarization.
+  identity: '-'
+  hardenedRuntime: false
   icon: assets/icon.png
   category: public.app-category.productivity
+# Where the installed app looks for updates (app-update.yml in the package). The build writes
+# latest.yml beside the installer; the release workflow attaches both to the GitHub release,
+# so the build itself never publishes (--publish never).
+publish:
+  provider: github
+  owner: Fei2411
+  repo: DeepSeek-Bot
