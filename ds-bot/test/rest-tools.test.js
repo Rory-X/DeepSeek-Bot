@@ -31,7 +31,7 @@ const redact = text => String(text).split(TOKEN).join('[secret]').split(KEY).joi
 const postConnector = (extra = {}) => ({
   displayName: 'Postly',
   api: 'https://postly.example.com',
-  restHeaders: ({ token, readSecret }) => ({ Authorization: `Bearer ${token}`, 'X-Api-Key': readSecret('POSTLY_API_KEY') }),
+  auth: ({ token, secrets }) => ({ Authorization: `Bearer ${token}`, 'X-Api-Key': secrets.POSTLY_API_KEY }),
   restTools: [
     {
       name: 'search_notes',
@@ -77,20 +77,29 @@ test('a missing path argument is reported before a request', async () => {
   assert.equal(asked, false)
 })
 
-test('a service header can replace the default bearer', async () => {
+test('a connector auth hook receives its named credentials', async () => {
   const seen = []
-  const [tool] = createRestTools('example', connector({ restHeaders: () => ({ Authorization: `Bearer ${TOKEN}`, 'Notion-Version': '2022-06-28' }) }), {
-    token: TOKEN, output, fetch: async (url, init) => { seen.push(init.headers); return answer(200, {}) },
+  const [tool] = createRestTools('example', connector({
+    auth: ({ token, secrets }) => ({ Authorization: `Bearer ${token}`, 'X-Named': secrets.EXTRA_KEY, 'Notion-Version': '2022-06-28' }),
+  }), {
+    token: TOKEN, secrets: { EXTRA_KEY: 'named-secret' }, output, fetch: async (url, init) => { seen.push(init.headers); return answer(200, {}) },
   })
   await tool.execute({ projectId: 'p1' })
   assert.equal(seen[0]['Notion-Version'], '2022-06-28')
+  assert.equal(seen[0]['X-Named'], 'named-secret')
+  // The old name still works for connectors written against it.
+  const [legacy] = createRestTools('example', connector({ restHeaders: () => ({ Authorization: `Bearer ${TOKEN}`, 'Notion-Version': '2022-06-28' }) }), {
+    token: TOKEN, output, fetch: async (url, init) => { seen.push(init.headers); return answer(200, {}) },
+  })
+  await legacy.execute({ projectId: 'p1' })
+  assert.equal(seen[1]['Notion-Version'], '2022-06-28')
 })
 
 test('a read-only POST sends only the mapped body fields, with connector-owned auth', async () => {
   const seen = []
   const [tool] = createRestTools('postly', postConnector(), {
     token: TOKEN,
-    readSecret: name => (name === 'POSTLY_API_KEY' ? KEY : undefined),
+    secrets: { POSTLY_API_KEY: KEY },
     output,
     fetch: async (url, init) => { seen.push([url, init]); return answer(200, { notes: [] }) },
   })
@@ -129,7 +138,7 @@ test('http errors become clear tool errors', async () => {
   const [tool] = createRestTools('example', connector(), { token: TOKEN, output, fetch: async () => { throw new Error('offline') } })
   await assert.rejects(tool.execute({ projectId: 'p1' }), /Could not reach Example/)
 
-  const [post] = createRestTools('postly', postConnector(), { token: TOKEN, output, fetch: async () => answer(429, {}) })
+  const [post] = createRestTools('postly', postConnector(), { token: TOKEN, secrets: { POSTLY_API_KEY: KEY }, output, fetch: async () => answer(429, {}) })
   await assert.rejects(post.execute({ bookId: 'b1', query: 'q' }), /rate limited/)
 })
 
@@ -147,8 +156,71 @@ test('a long answer is cut, plain text survives, and a token is redacted', async
   assert.equal(await leaky.execute({ projectId: 'p1' }), '{"token":"[secret]"}')
 
   // A POST answer is redacted and cut the same way.
-  const [post] = createRestTools('postly', postConnector(), { token: TOKEN, output, redact, fetch: async () => answer(200, { key: KEY, data: 'z'.repeat(REST_RESULT_MAX + 100) }) })
+  const [post] = createRestTools('postly', postConnector(), { token: TOKEN, secrets: { POSTLY_API_KEY: KEY }, output, redact, fetch: async () => answer(200, { key: KEY, data: 'z'.repeat(REST_RESULT_MAX + 100) }) })
   const postText = await post.execute({ bookId: 'b1', query: 'q' })
   assert.ok(!postText.includes(KEY))
   assert.match(postText, /result cut:/)
+})
+
+// WeRead answers HTTP 200 with `errcode`; ima with `code/msg/data`. An envelope turns either
+// into a plain payload, and a nonzero status into a tool error.
+const enveloped = (envelope, extra = {}) => ({
+  displayName: 'Enveloped',
+  api: 'https://enveloped.test',
+  envelope,
+  restTools: [{ name: 'query', method: 'POST', readOnly: true, path: '/v1/query', body: { q: 'q' }, parameters: { type: 'object', properties: { q: { type: 'string' } } }, ...extra }],
+})
+
+test('an envelope unwraps the payload and turns a bad status code into an error', async () => {
+  const ok = createRestTools('env', enveloped({ ok: 'errcode', success: 0, data: 'data', error: 'errmsg' }), { output, fetch: async () => answer(200, { errcode: 0, errmsg: 'ok', data: { notes: 2 } }) })
+  assert.equal(await ok[0].execute({ q: 'x' }), '{"notes":2}')
+
+  const ima = createRestTools('ima', enveloped({ ok: 'code', success: 0, data: 'data', error: 'msg', errors: { 20002: 'ima is rate limited; try again later.', 20004: 'ima did not accept this API key.' } }), { output })
+  for (const [code, pattern] of [[20002, /rate limited/], [20004, /did not accept this API key/], [210001, /answered code 210001: something broke/]]) {
+    const [tool] = createRestTools('ima', enveloped({ ok: 'code', success: 0, data: 'data', error: 'msg', errors: { 20002: 'ima is rate limited; try again later.', 20004: 'ima did not accept this API key.' } }), { output, fetch: async () => answer(200, { code, msg: 'something broke', data: {} }) })
+    await assert.rejects(tool.execute({ q: 'x' }), pattern, String(code))
+  }
+  assert.equal(ima[0].name, 'ima_query')
+
+  // A per-tool envelope replaces the connector's.
+  const overridden = createRestTools('env', enveloped({ ok: 'errcode', success: 0, data: 'data' }, { envelope: { ok: 'status', success: 'ok', data: 'result' } }), { output, fetch: async () => answer(200, { status: 'ok', result: [1, 2] }) })
+  assert.equal(await overridden[0].execute({ q: 'x' }), '[1,2]')
+
+  const missing = createRestTools('env', enveloped({ ok: 'errcode', success: 0 }), { output, fetch: async () => answer(200, 'not json') })
+  await assert.rejects(missing[0].execute({ q: 'x' }), /cannot read/)
+})
+
+test('a dotted body field nests its object, as a structured request needs', async () => {
+  const seen = []
+  const nested = {
+    displayName: 'Nested',
+    api: 'https://nested.test',
+    restTools: [{
+      name: 'search_note',
+      method: 'POST',
+      readOnly: true,
+      path: '/note/search',
+      body: { 'query_info.title': 'title', 'query_info.content': 'content', start: { const: 0 } },
+      parameters: { type: 'object', properties: { title: { type: 'string' }, content: { type: 'string' } } },
+    }],
+  }
+  const [tool] = createRestTools('nested', nested, { output, fetch: async (url, init) => { seen.push(JSON.parse(init.body)); return answer(200, {}) } })
+  await tool.execute({ title: '周报', content: '周报', start: 99 })
+  assert.deepEqual(seen[0], { query_info: { title: '周报', content: '周报' }, start: 0 })
+})
+
+test('an answer hook may format or refuse a successful response', async () => {
+  const formatter = createRestTools('env', enveloped(undefined, {
+    answer: ({ body }) => `notes: ${body.data.length}`,
+  }), { output, fetch: async () => answer(200, { data: [1, 2, 3] }) })
+  assert.equal(await formatter[0].execute({ q: 'x' }), 'notes: 3')
+
+  const refusing = createRestTools('env', enveloped(undefined, {
+    answer: ({ body }) => { if (body.code !== 0) throw new Error('no') ; return 'ok' },
+  }), { output, fetch: async () => answer(200, { code: 20004 }) })
+  await assert.rejects(refusing[0].execute({ q: 'x' }), /no/)
+
+  // HTTP errors are mapped before the envelope sees anything.
+  const http = createRestTools('env', enveloped({ ok: 'code', success: 0 }), { output, fetch: async () => answer(429, { code: 0 }) })
+  await assert.rejects(http[0].execute({ q: 'x' }), /rate limited/)
 })

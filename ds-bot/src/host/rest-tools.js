@@ -7,6 +7,12 @@
 // every body field it sends, with an argument name or a constant. An argument the definition
 // does not name never reaches the request, and nothing but the mapped scalars can enter the
 // body. Any other method is refused when the tools are built.
+//
+// Some services answer HTTP 200 with their own status field (WeRead's `errcode`, ima's
+// `code`). A connector may declare `envelope` (or one tool may override it): the field name
+// for the status and the success value, where the payload lives, how codes map to messages,
+// and optionally a full `answer({ body, status })` hook. A failed envelope is a tool error,
+// never a successful-looking answer.
 export const REST_RESULT_MAX = 20_000
 export const REST_ERROR_MAX = 2_000
 export const REST_BODY_MAX_BYTES = 8_192
@@ -55,25 +61,34 @@ const isScalarList = value => Array.isArray(value) && value.every(isScalar)
 // constant). Everything else in `args` is ignored, so a model cannot widen the request.
 function requestBody(connector, definition, args) {
   const body = {}
+  // A dotted field nests (`query_info.title`), which is how a service with a structured
+  // request body keeps one flat body mapping.
+  const setPath = (field, value) => {
+    const parts = field.split('.')
+    let node = body
+    for (const part of parts.slice(0, -1)) node = node[part] ??= {}
+    node[parts.at(-1)] = value
+  }
   for (const [field, mapping] of Object.entries(definition.body ?? {})) {
     if (mapping !== null && typeof mapping === 'object') {
       if (!Object.hasOwn(mapping, 'const')) throw new Error(`${connector.displayName} REST tool "${definition.name}" body field "${field}" must name an argument or a constant.`)
-      body[field] = mapping.const
+      setPath(field, mapping.const)
       continue
     }
     if (typeof mapping !== 'string' || mapping === '') throw new Error(`${connector.displayName} REST tool "${definition.name}" body field "${field}" must name an argument or a constant.`)
     const value = args?.[mapping]
     if (value === undefined || value === null) continue
     if (!isScalar(value) && !isScalarList(value)) throw new Error(`"${mapping}" must be text, a number, a boolean or a list of those.`)
-    body[field] = value
+    setPath(field, value)
   }
   const text = JSON.stringify(body)
   if (Buffer.byteLength(text) > REST_BODY_MAX_BYTES) throw new Error(`The request body is too large; keep it under ${REST_BODY_MAX_BYTES} bytes.`)
   return text
 }
 
-function headers(connector, definition, { token, readSecret }) {
-  const own = connector.restHeaders?.({ token, readSecret }) ?? { Authorization: `Bearer ${token}` }
+function headers(connector, definition, { token, secrets }) {
+  const auth = connector.auth ?? connector.restHeaders
+  const own = typeof auth === 'function' ? auth({ token, secrets }) ?? {} : { Authorization: `Bearer ${token}` }
   return { accept: 'application/json', ...(definition.headers ?? {}), ...own }
 }
 
@@ -93,12 +108,33 @@ function validate(connector, definition) {
   return method
 }
 
+// The service's own envelope around a 200 answer. `success` defaults to 0; `errors` maps a
+// status code to the sentence the model sees, and the envelope's message field is the
+// fallback so an unknown code still says what the service said.
+function unwrap(connector, envelope, body) {
+  if (body === undefined || body === null || typeof body !== 'object') {
+    throw new Error(`${connector.displayName} answered something this connector cannot read.`)
+  }
+  const code = body[envelope.ok]
+  const success = envelope.success === undefined ? 0 : envelope.success
+  const ok = envelope.successTrue === true ? code === true : code === success
+  if (ok) {
+    const payload = envelope.data === undefined ? body : body[envelope.data]
+    return payload === undefined ? 'null' : JSON.stringify(payload)
+  }
+  const mapped = envelope.errors !== null && typeof envelope.errors === 'object' ? envelope.errors[String(code)] : undefined
+  if (typeof mapped === 'string' && mapped !== '') throw new Error(mapped)
+  const detail = envelope.error === undefined ? undefined : body[envelope.error]
+  const said = typeof detail === 'string' && detail !== '' ? `: ${detail.slice(0, 160)}` : ''
+  throw new Error(`${connector.displayName} answered code ${String(code)}${said}`)
+}
+
 // Builds the connector's tools. `definition.parameters` is the model-facing JSON schema;
 // `path` may carry `{argument}` placeholders, `query` maps argument names to query names,
 // and a POST's `body` maps body fields to argument names or `{ const }`. `connector.api` is
-// the service origin, `connector.restHeaders({ token, readSecret })` supplies auth headers,
-// and `readSecret(name)` resolves any extra named secret the connector needs.
-export function createRestTools(id, connector, { token, readSecret = () => undefined, output, redact = text => String(text), fetch: request = fetch } = {}) {
+// the service origin, `connector.auth({ token, secrets })` supplies auth headers (the old
+// `restHeaders` name still works), and `secrets` is the named-credential map.
+export function createRestTools(id, connector, { token, secrets = {}, output, redact = text => String(text), fetch: request = fetch } = {}) {
   return (connector.restTools ?? []).map((definition) => {
     const method = validate(connector, definition)
     const name = safeName(id, definition.name)
@@ -120,7 +156,7 @@ export function createRestTools(id, connector, { token, readSecret = () => undef
         try {
           response = await request(url, {
             method,
-            headers: method === 'POST' ? { ...headers(connector, definition, { token, readSecret }), 'content-type': 'application/json' } : headers(connector, definition, { token, readSecret }),
+            headers: method === 'POST' ? { ...headers(connector, definition, { token, secrets }), 'content-type': 'application/json' } : headers(connector, definition, { token, secrets }),
             ...(method === 'POST' ? { body } : {}),
             signal: AbortSignal.timeout(TIMEOUT_MS),
           })
@@ -129,13 +165,26 @@ export function createRestTools(id, connector, { token, readSecret = () => undef
         }
         if (!response.ok) throw new Error(errorText(connector, response))
         const text = await response.text()
-        let answer = text
+        let parsed
         try {
-          answer = JSON.stringify(JSON.parse(text))
+          parsed = JSON.parse(text)
         } catch {
-          // A plain-text answer is returned as it is.
+          parsed = undefined
         }
-        return cut(answer, redact)
+        const envelope = definition.envelope ?? connector.envelope
+        const hook = definition.answer ?? connector.answer
+        if (typeof hook === 'function') {
+          const answer = await hook({ body: parsed, status: response.status })
+          return cut(typeof answer === 'string' ? answer : JSON.stringify(answer), redact)
+        }
+        if (envelope !== undefined) {
+          try {
+            return cut(unwrap(connector, envelope, parsed), redact)
+          } catch (error) {
+            throw new Error(redact(String(error?.message ?? error)).slice(0, REST_ERROR_MAX))
+          }
+        }
+        return cut(parsed === undefined ? text : JSON.stringify(parsed), redact)
       },
     }
   })

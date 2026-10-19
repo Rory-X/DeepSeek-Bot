@@ -19,8 +19,10 @@
 import { buildCloudflareToolIndex, CLOUDFLARE_TOOLBOX_TOOLS, createCloudflareCallTool, createCloudflareSearchTool, isBlockedCloudflareTool } from './cloudflare-toolbox.js'
 import { createApprovalDesk } from './connector-approval.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
+import { credentialFields, connectValues } from './connector-setup.js'
 import { externalConnectors } from './connectors/registry.js'
 import { createOAuthFlow } from './oauth/flow.js'
+import { createRestTools } from './rest-tools.js'
 import { output } from './tools.js'
 import { buildToolIndex, createCallTool, createSearchTool } from './vercel-toolbox.js'
 
@@ -95,6 +97,12 @@ const BUILTIN_CONNECTORS = {
   github: {
     displayName: 'GitHub',
     mode: 'mcp-client',
+    card: {
+      glyph: 'github',
+      about: "Issues, pull requests and repository context through GitHub's own MCP server.",
+      docsUrl: 'https://docs.github.com',
+      readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.',
+    },
     mcpUrl: 'https://api.githubcopilot.com/mcp/',
     api: 'https://api.github.com',
     tokenSecret: 'GITHUB_TOKEN',
@@ -107,6 +115,12 @@ const BUILTIN_CONNECTORS = {
   vercel: {
     displayName: 'Vercel',
     mode: 'read-tools',
+    card: {
+      glyph: 'vercel',
+      about: 'Projects, deployments and runtime logs from a connected Vercel account.',
+      docsUrl: 'https://vercel.com/docs/mcp',
+      readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.',
+    },
     mcpUrl: 'https://mcp.vercel.com',
     api: 'https://api.vercel.com',
     tokenSecret: 'VERCEL_TOKEN',
@@ -122,6 +136,17 @@ const BUILTIN_CONNECTORS = {
   cloudflare: {
     displayName: 'Cloudflare',
     mode: 'oauth-mcp',
+    card: {
+      glyph: 'cloudflare',
+      about: 'Zones, DNS records, analytics and Workers through Cloudflare\'s own MCP server.',
+      docsUrl: 'https://developers.cloudflare.com/agents/model-context-protocol/',
+      readOnlyNote: 'The named tools only read. Full access can change your account; every write still asks for your approval first.',
+      consent: {
+        title: 'Choose the access level on the authorization page',
+        body: 'Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your Cloudflare account; every write still asks for your approval first.',
+        acknowledge: "I'll choose the access level on the authorization page",
+      },
+    },
     mcpUrl: 'https://mcp.cloudflare.com/mcp?codemode=false',
     readTools: CLOUDFLARE_READ_TOOLS,
     oauth: { scopes: CLOUDFLARE_READ_SCOPES },
@@ -283,6 +308,7 @@ export function install(rt) {
     mounts.delete(id)
     for (const [callName, box] of toolboxes) if (box.id === id) toolboxes.delete(callName)
     if (mounted?.dispose !== undefined) for (const dispose of mounted.dispose) dispose()
+    mounted?.close?.()
     mounted?.client?.close()
     const fiber = mounted?.fiber
     if (fiber !== undefined) await Promise.resolve().then(() => fiber.dispose()).catch(() => {})
@@ -292,6 +318,79 @@ export function install(rt) {
   const reason = (error) => {
     const text = [error, error?.cause].filter(Boolean).map(part => String(part?.message ?? part)).join(': ')
     return rt.redactSecrets(text || 'error').slice(0, 300)
+  }
+
+  // Connectors that are not a single token (REST APIs with two keys, IMAP mailboxes) keep
+  // their credentials in the same named secrets and mount through hooks the module brings.
+  // The mount key tracks those values so a changed credential remounts; it is never logged.
+  const credentialFieldNames = connector => credentialFields(connector).map(field => field.name)
+  const credentialKeyOf = connector => credentialFieldNames(connector)
+    .map(name => `${name}\u0000${rt.secretValue(name) ?? ''}`)
+    .join('\u0001')
+  const secretMapOf = connector => Object.fromEntries(credentialFieldNames(connector).map(name => [name, rt.secretValue(name)]))
+  const configuredOf = (connector) => {
+    const fields = credentialFields(connector)
+    return fields.length > 0 && fields.every((field) => (field.required === false ? true : rt.secretValue(field.name) !== undefined))
+  }
+
+  // The credentials a service hands out are checked once, when they are saved. A module may
+  // bring its own `verify` hook (a POST login, an IMAP login); a connector with a `checkPath`
+  // falls back to the GET signIn; one with neither is accepted once the credentials exist.
+  const verifyConnector = async (id, connector, values) => {
+    if (typeof connector.verify === 'function') {
+      const token = values[connector.tokenSecret] ?? Object.values(values)[0]
+      const extra = await connector.verify({ token, secrets: { ...values }, api: connector.api })
+      return extra !== null && typeof extra === 'object' && !Array.isArray(extra) ? extra : {}
+    }
+    if (typeof connector.checkPath === 'string' && connector.checkPath !== '') {
+      const token = values[connector.tokenSecret] ?? Object.values(values)[0]
+      return await signIn(id, token, { api: connector.api })
+    }
+    return {}
+  }
+
+  // One REST tool definition per read-only request (the module brings the method, path,
+  // mapping and envelope; the framework only ever runs what it declares).
+  function mountRestTools(id) {
+    const connector = options[id]
+    const secrets = secretMapOf(connector)
+    const dispose = []
+    try {
+      for (const tool of createRestTools(id, connector, {
+        token: secrets[connector.tokenSecret],
+        secrets,
+        output,
+        redact: rt.redactSecrets,
+      })) dispose.push(ctx.tools.register(tool))
+    } catch (error) {
+      for (const undo of dispose) undo()
+      throw error
+    }
+    return { token: credentialKeyOf(connector), dispose }
+  }
+
+  // A connector whose protocol the framework does not know mounts its own tools through
+  // `mountTools`, which returns disposers and an optional close.
+  function mountConnectorTools(id) {
+    const connector = options[id]
+    if (typeof connector.mountTools !== 'function') throw new Error(`${connector.displayName} has no tools to mount`)
+    const secrets = secretMapOf(connector)
+    const mounted = connector.mountTools({
+      ctx,
+      rt,
+      connector,
+      token: secrets[connector.tokenSecret],
+      secrets,
+      state: state.connectors?.[id],
+      output,
+      redact: rt.redactSecrets,
+    })
+    if (mounted === undefined || mounted === null) return { token: credentialKeyOf(connector), dispose: [] }
+    return {
+      token: credentialKeyOf(connector),
+      dispose: Array.isArray(mounted.dispose) ? mounted.dispose : [],
+      ...(typeof mounted.close === 'function' ? { close: mounted.close } : {}),
+    }
   }
 
   // A mounted OAuth tool the server refuses (401/403) asks for one refresh. A failed
@@ -500,6 +599,8 @@ export function install(rt) {
           statuses.set(id, { state: 'error', error: reason(error) })
           return
         }
+      } else if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
+        token = configuredOf(connector) ? credentialKeyOf(connector) : undefined
       } else {
         token = rt.secretValue(connector.tokenSecret)
       }
@@ -522,6 +623,24 @@ export function install(rt) {
     if (connector.mode === 'read-tools') {
       await claimAccount(id, token, replaced)
       if (stopped || mounts.get(id) !== attempt) return
+    }
+    if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
+      try {
+        const mounted = connector.mode === 'rest-tools' ? mountRestTools(id) : mountConnectorTools(id)
+        if (stopped || mounts.get(id) !== attempt) {
+          for (const undo of mounted.dispose) undo()
+          mounted.close?.()
+          return
+        }
+        mounts.set(id, mounted)
+        statuses.set(id, { state: 'ready' })
+      } catch (error) {
+        await unmount(id)
+        mounts.set(id, { token })
+        statuses.set(id, { state: 'error', error: reason(error) })
+        rt.warn('ds-bot: %s connector failed: %s', connector.displayName, statuses.get(id).error)
+      }
+      return
     }
     const loader = ctx.get?.('loader')
     if (connector.mode === 'mcp-client' && (typeof loader?.import !== 'function' || typeof ctx.plugin !== 'function')) {
@@ -579,6 +698,9 @@ export function install(rt) {
   const accountOf = (id) => {
     const connector = options[id]
     if (connector.mode === 'oauth-mcp') return state.connectors?.[id]?.account ?? null
+    if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
+      return configuredOf(connector) ? state.connectors?.[id]?.account ?? null : null
+    }
     if (rt.secretValue(connector.tokenSecret) === undefined) return null
     return state.connectors?.[id]?.[connector.accountField] ?? null
   }
@@ -596,6 +718,10 @@ export function install(rt) {
       // Connect from `oauth` and shows `account` once the server named it.
       account: accountOf(id),
       ...(oauthConnector ? { oauth: true } : {}),
+      ...((connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom')
+        ? { mode: connector.mode, inputs: credentialFields(connector) }
+        : {}),
+      ...(connector.card === undefined ? {} : { card: connector.card }),
       ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
       ...(connector.toolbox === true
         ? {
@@ -616,8 +742,26 @@ export function install(rt) {
       const connector = options[body.id]
       if (connector.mode === 'oauth-mcp') throw new Error(`${connector.displayName} connects with OAuth, not a token`)
       const token = typeof body.token === 'string' ? body.token.trim() : ''
-      if (token === '') throw new Error('Paste a token first')
       if (insecure(body.id)) throw new Error(insecureText(body.id))
+      if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
+        await rt.loadSecrets()
+        const values = connectValues(connector, body)
+        const account = await verifyConnector(body.id, connector, values)
+        state.connectors = { ...state.connectors, [body.id]: { ...switchesOf(body.id), ...account, connectedAt: Date.now() } }
+        try {
+          for (const [name, value] of Object.entries(values)) {
+            const kept = rt.secretValue(name) !== undefined
+            await rt.secretEndpoint('secret-set', { name, value, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
+          }
+        } catch (error) {
+          delete state.connectors[body.id]
+          throw error
+        }
+        await rt.save()
+        await sync(body.id, true)
+        return connectorsView()
+      }
+      if (token === '') throw new Error('Paste a token first')
       await rt.loadSecrets()
       const kept = rt.secretValue(connector.tokenSecret) !== undefined
       const account = await signIn(body.id, token, { api: connector.api })
@@ -656,7 +800,10 @@ export function install(rt) {
         return connectorsView()
       }
       await rt.loadSecrets()
-      if (rt.secretValue(connector.tokenSecret) !== undefined) await rt.secretEndpoint('secret-delete', { name: connector.tokenSecret })
+      const names = new Set([...credentialFieldNames(connector), ...(connector.tokenSecret === undefined ? [] : [connector.tokenSecret])])
+      for (const name of names) {
+        if (rt.secretValue(name) !== undefined) await rt.secretEndpoint('secret-delete', { name })
+      }
       if (state.connectors?.[body.id] !== undefined) {
         delete state.connectors[body.id]
         await rt.save()
