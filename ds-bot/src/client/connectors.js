@@ -227,10 +227,7 @@ function ConnectorRow({ connector, actions }) {
     if (notify) {
       const chatId = chatValue.trim()
       // The chat id typed beside the secret is saved once the token is known to be good.
-      void run(async () => {
-        await submit()
-        if (chatId !== '') await actions.connectorSetChat(connector.id, chatId)
-      }, done)
+      void run(submit().then(() => (chatId === '' ? undefined : actions.connectorSetChat(connector.id, chatId))), done)
       return
     }
     // A host that declares its fields takes them as `values`; an older one takes the token.

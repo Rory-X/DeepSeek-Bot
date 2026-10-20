@@ -13995,10 +13995,7 @@ function ConnectorRow({ connector, actions }) {
     const submit = () => declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token);
     if (notify) {
       const chatId = chatValue.trim();
-      void run(async () => {
-        await submit();
-        if (chatId !== "") await actions.connectorSetChat(connector.id, chatId);
-      }, done);
+      void run(submit().then(() => chatId === "" ? void 0 : actions.connectorSetChat(connector.id, chatId)), done);
       return;
     }
     void run(submit(), done);
