@@ -47,3 +47,33 @@ Neon 是托管 Postgres，官方提供远程 MCP 服务（`https://mcp.neon.tech
 
 - **按级别注册工具**：模块的 `toolsOf({ level })` 与按参数审批的 `actionApproval` 需要框架 P1（级别门控 + 审批卡带参数）。
 - **挂载地址**：模块 `authorize()` 在写级别返回不带 `readonly` 的地址，但现有挂载仍用 `connector.url`；需要框架在模块带 `authorize` 时用 **grant 的 resource** 挂载，否则写 grant 会挂在只读地址上（`tools/list` 仍是只读清单，写工具永远不出现）。
+
+## 用户恢复路径（hotfix 后）
+
+> hotfix 之前，卡片在 off 状态下打不开设置面板、也没有 `projectId`/`roleName` 输入框，用户只能由运维改 `state.json` 恢复。下面这版是修好之后的正常操作。
+
+**只读（推荐）**
+1. 设置 → 连接器 → 展开 Neon 卡片（未连接时也能展开）。
+2. 访问级别选「只读 / Read only」。
+3. 点「Connect」，浏览器跳到 Neon 授权页，点 Allow。
+4. 回到卡片显示 Connected；工具面是 16 个只读工具。
+
+**完整能力（可写，需要先准备）**
+1. Neon Console 里复制 **Project ID**（形如 `spring-brook-12345678`：小写字母、数字、连字符）。
+2. 在每个要查询的分支上建一个受限 Postgres 角色（Neon 服务端自己解析密码，DS Bot 不需要密码）：
+   ```sql
+   CREATE ROLE app_reader LOGIN PASSWORD '<自设>';
+   GRANT CONNECT ON DATABASE neondb TO app_reader;
+   GRANT USAGE ON SCHEMA public TO app_reader;
+   GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_reader;
+   ```
+3. 卡片设置里填 `Project ID`、`SQL role`（如 `app_reader`），访问级别选「完整能力 / Can write」。
+4. 点 Connect → Neon 授权页确认：只 branches/querying/snapshots、锁项目、锁角色、scope 为 read + write → Allow。
+5. 回来是 Connected；之后建分支/写 SQL/建快照/删分支每次弹审批卡。
+6. 想回只读：级别切「只读」，会自动断开删 grant，再点一次 Connect 重新授权。
+
+**状态提示**：级别/设置在已连接时改动会写 `needsReauth`（"Authorize again…"），成功授权回调后就清掉；它本身不拦操作，拦截的是 `readiness`（缺 `projectId`/`roleName` 时）。旧 grant 在改级别时就被删掉，不会残留。
+
+## 故障回退（hotfix 未装时的唯一办法）
+
+停 DSH → 备份 `state.json` → 把 `connectors.neon` 改成 `{"level":"read"}`（要写就同时写 `settings`）→ 启动 → 在卡片点 Connect。**不要再反复点 Connect**，同一 readiness 拒绝不会自愈。

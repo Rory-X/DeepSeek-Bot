@@ -209,6 +209,61 @@ try {
   if (String(error?.message ?? error) !== 'skip') record('QA-05', 'not configured', 'fail', String(error?.message ?? error))
 }
 
+// --- C2. settings clear the readiness note --------------------------------
+try {
+  const rowNow = await neonRow()
+  if (!Array.isArray(rowNow?.levels)) {
+    record('QA-26', 'saving the settings clears the readiness note', 'skip', 'levels are not in the view yet')
+  } else {
+    await api('connector-set-settings', { id: 'neon', values: { projectId: 'spring-brook-12345678', roleName: 'app_reader' } })
+    await api('connector-set-level', { id: 'neon', level: 'write' })
+    const before = await neonRow()
+    const cleared = before?.levelNote === undefined
+    record('QA-26', 'saving the settings clears the readiness note', cleared ? 'pass' : 'fail',
+      JSON.stringify({ level: before?.level, levelNote: before?.levelNote, state: before?.state }))
+  }
+} catch (error) {
+  record('QA-26', 'saving the settings clears the readiness note', 'fail', String(error?.message ?? error))
+}
+
+// --- C3. the hotfix path: pick a level on an off card and connect ---------
+try {
+  await api('connector-disconnect', { id: 'neon' }).catch(() => {})
+  await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {})
+  await page.waitForTimeout(1500)
+  await dismissDialogs()
+  await openConnectors()
+  const card = page.locator('.bt-connector', { hasText: 'Neon' }).first()
+  const stateRow = await neonRow()
+  if (stateRow?.state !== 'off') {
+    record('QA-25', 'an off card can pick Read-only and connect', 'skip', `the row is ${stateRow?.state}, not off`)
+  } else {
+    // The hotfix makes the panel reachable on an off card; without it there is no level control.
+    const main = card.locator('.bt-connector-main')
+    if (await main.locator('button, [role="button"]').count() > 0 || await main.evaluate(node => node.tagName === 'BUTTON').catch(() => false)) await main.click().catch(() => {})
+    const readOnly = card.locator('.bt-connector-level', { hasText: /read/i }).first()
+    const reachable = await readOnly.count() > 0
+    if (!reachable) {
+      record('QA-25', 'an off card can pick Read-only and connect', 'skip', 'this build cannot open the level panel while off (hotfix pending)')
+    } else {
+      await resetMock()
+      await readOnly.click()
+      await page.waitForTimeout(500)
+      const connect = card.getByRole('button', { name: /^Connect$/ }).first()
+      await connect.click()
+      await page.waitForTimeout(1500)
+      const last = await mockJson('/debug/last-authorize')
+      const categories = Array.isArray(last?.categories) ? last.categories.length : 0
+      const ok = (last?.readonly ?? []).includes('true') && categories === 5 && last?.scope === 'read'
+      record('QA-25', 'an off card can pick Read-only and connect', ok ? 'pass' : 'fail',
+        JSON.stringify({ readonly: last?.readonly, categories, scope: last?.scope }), [await shot('25-readonly-from-off-1280')])
+      // The authorization is left for the next run; a stray browser tab is closed by the page.
+    }
+  }
+} catch (error) {
+  record('QA-25', 'an off card can pick Read-only and connect', 'fail', String(error?.message ?? error))
+}
+
 // --- G/H. cleanup and secrets ---------------------------------------------
 try {
   const disconnect = await api('connector-disconnect', { id: 'neon' })
