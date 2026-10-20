@@ -46,26 +46,17 @@ export function imaError(code, msg) {
   return `ima answered ${code}${named}`
 }
 
-// The adapter unwraps this envelope and turns a non-zero code into a tool error, so a
-// refusal never reads as a successful answer. The message field is the fallback for codes
-// that are not mapped here.
-export const IMA_ENVELOPE = {
-  ok: 'code',
-  success: 0,
-  data: 'data',
-  error: 'msg',
-  errors: {
-    20002: imaError(20002),
-    110021: imaError(110021),
-    20004: imaError(20004),
-    200002: imaError(200002),
-    110030: imaError(110030),
-    210005: imaError(210005),
-    210011: imaError(210011),
-    210034: imaError(210034),
-    210002: imaError(210002),
-    210035: imaError(210035),
-  },
+// A successful call is unwrapped here instead of through `envelope`, because the adapter
+// checks a non-2xx status before it runs this hook: a 429 or 401 with an empty or odd body
+// then says what happened instead of "code undefined". The service's own status field is
+// still authoritative for the business errors it reports inside a 200.
+export function imaAnswer({ body, status } = {}) {
+  if (status === 429) throw new Error('ima is rate limiting this key; try again later')
+  if (body === null || typeof body !== 'object' || Array.isArray(body) || !Object.hasOwn(body, 'code')) {
+    throw new Error('ima answered something this connector cannot read.')
+  }
+  if (body.code === 0) return JSON.stringify(body.data ?? {})
+  throw new Error(imaError(body.code, body.msg))
 }
 
 // The card and the team file keep two credentials for ima, not one token: the client id
@@ -273,13 +264,16 @@ export const connector = {
   credentials: IMA_CREDENTIALS,
   auth,
   restTools: IMA_REST_TOOLS,
-  envelope: IMA_ENVELOPE,
+  answer: imaAnswer,
   verify: verifyIma,
-  // What the card shows. Harmless if this framework version does not read them yet.
-  glyph: 'ima',
-  about: 'Read your ima notes and knowledge bases.',
-  docsUrl: 'https://ima.qq.com/agent-interface',
-  readOnlyNote: 'All tools send POST requests, but they only read: nothing in ima is changed.',
+  // The card reads its copy from `card` only (see the client's cardText): glyph, about,
+  // docsUrl and readOnlyNote at the top level are ignored by the view.
+  card: {
+    glyph: 'ima',
+    about: 'Read your ima notes and knowledge bases.',
+    docsUrl: 'https://ima.qq.com/agent-interface',
+    readOnlyNote: 'All tools send POST requests, but they only read: nothing in ima is changed.',
+  },
 }
 
 export default connector
@@ -306,6 +300,7 @@ export async function verifyIma({ secrets = {}, fetch: request = fetch } = {}) {
     throw new Error('Could not reach ima')
   }
   if (response.status === 401) throw new Error('ima did not accept this client id or API key')
+  if (response.status === 429) throw new Error('ima is rate limiting this key; try again later')
   if (!response.ok) throw new Error(`ima answered ${response.status}`)
   let body
   try {
@@ -313,9 +308,6 @@ export async function verifyIma({ secrets = {}, fetch: request = fetch } = {}) {
   } catch {
     throw new Error('ima answered something this connector cannot read')
   }
-  if (body?.code !== 0) {
-    const mapped = IMA_ENVELOPE.errors[String(body?.code)]
-    throw new Error(mapped ?? `ima answered code ${String(body?.code)}${typeof body?.msg === 'string' && body.msg !== '' ? `: ${body.msg.slice(0, 160)}` : ''}`)
-  }
+  if (body?.code !== 0) throw new Error(imaError(body?.code, body?.msg))
   return { ok: true }
 }

@@ -4,10 +4,10 @@ import connector, {
   IMA_API_KEY_SECRET,
   IMA_BASE,
   IMA_CLIENT_ID_SECRET,
-  IMA_ENVELOPE,
   IMA_REST_TOOLS,
   IMA_WRITE_PATHS,
   auth,
+  imaAnswer,
   imaError,
   verifyIma,
 } from '../src/host/connectors/ima.js'
@@ -113,17 +113,17 @@ test('the two credential headers and the skill context travel on every call', ()
   assert.deepEqual(auth({ secrets: { [IMA_CLIENT_ID_SECRET]: CLIENT_ID } }), { 'ima-openapi-clientid': CLIENT_ID, 'ima-openapi-ctx': 'skill_version=1.1.10' })
 })
 
-test('the envelope names ima\'s own status fields and maps the refusal codes', () => {
-  assert.equal(IMA_ENVELOPE.ok, 'code')
-  assert.equal(IMA_ENVELOPE.success, 0)
-  assert.equal(IMA_ENVELOPE.data, 'data')
-  assert.equal(IMA_ENVELOPE.error, 'msg')
-  assert.match(IMA_ENVELOPE.errors[20002], /rate limiting/)
-  assert.match(IMA_ENVELOPE.errors[20004], /did not accept this client id or API key/)
-  assert.match(IMA_ENVELOPE.errors[200002], /did not accept this client id or API key/)
-  assert.match(IMA_ENVELOPE.errors[110030], /may not read that/)
+test('a business failure and a refusal each keep their own sentence', () => {
+  assert.equal(imaAnswer({ status: 200, body: envelope({ info_list: [] }) }), '{"info_list":[]}')
+  assert.equal(imaAnswer({ status: 200, body: { code: 0 } }), '{}')
+  assert.throws(() => imaAnswer({ status: 200, body: { code: 20004, msg: 'auth failed' } }), /did not accept this client id or API key/)
+  assert.throws(() => imaAnswer({ status: 200, body: { code: 20002, msg: 'slow down' } }), /rate limiting/)
+  assert.throws(() => imaAnswer({ status: 200, body: { code: 110030, msg: '无权限' } }), /may not read that: 无权限/)
+  assert.throws(() => imaAnswer({ status: 200, body: { code: 210001, msg: '参数非法' } }), /ima answered 210001: 参数非法/)
+  // A body that is not an ima envelope is refused, never guessed at.
+  assert.throws(() => imaAnswer({ status: 200, body: 'gateway error' }), /cannot read/)
+  assert.throws(() => imaAnswer({ status: 200, body: { not: 'an envelope' } }), /cannot read/)
   assert.equal(imaError(999, ''), 'ima answered 999')
-  assert.equal(imaError(210001, '参数非法'), 'ima answered 210001: 参数非法')
 })
 
 test('verify confirms the pair with one empty knowledge base search', async () => {
@@ -150,8 +150,9 @@ test('verify turns a refusal, a timeout and a dead network into clear errors', a
   await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => { const error = new Error('timed out'); error.name = 'TimeoutError'; throw error } }), /did not answer in time/)
   await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => { throw new Error('offline') } }), /Could not reach ima/)
   await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(500, {}) }), /ima answered 500/)
+  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(429, {}) }), /rate limiting/)
   await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(200, { code: 20004, msg: 'auth failed', data: {} }) }), /did not accept this client id or API key/)
-  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(200, { code: 210001, msg: '参数非法', data: {} }) }), /ima answered code 210001: 参数非法/)
+  await assert.rejects(verifyIma({ secrets: SECRETS, fetch: async () => answer(200, { code: 210001, msg: '参数非法', data: {} }) }), /ima answered 210001: 参数非法/)
   // The credentials never appear in an error message.
   try {
     await verifyIma({ secrets: SECRETS, fetch: async () => answer(401, {}) })
@@ -171,11 +172,14 @@ test('verify refuses a half-filled card without a request', async () => {
   assert.equal(asked, false)
 })
 
-test('the card hints describe a read-only, account-less connector', () => {
-  assert.equal(connector.glyph, 'ima')
-  assert.match(connector.about, /notes and knowledge bases/)
-  assert.match(connector.docsUrl, /^https:\/\/ima\.qq\.com\//)
-  assert.match(connector.readOnlyNote, /only read/)
+test('the card copy lives under card, where the client reads it', () => {
+  // The connector view calls cardText(connector, key), which reads connector.card[key] only,
+  // so a top-level glyph/about/docsUrl/readOnlyNote would never reach the card.
+  assert.equal(connector.card.glyph, 'ima')
+  assert.match(connector.card.about, /notes and knowledge bases/)
+  assert.match(connector.card.docsUrl, /^https:\/\/ima\.qq\.com\//)
+  assert.match(connector.card.readOnlyNote, /only read/)
+  for (const key of ['glyph', 'about', 'docsUrl', 'readOnlyNote']) assert.equal(connector[key], undefined, key)
   assert.equal(connector.actions, undefined)
   assert.equal(connector.toolbox, undefined)
 })
@@ -234,14 +238,20 @@ test('each mounted tool POSTs to ima.qq.com with both headers and only its mappe
   }
 })
 
-test('the adapter unwraps ima answers and turns refusal codes into tool errors', { skip: noAdapter }, async () => {
-  const [tool] = mounted(async () => answer(200, { code: 20004, msg: 'auth failed', data: {} }))
-  await assert.rejects(tool.execute({ cursor: '0', limit: 20 }), /did not accept this client id or API key/)
+test('the adapter unwraps ima answers, and a 429 stays a rate limit whatever the body', async () => {
+  const [ok] = mounted(async () => answer(200, envelope({ info_list: [] })))
+  assert.equal(await ok.execute({ query: '', cursor: '', limit: 1 }), '{"info_list":[]}')
+  const [auth] = mounted(async () => answer(200, { code: 20004, msg: 'auth failed', data: {} }))
+  await assert.rejects(auth.execute({ cursor: '0', limit: 20 }), /did not accept this client id or API key/)
   const [rate] = mounted(async () => answer(200, { code: 20002, msg: 'slow down', data: {} }))
   await assert.rejects(rate.execute({ cursor: '0', limit: 20 }), /rate limiting/)
   // An unmapped code keeps the service's own message, so the model still learns why.
   const [unknown] = mounted(async () => answer(200, { code: 210001, msg: '参数非法', data: {} }))
   await assert.rejects(unknown.execute({ cursor: '0', limit: 20 }), /参数非法/)
-  const [ok] = mounted(async () => answer(200, envelope({ info_list: [] })))
-  assert.equal(await ok.execute({ query: '', cursor: '', limit: 1 }), '{"info_list":[]}')
+  // Probe's regression: HTTP 429 with an empty body, or with a body that is not an
+  // envelope, must say "rate limit" instead of "code undefined".
+  for (const body of ['', '{}', '{"code":20002,"msg":"too many"}']) {
+    const [throttled] = mounted(async () => ({ status: 429, ok: false, text: async () => body }))
+    await assert.rejects(throttled.execute({ cursor: '0', limit: 20 }), /rate limited/, JSON.stringify(body))
+  }
 })
