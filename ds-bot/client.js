@@ -391,6 +391,16 @@ var ZH = {
   Off: "关闭",
   On: "开启",
   "Connector settings": "连接器设置",
+  "Instance settings": "实例设置",
+  "The name changes only this card; the connection and its tools stay the same.": "名称只改这张卡片，连接和工具都不变。",
+  "Add a Neon project": "添加 Neon 项目",
+  "Add another connection": "再添加一个连接",
+  "Adding…": "正在添加…",
+  "You can connect up to {max} instances.": "最多连接 {max} 个实例。",
+  "Remove this instance": "移除这个实例",
+  "Removing this instance disconnects it and deletes its authorization. The project itself is not changed.": "移除后此实例会断开，它的授权也会被删除；项目本身不受影响。",
+  "Removing…": "正在移除…",
+  "Keep at least one connection.": "至少保留一个连接。",
   "Waiting for the browser…": "正在浏览器里等待…",
   "Not connected": "未连接",
   "Could not connect": "连接失败",
@@ -2133,8 +2143,12 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     // asks to authorize again, a token connector remounts with the new level.
     connectorSetLevel: (id, level) => after(call2("connector-set-level", { id, level })),
     // Settings are plain values (a project id, a role name), saved in one request; the view
-    // comes back with what the host normalized.
+    // comes back with what the host normalized. A module that keeps several connections
+    // takes the card's own name here too, which is why the input sits beside them.
     connectorSetSettings: (id, values) => after(call2("connector-set-settings", { id, values })),
+    // One more card of a multi-instance module, and one fewer; both answer with the new view.
+    connectorCreateInstance: (base) => after(call2("connector-create-instance", { base })),
+    connectorDeleteInstance: (id) => after(call2("connector-delete-instance", { id })),
     // The chosen level travels with the authorization request, so the grant is asked for the
     // level the reader sees.
     connectorOauthStart: (id, level) => after(call2("connector-oauth-start", { id, ...typeof level === "string" && level !== "" ? { level } : {} })),
@@ -3365,7 +3379,7 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector-head{display:flex;align-items:center;gap:12px;min-width:0}
 .bt-connector-mark{flex:none;width:36px;height:36px;border-radius:10px;background:var(--bt-card);border:.5px solid var(--bt-line);display:flex;align-items:center;justify-content:center;color:var(--bt-ink)}
 .bt-connector-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.bt-connector-name{font-size:14px;line-height:20px;font-weight:500}
+.bt-connector-name{font-size:14px;line-height:20px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-connector-status{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-connector[data-state=ready] .bt-connector-status{color:var(--bt-ink-2)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
@@ -3422,6 +3436,28 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* A form with several credentials names each field above its masked box. */
 .bt-connector-field{display:flex;flex-direction:column;gap:4px}
 .bt-connector-field-name{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+/* Several instances of one module: each is a card of its own, the panel names the fields the
+   instance keeps, and one more instance is added from the bottom of the group. */
+.bt-connector-panel-inner{display:flex;flex-direction:column;gap:12px;min-width:0}
+.bt-connector-instance-grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;min-width:0}
+.bt-connector-instance-title{grid-column:1/-1}
+.bt-connector-instance-grid>.bt-connector-field{min-width:0}
+.bt-connector-instance-save{grid-column:1/-1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.bt-connector-remove{padding-top:10px;border-top:.5px solid var(--bt-line)}
+.bt-connector-remove-ask{display:flex;flex-direction:column;gap:8px}
+.bt-connector-remove .bt-connector-link-btn{color:var(--bt-danger)}
+.bt-connector-remove .bt-connector-link-btn:disabled{opacity:.4;cursor:default}
+.bt-connector-add{display:flex;flex-direction:column;gap:6px;padding:12px;min-width:0}
+.bt-connector-add-btn{display:flex;align-items:center;gap:8px;width:100%;min-height:40px;box-sizing:border-box;padding:0 12px;border:.5px dashed var(--bt-line-2);border-radius:10px;background:none;color:var(--bt-ink-2);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
+.bt-connector-add-btn:hover{background:var(--bt-hover)}
+.bt-connector-add-btn:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-connector-add-btn:disabled{opacity:.4;cursor:default}
+.bt-connector-add-plus{display:inline-flex;flex:none;color:var(--bt-ink-3)}
+.bt-connector-add .bt-connector-error{padding-left:0}
+/* A wide settings panel lays the instance fields out two by two; a phone keeps one column. */
+@media (min-width:900px){
+.bt-connector-instance-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the
    shell offers them and CSS-module name suffixes elsewhere. */
@@ -14365,6 +14401,24 @@ var TOKEN_CREATE = {
 };
 var tokenLabel = (id) => (TOKEN_LABELS[id] ?? (() => t("Token")))();
 var tokenCreate = (id) => (TOKEN_CREATE[id] ?? (() => t("Create a token")))();
+var instanceOf = (connector) => {
+  const value = connector?.instance;
+  if (value === null || typeof value !== "object") return null;
+  if (typeof value.base !== "string" || value.base === "") return null;
+  if (typeof value.id !== "string" || value.id === "") return null;
+  return {
+    base: value.base,
+    id: value.id,
+    label: typeof value.label === "string" ? value.label : "",
+    max: Number.isInteger(value.max) && value.max > 0 ? value.max : null
+  };
+};
+var INSTANCE_ADD = {
+  neon: () => t("Add a Neon project")
+};
+var instanceAddText = (base) => (INSTANCE_ADD[base] ?? (() => t("Add another connection")))();
+var INSTANCE_SOFT_MAX = 8;
+var instanceMax = (instance) => instance.max === null ? instance.base === "neon" ? INSTANCE_SOFT_MAX : null : instance.max;
 var wantsChinese = () => language().startsWith("zh");
 var cardText = (connector, key) => {
   const value = connector.card?.[key];
@@ -14404,14 +14458,18 @@ function statusText2(connector) {
   }
   return cardAbout(connector) ?? (connector.oauth === true ? t("Not connected") : "");
 }
-function ConnectorRow({ connector, actions, readOnly = null }) {
+function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }) {
   const [form, setForm] = (0, import_react36.useState)(false);
   const [values, setValues] = (0, import_react36.useState)({});
   const [busy, setBusy] = (0, import_react36.useState)(false);
   const [error, setError] = (0, import_react36.useState)(null);
   const oauth = connector.oauth === true;
   const manual = oauth && connector.manualClient === true;
-  const settings = Array.isArray(connector.settings) ? connector.settings.filter((field) => field !== null && typeof field?.name === "string" && field.name !== "") : [];
+  const instance = instanceOf(connector);
+  const isInstance = instance !== null;
+  const declaredSettings = Array.isArray(connector.settings) ? connector.settings.filter((field) => field !== null && typeof field?.name === "string" && field.name !== "") : [];
+  const labelField = isInstance && !declaredSettings.some((field) => field.name === "label") ? { name: "label", label: t("Name"), value: instance.label, placeholder: connector.name } : null;
+  const settings = labelField === null ? declaredSettings : [labelField, ...declaredSettings];
   const [settingDraft, setSettingDraft] = (0, import_react36.useState)(null);
   const settingValue = (field) => {
     if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name];
@@ -14422,6 +14480,12 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     if (busy || !settingsChanged) return;
     const values2 = Object.fromEntries(settings.map((field) => [field.name, settingValue(field).trim()]));
     void run(actions.connectorSetSettings(connector.id, values2), () => setSettingDraft(null));
+  };
+  const [removeAsk, setRemoveAsk] = (0, import_react36.useState)(false);
+  const lastInstance = isInstance && instanceCount <= 1;
+  const removeInstance = () => {
+    if (busy) return;
+    void run(actions.connectorDeleteInstance(connector.id), () => setRemoveAsk(false));
   };
   const tokenFieldLabel = cardText(connector, "tokenLabel") ?? tokenLabel(connector.id);
   const tokenFieldPlaceholder = cardText(connector, "tokenPlaceholder") ?? void 0;
@@ -14540,30 +14604,164 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     void run(actions.connectorSetLevel(connector.id, id));
   };
   const storedSetting = (field) => (typeof field.value === "string" ? field.value : "").trim();
-  const settingsEmpty = settings.some((field) => storedSetting(field) === "");
+  const settingsEmpty = declaredSettings.some((field) => field.name !== "label" && storedSetting(field) === "");
   const levelBlocked = (id) => {
     const note = typeof levelNotes[id] === "string" && levelNotes[id] !== "" ? levelNotes[id] : null;
     if (note !== null) return note;
     if (settingsEmpty && /write|full/i.test(id)) return t("Fill in the settings before switching to this level.");
     return null;
   };
-  const hasOptions = settings.length > 0 || levels.length > 0 || on && (capabilities.length > 0 || permissions !== null);
+  const hasOptions = isInstance || settings.length > 0 || levels.length > 0 || on && (capabilities.length > 0 || permissions !== null);
   const [details, setDetails] = (0, import_react36.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark;
   const docsUrl = typeof connector.card?.docsUrl === "string" && connector.card.docsUrl !== "" ? connector.card.docsUrl : TOKEN_URLS[connector.id];
+  const fieldNode = (field) => (0, import_react36.createElement)(
+    "label",
+    { key: field.name, className: "bt-connector-field" },
+    (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, typeof field.label === "string" && field.label !== "" ? field.label : field.name),
+    (0, import_react36.createElement)("div", { className: "bt-q-field" }, (0, import_react36.createElement)("input", {
+      className: "bt-connector-input",
+      value: settingValue(field),
+      placeholder: field.placeholder ?? (typeof field.label === "string" && field.label !== "" ? field.label : field.name),
+      "aria-label": field.label ?? field.name,
+      autoComplete: "off",
+      spellCheck: false,
+      disabled: busy,
+      onChange: (event) => setSettingDraft((previous) => ({ ...previous, [field.name]: event.target.value })),
+      onKeyDown: (event) => {
+        if (event.key === "Enter") saveSettings();
+      }
+    }))
+  );
+  const saveSettingsRow = (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-form-row" },
+    (0, import_react36.createElement)("button", {
+      type: "button",
+      className: "bt-soft bt-soft-sm",
+      disabled: busy || !settingsChanged,
+      onClick: () => saveSettings()
+    }, t("Save settings"))
+  );
+  const permissionsNode = permissions !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, permissions) : null;
+  const capabilitiesNode = capabilities.length > 0 ? (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-setting" },
+    (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Capabilities")),
+    capWrites && currentLevel === "read" && !writesLocked ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Capabilities that write open after switching to Can write.")) : null,
+    (0, import_react36.createElement)("ul", { className: "bt-connector-caps" }, capabilities.map((entry, index) => {
+      const item = capabilityItem(entry, index);
+      const locked = item.available === false || writesLocked && item.risk !== "read";
+      const badge = item.risk === "destructive" ? t("Destructive") : item.risk === "write" ? t("Write") : null;
+      return (0, import_react36.createElement)(
+        "li",
+        { key: item.key, className: "bt-connector-cap", "data-risk": item.risk, "data-locked": locked || void 0 },
+        (0, import_react36.createElement)("span", { className: "bt-connector-cap-title" }, item.title, badge !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-badge" }, badge) : null),
+        item.description !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-note" }, item.description) : null,
+        item.change !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-change" }, item.change) : null,
+        locked ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-lock" }, t("Unavailable on this host.")) : null
+      );
+    }))
+  ) : null;
+  const settingsBlock = settings.length > 0 ? (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-setting" },
+    (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Settings")),
+    settings.map(fieldNode),
+    saveSettingsRow
+  ) : null;
+  const levelBlock = levels.length > 0 ? (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-setting" },
+    (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
+    (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-levels", role: "radiogroup", "aria-label": t("Access level") },
+      levels.map((entry) => {
+        const item = levelItem(entry);
+        const current = item.id === shownLevel;
+        const blocked = current ? null : levelBlocked(item.id);
+        return (0, import_react36.createElement)(
+          "div",
+          { key: item.id, className: "bt-connector-level-wrap" },
+          (0, import_react36.createElement)(
+            "button",
+            {
+              type: "button",
+              role: "radio",
+              "aria-checked": current,
+              className: "bt-connector-level",
+              "data-current": current || void 0,
+              disabled: busy || writesLocked && item.write === true || blocked !== null,
+              onClick: () => {
+                if (!current && blocked === null) chooseLevel(item.id);
+              }
+            },
+            (0, import_react36.createElement)("span", { className: "bt-connector-level-title" }, item.title),
+            item.description !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-level-note" }, item.description) : null
+          ),
+          blocked !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-level-blocked" }, blocked) : null
+        );
+      })
+    ),
+    (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization."))
+  ) : null;
+  const removeNode = isInstance ? (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-setting bt-connector-remove" },
+    removeAsk ? (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-remove-ask" },
+      (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Remove this instance")),
+      (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Removing this instance disconnects it and deletes its authorization. The project itself is not changed.")),
+      (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-form-row" },
+        (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => setRemoveAsk(false) }, t("Cancel")),
+        (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm bt-danger", disabled: busy, onClick: removeInstance }, busy ? t("Removing…") : t("Remove"))
+      )
+    ) : (0, import_react36.createElement)("button", {
+      type: "button",
+      className: "bt-connector-link bt-connector-link-btn bt-danger",
+      disabled: busy || lastInstance,
+      onClick: () => setRemoveAsk(true)
+    }, t("Remove this instance")),
+    lastInstance ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Keep at least one connection.")) : null
+  ) : null;
+  const panelBody = isInstance ? (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-instance-grid" },
+    (0, import_react36.createElement)("div", { className: "bt-connector-action-title bt-connector-instance-title" }, t("Instance settings")),
+    settings.map(fieldNode),
+    levelBlock,
+    (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-instance-save" },
+      saveSettingsRow,
+      labelField !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("The name changes only this card; the connection and its tools stay the same.")) : null
+    )
+  ) : null;
   const row = (0, import_react36.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
   const mark = (0, import_react36.createElement)("span", { className: "bt-connector-mark" }, Mark ? (0, import_react36.createElement)(Mark) : null);
   const text = (0, import_react36.createElement)(
     "span",
     { className: "bt-connector-text" },
-    (0, import_react36.createElement)("span", { className: "bt-connector-name" }, connector.name),
+    // A long instance name is cut with an ellipsis on a phone; the title keeps it complete.
+    (0, import_react36.createElement)("span", { className: "bt-connector-name", title: connector.name }, connector.name),
     (0, import_react36.createElement)("span", { className: "bt-connector-status" }, statusText2(connector))
   );
   return (0, import_react36.createElement)(
     "div",
-    { ref: row, className: "bt-connector", "data-state": connector.state, "data-open": details || void 0, "data-notify": notify || void 0 },
+    {
+      ref: row,
+      className: "bt-connector",
+      "data-state": connector.state,
+      "data-open": details || void 0,
+      "data-notify": notify || void 0,
+      "data-instance": isInstance || void 0
+    },
     (0, import_react36.createElement)(
       "div",
       { className: "bt-connector-head" },
@@ -14656,96 +14854,16 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     ) : null,
     hasOptions && details ? (0, import_react36.createElement)(
       "div",
-      { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings") },
-      settings.length > 0 ? (0, import_react36.createElement)(
+      { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings"), "data-instance": isInstance || void 0 },
+      (0, import_react36.createElement)(
         "div",
-        { className: "bt-connector-setting" },
-        (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Settings")),
-        settings.map((field) => (0, import_react36.createElement)(
-          "label",
-          { key: field.name, className: "bt-connector-field" },
-          (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, typeof field.label === "string" && field.label !== "" ? field.label : field.name),
-          (0, import_react36.createElement)("div", { className: "bt-q-field" }, (0, import_react36.createElement)("input", {
-            className: "bt-connector-input",
-            value: settingValue(field),
-            placeholder: field.name,
-            "aria-label": field.label ?? field.name,
-            autoComplete: "off",
-            spellCheck: false,
-            disabled: busy,
-            onChange: (event) => setSettingDraft((previous) => ({ ...previous, [field.name]: event.target.value })),
-            onKeyDown: (event) => {
-              if (event.key === "Enter") saveSettings();
-            }
-          }))
-        )),
-        (0, import_react36.createElement)(
-          "div",
-          { className: "bt-connector-form-row" },
-          (0, import_react36.createElement)("button", {
-            type: "button",
-            className: "bt-soft bt-soft-sm",
-            disabled: busy || !settingsChanged,
-            onClick: () => saveSettings()
-          }, t("Save settings"))
-        )
-      ) : null,
-      levels.length > 0 ? (0, import_react36.createElement)(
-        "div",
-        { className: "bt-connector-setting" },
-        (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
-        (0, import_react36.createElement)(
-          "div",
-          { className: "bt-connector-levels", role: "radiogroup", "aria-label": t("Access level") },
-          levels.map((entry) => {
-            const item = levelItem(entry);
-            const current = item.id === shownLevel;
-            const blocked = current ? null : levelBlocked(item.id);
-            return (0, import_react36.createElement)(
-              "div",
-              { key: item.id, className: "bt-connector-level-wrap" },
-              (0, import_react36.createElement)(
-                "button",
-                {
-                  type: "button",
-                  role: "radio",
-                  "aria-checked": current,
-                  className: "bt-connector-level",
-                  "data-current": current || void 0,
-                  disabled: busy || writesLocked && item.write === true || blocked !== null,
-                  onClick: () => {
-                    if (!current && blocked === null) chooseLevel(item.id);
-                  }
-                },
-                (0, import_react36.createElement)("span", { className: "bt-connector-level-title" }, item.title),
-                item.description !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-level-note" }, item.description) : null
-              ),
-              blocked !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-level-blocked" }, blocked) : null
-            );
-          })
-        ),
-        (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization."))
-      ) : null,
-      permissions !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, permissions) : null,
-      capabilities.length > 0 ? (0, import_react36.createElement)(
-        "div",
-        { className: "bt-connector-setting" },
-        (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Capabilities")),
-        capWrites && currentLevel === "read" && !writesLocked ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Capabilities that write open after switching to Can write.")) : null,
-        (0, import_react36.createElement)("ul", { className: "bt-connector-caps" }, capabilities.map((entry, index) => {
-          const item = capabilityItem(entry, index);
-          const locked = item.available === false || writesLocked && item.risk !== "read";
-          const badge = item.risk === "destructive" ? t("Destructive") : item.risk === "write" ? t("Write") : null;
-          return (0, import_react36.createElement)(
-            "li",
-            { key: item.key, className: "bt-connector-cap", "data-risk": item.risk, "data-locked": locked || void 0 },
-            (0, import_react36.createElement)("span", { className: "bt-connector-cap-title" }, item.title, badge !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-badge" }, badge) : null),
-            item.description !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-note" }, item.description) : null,
-            item.change !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-change" }, item.change) : null,
-            locked ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-lock" }, t("Unavailable on this host.")) : null
-          );
-        }))
-      ) : null
+        { className: "bt-connector-panel-inner" },
+        isInstance ? panelBody : settingsBlock,
+        isInstance ? null : levelBlock,
+        permissionsNode,
+        capabilitiesNode,
+        isInstance ? removeNode : null
+      )
     ) : null,
     !oauth && !on && form ? (0, import_react36.createElement)(
       "div",
@@ -14842,13 +14960,88 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     error ? (0, import_react36.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
   );
 }
+function AddInstanceRow({ base, count, max, actions }) {
+  const [busy, setBusy] = (0, import_react36.useState)(false);
+  const [error, setError] = (0, import_react36.useState)(null);
+  const atCap = typeof max === "number" && count >= max;
+  const add = () => {
+    if (busy || atCap) return;
+    setBusy(true);
+    setError(null);
+    void actions.connectorCreateInstance(base).catch((failure) => setError(failure?.message ?? String(failure))).finally(() => setBusy(false));
+  };
+  return (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-add" },
+    (0, import_react36.createElement)(
+      "button",
+      {
+        type: "button",
+        className: "bt-connector-add-btn",
+        disabled: busy || atCap,
+        onClick: add
+      },
+      (0, import_react36.createElement)(
+        "span",
+        { className: "bt-connector-add-plus", "aria-hidden": true },
+        (0, import_react36.createElement)(
+          "svg",
+          { width: 14, height: 14, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" },
+          (0, import_react36.createElement)("path", { d: "M10 4.5v11M4.5 10h11" })
+        )
+      ),
+      (0, import_react36.createElement)("span", null, busy ? t("Adding…") : instanceAddText(base))
+    ),
+    atCap ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("You can connect up to {max} instances.", { max })) : null,
+    error !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
+  );
+}
+function connectorGroups(list) {
+  const groups = [];
+  const byBase = /* @__PURE__ */ new Map();
+  for (const connector of list) {
+    const instance = instanceOf(connector);
+    if (instance === null) {
+      groups.push({ base: null, rows: [connector] });
+      continue;
+    }
+    const existing = byBase.get(instance.base);
+    if (existing !== void 0) {
+      existing.rows.push(connector);
+      continue;
+    }
+    const group = { base: instance.base, rows: [connector] };
+    byBase.set(instance.base, group);
+    groups.push(group);
+  }
+  return groups;
+}
 function ConnectorsPage({ roster, actions }) {
   const list = roster?.connectors ?? [];
   const readOnly = typeof roster?.readOnly === "string" && roster.readOnly !== "" ? roster.readOnly : null;
+  const rows = [];
+  for (const group of connectorGroups(list)) {
+    if (group.base === null) {
+      const connector = group.rows[0];
+      rows.push((0, import_react36.createElement)(ConnectorRow, { key: connector.id, connector, actions, readOnly }));
+      continue;
+    }
+    for (const connector of group.rows) {
+      rows.push((0, import_react36.createElement)(ConnectorRow, { key: connector.id, connector, actions, readOnly, instanceCount: group.rows.length }));
+    }
+    const first = instanceOf(group.rows[0]);
+    rows.push((0, import_react36.createElement)(AddInstanceRow, {
+      key: `${group.base}-add`,
+      base: group.base,
+      count: group.rows.length,
+      max: first === null ? null : instanceMax(first),
+      actions
+    }));
+  }
   return (0, import_react36.createElement)(
     "section",
     { className: "bt-set-section" },
-    (0, import_react36.createElement)("div", { className: "bt-set-card bt-connectors-card" }, list.length === 0 ? (0, import_react36.createElement)("div", { className: "bt-set-row" }, (0, import_react36.createElement)("span", { className: "bt-set-hint" }, t("No connectors"))) : list.map((connector) => (0, import_react36.createElement)(ConnectorRow, { key: connector.id, connector, actions, readOnly })))
+    (0, import_react36.createElement)("div", { className: "bt-set-card bt-connectors-card" }, rows.length === 0 ? (0, import_react36.createElement)("div", { className: "bt-set-row" }, (0, import_react36.createElement)("span", { className: "bt-set-hint" }, t("No connectors"))) : rows)
   );
 }
 

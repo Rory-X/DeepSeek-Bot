@@ -95,8 +95,12 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     // asks to authorize again, a token connector remounts with the new level.
     connectorSetLevel: (id, level) => after(call('connector-set-level', { id, level })),
     // Settings are plain values (a project id, a role name), saved in one request; the view
-    // comes back with what the host normalized.
+    // comes back with what the host normalized. A module that keeps several connections
+    // takes the card's own name here too, which is why the input sits beside them.
     connectorSetSettings: (id, values) => after(call('connector-set-settings', { id, values })),
+    // One more card of a multi-instance module, and one fewer; both answer with the new view.
+    connectorCreateInstance: base => after(call('connector-create-instance', { base })),
+    connectorDeleteInstance: id => after(call('connector-delete-instance', { id })),
     // The chosen level travels with the authorization request, so the grant is asked for the
     // level the reader sees.
     connectorOauthStart: (id, level) => after(call('connector-oauth-start', { id, ...(typeof level === 'string' && level !== '' ? { level } : {}) })),

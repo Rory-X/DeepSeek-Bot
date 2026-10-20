@@ -92,6 +92,30 @@ const TOKEN_CREATE = {
 const tokenLabel = id => (TOKEN_LABELS[id] ?? (() => t('Token')))()
 const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
 
+// A module may keep several connections — Neon keeps one per project — and then its view
+// sends one row per instance, each naming the module it belongs to. A row without
+// `instance` stays the single card every connector drew before.
+const instanceOf = (connector) => {
+  const value = connector?.instance
+  if (value === null || typeof value !== 'object') return null
+  if (typeof value.base !== 'string' || value.base === '') return null
+  if (typeof value.id !== 'string' || value.id === '') return null
+  return {
+    base: value.base,
+    id: value.id,
+    label: typeof value.label === 'string' ? value.label : '',
+    max: Number.isInteger(value.max) && value.max > 0 ? value.max : null,
+  }
+}
+// What the add button calls one more of the module's items; a module without its own words
+// keeps the generic line. The soft cap is the host's, and only a guess when it names none.
+const INSTANCE_ADD = {
+  neon: () => t('Add a Neon project'),
+}
+const instanceAddText = base => (INSTANCE_ADD[base] ?? (() => t('Add another connection')))()
+const INSTANCE_SOFT_MAX = 8
+const instanceMax = instance => (instance.max === null ? (instance.base === 'neon' ? INSTANCE_SOFT_MAX : null) : instance.max)
+
 // The card data a connector declares in its view: an icon name, one line about it, where its
 // documentation is, and the words on its fields. A module that also has Chinese puts the same
 // keys under `card.zh`, and the reader's language picks one; no service is named here.
@@ -148,7 +172,7 @@ function statusText(connector) {
   return cardAbout(connector) ?? (connector.oauth === true ? t('Not connected') : '')
 }
 
-function ConnectorRow({ connector, actions, readOnly = null }) {
+function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }) {
   const [form, setForm] = useState(false)
   // The credential values, by the secret name the host declared; a form with one field is
   // the token field the cards always had.
@@ -159,11 +183,21 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   // service without dynamic registration asks for first.
   const oauth = connector.oauth === true
   const manual = oauth && connector.manualClient === true
+  // One row of a multi-instance module: the card names the module and lets the reader
+  // rename or remove this instance; other rows are untouched by either.
+  const instance = instanceOf(connector)
+  const isInstance = instance !== null
   // The settings a connector declares are plain text, shown with the stored value: they
   // decide which address or project the mounted level runs against, not who the user is.
-  const settings = Array.isArray(connector.settings)
+  const declaredSettings = Array.isArray(connector.settings)
     ? connector.settings.filter(field => field !== null && typeof field?.name === 'string' && field.name !== '')
     : []
+  // The card's own name is a plain label the reader types, kept apart from the module's
+  // settings; when the host already sends it as one, that field is the name.
+  const labelField = isInstance && !declaredSettings.some(field => field.name === 'label')
+    ? { name: 'label', label: t('Name'), value: instance.label, placeholder: connector.name }
+    : null
+  const settings = labelField === null ? declaredSettings : [labelField, ...declaredSettings]
   const [settingDraft, setSettingDraft] = useState(null)
   const settingValue = (field) => {
     if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name]
@@ -174,6 +208,13 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     if (busy || !settingsChanged) return
     const values = Object.fromEntries(settings.map(field => [field.name, settingValue(field).trim()]))
     void run(actions.connectorSetSettings(connector.id, values), () => setSettingDraft(null))
+  }
+  // Removing an instance asks once, in place: the grant it deletes cannot be restored.
+  const [removeAsk, setRemoveAsk] = useState(false)
+  const lastInstance = isInstance && instanceCount <= 1
+  const removeInstance = () => {
+    if (busy) return
+    void run(actions.connectorDeleteInstance(connector.id), () => setRemoveAsk(false))
   }
   // The fields a connector declares (`credentials` on the host): the card draws one masked
   // input per field and sends them together as `values`. A host that declares none keeps the
@@ -302,7 +343,8 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     void run(actions.connectorSetLevel(connector.id, id))
   }
   const storedSetting = field => (typeof field.value === 'string' ? field.value : '').trim()
-  const settingsEmpty = settings.some(field => storedSetting(field) === '')
+  // The card's own name is not a requirement of the level; the module's settings are.
+  const settingsEmpty = declaredSettings.some(field => field.name !== 'label' && storedSetting(field) === '')
   const levelBlocked = (id) => {
     const note = typeof levelNotes[id] === 'string' && levelNotes[id] !== '' ? levelNotes[id] : null
     if (note !== null) return note
@@ -310,8 +352,9 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     return null
   }
   // A connector with settings opens its panel even before it is connected: the settings are
-  // what a level needs in order to connect at all.
-  const hasOptions = settings.length > 0 || levels.length > 0
+  // what a level needs in order to connect at all. An instance always opens it, because the
+  // panel is where the instance is renamed or removed.
+  const hasOptions = isInstance || settings.length > 0 || levels.length > 0
     || (on && (capabilities.length > 0 || permissions !== null))
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
@@ -319,13 +362,107 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark
   // What the connector says about itself: its docs and the words on its token field.
   const docsUrl = typeof connector.card?.docsUrl === 'string' && connector.card.docsUrl !== '' ? connector.card.docsUrl : TOKEN_URLS[connector.id]
+  // One input per declared setting; the card's own name goes in the same form when the host
+  // does not already send it as one.
+  const fieldNode = field => h('label', { key: field.name, className: 'bt-connector-field' },
+    h('span', { className: 'bt-connector-field-name' }, typeof field.label === 'string' && field.label !== '' ? field.label : field.name),
+    h('div', { className: 'bt-q-field' }, h('input', {
+      className: 'bt-connector-input', value: settingValue(field), placeholder: field.placeholder ?? (typeof field.label === 'string' && field.label !== '' ? field.label : field.name), 'aria-label': field.label ?? field.name,
+      autoComplete: 'off', spellCheck: false, disabled: busy,
+      onChange: (event) => setSettingDraft(previous => ({ ...previous, [field.name]: event.target.value })),
+      onKeyDown: (event) => { if (event.key === 'Enter') saveSettings() },
+    })))
+  const saveSettingsRow = h('div', { className: 'bt-connector-form-row' },
+    h('button', {
+      type: 'button', className: 'bt-soft bt-soft-sm',
+      disabled: busy || !settingsChanged,
+      onClick: () => saveSettings(),
+    }, t('Save settings')))
+  const permissionsNode = permissions !== null ? h('div', { className: 'bt-connector-hint' }, permissions) : null
+  const capabilitiesNode = capabilities.length > 0
+    ? h('div', { className: 'bt-connector-setting' },
+      h('div', { className: 'bt-connector-action-title' }, t('Capabilities')),
+      capWrites && currentLevel === 'read' && !writesLocked
+        ? h('div', { className: 'bt-connector-hint' }, t('Capabilities that write open after switching to Can write.'))
+        : null,
+      h('ul', { className: 'bt-connector-caps' }, capabilities.map((entry, index) => {
+        const item = capabilityItem(entry, index)
+        const locked = item.available === false || (writesLocked && item.risk !== 'read')
+        const badge = item.risk === 'destructive' ? t('Destructive') : item.risk === 'write' ? t('Write') : null
+        return h('li', { key: item.key, className: 'bt-connector-cap', 'data-risk': item.risk, 'data-locked': locked || undefined },
+          h('span', { className: 'bt-connector-cap-title' }, item.title, badge !== null ? h('span', { className: 'bt-connector-cap-badge' }, badge) : null),
+          item.description !== null ? h('span', { className: 'bt-connector-cap-note' }, item.description) : null,
+          item.change !== null ? h('span', { className: 'bt-connector-cap-change' }, item.change) : null,
+          locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
+      })))
+    : null
+  const settingsBlock = settings.length > 0
+    ? h('div', { className: 'bt-connector-setting' },
+      h('div', { className: 'bt-connector-action-title' }, t('Settings')),
+      settings.map(fieldNode),
+      saveSettingsRow)
+    : null
+  const levelBlock = levels.length > 0
+    ? h('div', { className: 'bt-connector-setting' },
+      h('div', { className: 'bt-connector-action-title' }, t('Access level')),
+      h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
+        levels.map((entry) => {
+          const item = levelItem(entry)
+          const current = item.id === shownLevel
+          const blocked = current ? null : levelBlocked(item.id)
+          return h('div', { key: item.id, className: 'bt-connector-level-wrap' },
+            h('button', {
+              type: 'button', role: 'radio', 'aria-checked': current,
+              className: 'bt-connector-level', 'data-current': current || undefined,
+              disabled: busy || (writesLocked && item.write === true) || blocked !== null,
+              onClick: () => { if (!current && blocked === null) chooseLevel(item.id) },
+            },
+            h('span', { className: 'bt-connector-level-title' }, item.title),
+            item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null),
+            blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
+        })),
+      h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')))
+    : null
+  // An instance is removed in place, after one confirmation; the last one stays, so the
+  // module always has a card to connect. Its removal is not a module setting.
+  const removeNode = isInstance
+    ? h('div', { className: 'bt-connector-setting bt-connector-remove' },
+      removeAsk
+        ? h('div', { className: 'bt-connector-remove-ask' },
+          h('div', { className: 'bt-connector-action-title' }, t('Remove this instance')),
+          h('div', { className: 'bt-connector-hint' }, t('Removing this instance disconnects it and deletes its authorization. The project itself is not changed.')),
+          h('div', { className: 'bt-connector-form-row' },
+            h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => setRemoveAsk(false) }, t('Cancel')),
+            h('button', { type: 'button', className: 'bt-soft bt-soft-sm bt-danger', disabled: busy, onClick: removeInstance }, busy ? t('Removing…') : t('Remove'))))
+        : h('button', {
+          type: 'button', className: 'bt-connector-link bt-connector-link-btn bt-danger',
+          disabled: busy || lastInstance,
+          onClick: () => setRemoveAsk(true),
+        }, t('Remove this instance')),
+      lastInstance ? h('div', { className: 'bt-connector-hint' }, t('Keep at least one connection.')) : null)
+    : null
+  const panelBody = isInstance
+    ? h('div', { className: 'bt-connector-instance-grid' },
+      h('div', { className: 'bt-connector-action-title bt-connector-instance-title' }, t('Instance settings')),
+      settings.map(fieldNode),
+      levelBlock,
+      h('div', { className: 'bt-connector-instance-save' },
+        saveSettingsRow,
+        labelField !== null
+          ? h('div', { className: 'bt-connector-hint' }, t('The name changes only this card; the connection and its tools stay the same.'))
+          : null))
+    : null
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
   const mark = h('span', { className: 'bt-connector-mark' }, Mark ? h(Mark) : null)
   const text = h('span', { className: 'bt-connector-text' },
-    h('span', { className: 'bt-connector-name' }, connector.name),
+    // A long instance name is cut with an ellipsis on a phone; the title keeps it complete.
+    h('span', { className: 'bt-connector-name', title: connector.name }, connector.name),
     h('span', { className: 'bt-connector-status' }, statusText(connector)))
-  return h('div', { ref: row, className: 'bt-connector', 'data-state': connector.state, 'data-open': details || undefined, 'data-notify': notify || undefined },
+  return h('div', {
+    ref: row, className: 'bt-connector', 'data-state': connector.state, 'data-open': details || undefined,
+    'data-notify': notify || undefined, 'data-instance': isInstance || undefined,
+  },
     h('div', { className: 'bt-connector-head' },
       hasOptions
         ? h('button', {
@@ -382,64 +519,13 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     oauth && docsUrl !== undefined ? h('div', { className: 'bt-connector-docs' },
       h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation'))) : null,
     hasOptions && details
-      ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
-        settings.length > 0
-          ? h('div', { className: 'bt-connector-setting' },
-            h('div', { className: 'bt-connector-action-title' }, t('Settings')),
-            settings.map(field => h('label', { key: field.name, className: 'bt-connector-field' },
-              h('span', { className: 'bt-connector-field-name' }, typeof field.label === 'string' && field.label !== '' ? field.label : field.name),
-              h('div', { className: 'bt-q-field' }, h('input', {
-                className: 'bt-connector-input', value: settingValue(field), placeholder: field.name, 'aria-label': field.label ?? field.name,
-                autoComplete: 'off', spellCheck: false, disabled: busy,
-                onChange: (event) => setSettingDraft(previous => ({ ...previous, [field.name]: event.target.value })),
-                onKeyDown: (event) => { if (event.key === 'Enter') saveSettings() },
-              })))),
-            h('div', { className: 'bt-connector-form-row' },
-              h('button', {
-                type: 'button', className: 'bt-soft bt-soft-sm',
-                disabled: busy || !settingsChanged,
-                onClick: () => saveSettings(),
-              }, t('Save settings'))))
-          : null,
-        levels.length > 0
-          ? h('div', { className: 'bt-connector-setting' },
-            h('div', { className: 'bt-connector-action-title' }, t('Access level')),
-            h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
-              levels.map((entry) => {
-                const item = levelItem(entry)
-                const current = item.id === shownLevel
-                const blocked = current ? null : levelBlocked(item.id)
-                return h('div', { key: item.id, className: 'bt-connector-level-wrap' },
-                  h('button', {
-                    type: 'button', role: 'radio', 'aria-checked': current,
-                    className: 'bt-connector-level', 'data-current': current || undefined,
-                    disabled: busy || (writesLocked && item.write === true) || blocked !== null,
-                    onClick: () => { if (!current && blocked === null) chooseLevel(item.id) },
-                  },
-                  h('span', { className: 'bt-connector-level-title' }, item.title),
-                  item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null),
-                  blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
-              })),
-            h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')))
-          : null,
-        permissions !== null ? h('div', { className: 'bt-connector-hint' }, permissions) : null,
-        capabilities.length > 0
-          ? h('div', { className: 'bt-connector-setting' },
-            h('div', { className: 'bt-connector-action-title' }, t('Capabilities')),
-            capWrites && currentLevel === 'read' && !writesLocked
-              ? h('div', { className: 'bt-connector-hint' }, t('Capabilities that write open after switching to Can write.'))
-              : null,
-            h('ul', { className: 'bt-connector-caps' }, capabilities.map((entry, index) => {
-              const item = capabilityItem(entry, index)
-              const locked = item.available === false || (writesLocked && item.risk !== 'read')
-              const badge = item.risk === 'destructive' ? t('Destructive') : item.risk === 'write' ? t('Write') : null
-              return h('li', { key: item.key, className: 'bt-connector-cap', 'data-risk': item.risk, 'data-locked': locked || undefined },
-                h('span', { className: 'bt-connector-cap-title' }, item.title, badge !== null ? h('span', { className: 'bt-connector-cap-badge' }, badge) : null),
-                item.description !== null ? h('span', { className: 'bt-connector-cap-note' }, item.description) : null,
-                item.change !== null ? h('span', { className: 'bt-connector-cap-change' }, item.change) : null,
-                locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
-            })))
-          : null)
+      ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings'), 'data-instance': isInstance || undefined },
+        h('div', { className: 'bt-connector-panel-inner' },
+          isInstance ? panelBody : settingsBlock,
+          isInstance ? null : levelBlock,
+          permissionsNode,
+          capabilitiesNode,
+          isInstance ? removeNode : null))
       : null,
     !oauth && !on && form ? h('div', { className: 'bt-connector-form' },
       fields.map((field, index) => {
@@ -493,12 +579,79 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     error ? h('div', { className: 'bt-connector-error', role: 'alert' }, error) : null)
 }
 
-// Settings → Connectors: one row per connector.
+// One more instance of a module: a card that is off until the reader connects it. The host
+// assigns the next free id; over its soft cap it refuses and its own sentence is shown.
+function AddInstanceRow({ base, count, max, actions }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const atCap = typeof max === 'number' && count >= max
+  const add = () => {
+    if (busy || atCap) return
+    setBusy(true)
+    setError(null)
+    void actions.connectorCreateInstance(base)
+      .catch(failure => setError(failure?.message ?? String(failure)))
+      .finally(() => setBusy(false))
+  }
+  return h('div', { className: 'bt-connector-add' },
+    h('button', {
+      type: 'button', className: 'bt-connector-add-btn', disabled: busy || atCap,
+      onClick: add,
+    },
+    h('span', { className: 'bt-connector-add-plus', 'aria-hidden': true },
+      h('svg', { width: 14, height: 14, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' },
+        h('path', { d: 'M10 4.5v11M4.5 10h11' }))),
+    h('span', null, busy ? t('Adding…') : instanceAddText(base))),
+    atCap ? h('div', { className: 'bt-connector-hint' }, t('You can connect up to {max} instances.', { max })) : null,
+    error !== null ? h('div', { className: 'bt-connector-error', role: 'alert' }, error) : null)
+}
+
+// The instances of one module are drawn together where its first card was; every other
+// connector keeps its own place in the list.
+function connectorGroups(list) {
+  const groups = []
+  const byBase = new Map()
+  for (const connector of list) {
+    const instance = instanceOf(connector)
+    if (instance === null) {
+      groups.push({ base: null, rows: [connector] })
+      continue
+    }
+    const existing = byBase.get(instance.base)
+    if (existing !== undefined) {
+      existing.rows.push(connector)
+      continue
+    }
+    const group = { base: instance.base, rows: [connector] }
+    byBase.set(instance.base, group)
+    groups.push(group)
+  }
+  return groups
+}
+
+// Settings → Connectors: one row per connector, and one row per instance of a module that
+// keeps several connections.
 export function ConnectorsPage({ roster, actions }) {
   const list = roster?.connectors ?? []
   const readOnly = typeof roster?.readOnly === 'string' && roster.readOnly !== '' ? roster.readOnly : null
+  const rows = []
+  for (const group of connectorGroups(list)) {
+    if (group.base === null) {
+      const connector = group.rows[0]
+      rows.push(h(ConnectorRow, { key: connector.id, connector, actions, readOnly }))
+      continue
+    }
+    for (const connector of group.rows) {
+      rows.push(h(ConnectorRow, { key: connector.id, connector, actions, readOnly, instanceCount: group.rows.length }))
+    }
+    const first = instanceOf(group.rows[0])
+    rows.push(h(AddInstanceRow, {
+      key: `${group.base}-add`, base: group.base, count: group.rows.length,
+      max: first === null ? null : instanceMax(first), actions,
+    }))
+  }
   return h('section', { className: 'bt-set-section' },
-    h('div', { className: 'bt-set-card bt-connectors-card' }, list.length === 0
+    h('div', { className: 'bt-set-card bt-connectors-card' }, rows.length === 0
       ? h('div', { className: 'bt-set-row' }, h('span', { className: 'bt-set-hint' }, t('No connectors')))
-      : list.map(connector => h(ConnectorRow, { key: connector.id, connector, actions, readOnly }))))
+      : rows))
 }
