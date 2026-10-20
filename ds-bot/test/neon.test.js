@@ -3,7 +3,10 @@ import { test } from 'node:test'
 import { McpHttpClient, mcpResultText } from '../src/host/mcp.js'
 import { createOAuthFlow, OAUTH_PREFIX } from '../src/host/oauth/flow.js'
 import { OAuthError } from '../src/host/oauth/client.js'
-import neon, { configure, neonAccount, neonTools, neonUrl } from '../src/host/connectors/neon.js'
+import neon, {
+  configure, neonAccount, neonActionApproval, neonAuthorize, neonReadiness, neonTools, neonToolsOf, neonUrl, neonWriteUrl,
+  normalizeNeonSettings, sqlPreview,
+} from '../src/host/connectors/neon.js'
 import { fakeContext } from './fake-ctx.js'
 import { fakeCredentials, fakeOAuthServer, fakeResponse, fakeWebServer } from './oauth-fakes.js'
 
@@ -81,10 +84,10 @@ test('a configured Neon address cannot turn read-only off', () => {
   assert.equal(url.searchParams.get('readonly'), 'true')
   assert.equal(url.searchParams.get('projectId'), 'proj-1')
 
-  const scoped = new URL(configure({ url: neonUrl({ projectId: 'proj_2', roleName: 'app_reader' }) }).url)
+  const scoped = new URL(configure({ url: neonUrl({ projectId: 'spring-brook-12345678', roleName: 'app_reader' }) }).url)
   assert.deepEqual(
     [scoped.searchParams.get('readonly'), scoped.searchParams.get('projectId'), scoped.searchParams.get('roleName')],
-    ['true', 'proj_2', 'app_reader'],
+    ['true', 'spring-brook-12345678', 'app_reader'],
   )
   // A pinned role takes the same read-only grant with it.
   assert.equal(new URL(neonUrl({ roleName: 'app_reader' })).searchParams.get('roleName'), 'app_reader')
@@ -276,4 +279,110 @@ test('the connected account is the organization list Neon answers', () => {
   assert.equal(neonAccount(undefined), undefined)
   assert.equal(neon.accountOf({ organizations: [{ name: 'Acme' }] }), 'Acme')
   assert.deepEqual(neonTools(undefined), [])
+})
+
+test('Neon declares both access levels and the settings the full level needs', () => {
+  assert.deepEqual(neon.levels, ['read', 'write'])
+  assert.equal(neon.defaultLevel, 'read')
+  assert.deepEqual(neon.settings.map(field => field.name), ['projectId', 'roleName'])
+  for (const hook of ['authorize', 'toolsOf', 'readiness', 'normalizeSettings', 'actionApproval']) {
+    assert.equal(typeof neon[hook], 'function', hook)
+  }
+  assert.equal(neon.authorize, neonAuthorize)
+  assert.equal(neon.toolsOf, neonToolsOf)
+  assert.equal(neon.readiness, neonReadiness)
+  assert.equal(neon.normalizeSettings, normalizeNeonSettings)
+  assert.equal(neon.actionApproval, neonActionApproval)
+})
+
+test('the read level authorizes the read-only address and the read scope', () => {
+  const grant = neonAuthorize({ level: 'read', settings: {} })
+  const url = new URL(grant.url)
+  assert.deepEqual(grant.scopes, ['read'])
+  assert.deepEqual([url.searchParams.get('readonly'), url.searchParams.getAll('category').length], ['true', 5])
+  // A project may be pinned at the read level too: it only narrows what the grant can see.
+  const pinned = new URL(neonAuthorize({ level: 'read', settings: { projectId: 'spring-brook-12345678' } }).url)
+  assert.equal(pinned.searchParams.get('projectId'), 'spring-brook-12345678')
+})
+
+test('the full level authorizes a write grant on one project and one role', () => {
+  const settings = { projectId: 'spring-brook-12345678', roleName: 'app_reader' }
+  const grant = neonAuthorize({ level: 'write', settings })
+  const url = new URL(grant.url)
+  assert.deepEqual(grant.scopes, ['read', 'write'])
+  assert.equal(url.searchParams.get('readonly'), null)
+  assert.deepEqual(url.searchParams.getAll('category'), ['branches', 'querying', 'snapshots'])
+  assert.deepEqual([url.searchParams.get('projectId'), url.searchParams.get('roleName')], [settings.projectId, settings.roleName])
+  assert.equal(neonWriteUrl(settings), grant.url)
+  // The pins are not optional: without them the grant would reach every project and run as
+  // the database owner.
+  assert.throws(() => neonAuthorize({ level: 'write', settings: { roleName: 'app_reader' } }), /project ID/)
+  assert.throws(() => neonAuthorize({ level: 'write', settings: { projectId: 'spring-brook-12345678' } }), /restricted Postgres role/)
+})
+
+test('the full level says what it still needs before authorizing', () => {
+  assert.equal(neonReadiness({ level: 'read', settings: {} }), undefined)
+  assert.match(neonReadiness({ level: 'write', settings: {} }), /project ID/)
+  assert.match(neonReadiness({ level: 'write', settings: { projectId: 'spring-brook-12345678' } }), /restricted Postgres role/)
+  assert.match(neonReadiness({ level: 'write', settings: { projectId: 'Spring_Brook', roleName: 'app_reader' } }), /project ID/)
+  assert.equal(neonReadiness({ level: 'write', settings: { projectId: 'spring-brook-12345678', roleName: 'app_reader' } }), undefined)
+})
+
+test('the settings form is trimmed and validated, and an emptied field is dropped', () => {
+  assert.deepEqual(normalizeNeonSettings({ projectId: '  spring-brook-12345678 ', roleName: ' app_reader ' }), {
+    projectId: 'spring-brook-12345678',
+    roleName: 'app_reader',
+  })
+  assert.deepEqual(normalizeNeonSettings({ projectId: '', roleName: '' }), {})
+  assert.deepEqual(normalizeNeonSettings(undefined), {})
+  assert.throws(() => normalizeNeonSettings({ projectId: 'Spring_Brook' }), /project ID/)
+  assert.throws(() => normalizeNeonSettings({ projectId: 'spring-brook-12345678', roleName: 'app-reader' }), /role name/)
+})
+
+test('the level picks the tool surface, and the write tools exist only at write', () => {
+  const read = neonToolsOf({ level: 'read' })
+  const write = neonToolsOf({ level: 'write' })
+  assert.deepEqual(read.readTools, neon.readTools)
+  assert.deepEqual(read.actionTools, [])
+  assert.deepEqual(write.readTools, neon.readTools)
+  assert.deepEqual(write.actionTools, ['create_branch', 'run_sql', 'create_snapshot', 'delete_branch'])
+  // `run_sql` is the same Neon tool in both levels: a read-only transaction at the read
+  // level, an approved write at the write level. The other three exist only at write.
+  for (const name of write.actionTools.filter(entry => entry !== 'run_sql')) assert.ok(!neon.readTools.includes(name), name)
+  assert.ok(neon.readTools.includes('run_sql'))
+})
+
+test('an approval line names the branch and never carries the whole SQL', async () => {
+  const long = `select * from users where email = '${'a'.repeat(120)}' and note = '${'b'.repeat(120)}'`
+  const run = await neonActionApproval('run_sql', { sql: long, branch_id: 'br-1' }, { settings: { roleName: 'app_reader' } })
+  assert.equal(run.danger, false)
+  assert.match(run.line, /app_reader/)
+  assert.match(run.line, /br-1/)
+  assert.ok(run.line.includes(sqlPreview(long)))
+  assert.ok(!run.line.includes('b'.repeat(120)))
+  assert.ok(sqlPreview(long).length <= 200)
+
+  const removed = await neonActionApproval('delete_branch', { branch_id: 'br-1' }, { settings: { projectId: 'spring-brook-12345678' } })
+  assert.equal(removed.danger, true)
+  assert.match(removed.line, /br-1/)
+  assert.match(removed.line, /deleted and cannot be recovered/)
+
+  const created = await neonActionApproval('create_branch', { name: 'qa-branch' }, { settings: { projectId: 'spring-brook-12345678' } })
+  assert.match(created.line, /qa-branch/)
+  const snapshot = await neonActionApproval('create_snapshot', { branch_id: 'br-1', name: 'before-migration' }, {})
+  assert.match(snapshot.line, /before-migration/)
+})
+
+test('the approval line resolves a branch name through the mounted client', async () => {
+  const client = {
+    callTool: async (name, args) => {
+      assert.equal(name, 'list_branches')
+      assert.deepEqual(args, {})
+      return { content: [{ type: 'text', text: JSON.stringify({ branches: [{ id: 'br-1', name: 'feature-copy' }] }) }] }
+    },
+  }
+  const removed = await neonActionApproval('delete_branch', { branch_id: 'br-1' }, { client })
+  assert.match(removed.line, /feature-copy/)
+  const broken = await neonActionApproval('delete_branch', { branch_id: 'br-1' }, { client: { callTool: async () => { throw new Error('down') } } })
+  assert.match(broken.line, /br-1/)
 })
