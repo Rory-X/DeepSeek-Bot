@@ -13462,6 +13462,30 @@ var NeonMark = () => (0, import_react32.createElement)(
   (0, import_react32.createElement)("path", { d: "M4 5.4v4.2c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V5.4" }),
   (0, import_react32.createElement)("path", { d: "M4 9.6v4.2c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V9.6" })
 );
+var ImaMark = () => (0, import_react32.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react32.createElement)("rect", { x: 4.2, y: 3.4, width: 11.6, height: 13.2, rx: 2.2 }),
+  (0, import_react32.createElement)("path", { d: "M7.4 7.6h5.2M7.4 10.3h5.2M7.4 13h3.2" })
+);
+var WeReadMark = () => (0, import_react32.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react32.createElement)("path", { d: "M10 5.6c-1.5-1.2-3.3-1.7-5.8-1.7v10.6c2.5 0 4.3.5 5.8 1.7 1.5-1.2 3.3-1.7 5.8-1.7V3.9c-2.5 0-4.3.5-5.8 1.7z" }),
+  (0, import_react32.createElement)("path", { d: "M10 5.6v10.6" })
+);
+var GmailMark = () => (0, import_react32.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react32.createElement)("rect", { x: 2.8, y: 4.8, width: 14.4, height: 10.4, rx: 2 }),
+  (0, import_react32.createElement)("path", { d: "M3.6 6.4 10 11l6.4-4.6" })
+);
+var QQMailMark = () => (0, import_react32.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react32.createElement)("rect", { x: 2.8, y: 4.8, width: 14.4, height: 10.4, rx: 2 }),
+  (0, import_react32.createElement)("path", { d: "M3.4 15.2 8.4 10.6M16.6 15.2 11.6 10.6" })
+);
 var CARD_GLYPHS = {
   github: GitHubMark,
   vercel: VercelMark,
@@ -13469,7 +13493,11 @@ var CARD_GLYPHS = {
   notion: NotionMark,
   slack: SlackMark,
   telegram: TelegramMark,
-  neon: NeonMark
+  neon: NeonMark,
+  ima: ImaMark,
+  weread: WeReadMark,
+  gmail: GmailMark,
+  qqmail: QQMailMark
 };
 var ABOUT = {
   github: () => t("Repositories, issues, and pull requests"),

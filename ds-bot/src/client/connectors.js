@@ -33,6 +33,24 @@ export const NeonMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20
   h('path', { d: 'M4 5.4v4.2c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V5.4' }),
   h('path', { d: 'M4 9.6v4.2c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V9.6' }))
 
+// A page with written lines, for a notes service; an open book for a reading one.
+export const ImaMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('rect', { x: 4.2, y: 3.4, width: 11.6, height: 13.2, rx: 2.2 }),
+  h('path', { d: 'M7.4 7.6h5.2M7.4 10.3h5.2M7.4 13h3.2' }))
+
+export const WeReadMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('path', { d: 'M10 5.6c-1.5-1.2-3.3-1.7-5.8-1.7v10.6c2.5 0 4.3.5 5.8 1.7 1.5-1.2 3.3-1.7 5.8-1.7V3.9c-2.5 0-4.3.5-5.8 1.7z' }),
+  h('path', { d: 'M10 5.6v10.6' }))
+
+// Two envelopes of our own drawing, told apart by their folds: a letter, and a tray.
+export const GmailMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('rect', { x: 2.8, y: 4.8, width: 14.4, height: 10.4, rx: 2 }),
+  h('path', { d: 'M3.6 6.4 10 11l6.4-4.6' }))
+
+export const QQMailMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('rect', { x: 2.8, y: 4.8, width: 14.4, height: 10.4, rx: 2 }),
+  h('path', { d: 'M3.4 15.2 8.4 10.6M16.6 15.2 11.6 10.6' }))
+
 // Every mark the cards can name, by the `glyph` a connector declares. A host that does not
 // declare one yet falls back to the service id, so the older connectors keep their marks.
 const CARD_GLYPHS = {
@@ -43,6 +61,10 @@ const CARD_GLYPHS = {
   slack: SlackMark,
   telegram: TelegramMark,
   neon: NeonMark,
+  ima: ImaMark,
+  weread: WeReadMark,
+  gmail: GmailMark,
+  qqmail: QQMailMark,
 }
 const ABOUT = {
   github: () => t('Repositories, issues, and pull requests'),
