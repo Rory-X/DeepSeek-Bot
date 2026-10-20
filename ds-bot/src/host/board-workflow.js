@@ -74,6 +74,19 @@ export function workflowChange(board, command, input, { actor = 'user', bots, pr
       activity = 'Requirement started'
       break
     }
+    case 'board-assign': {
+      active(card); leadOnly(card, actor); noOpen(card)
+      if (!['clarification', 'design'].includes(card.stage) || card.approvedPlan !== undefined) fail('Assign collaborators before submitting the implementation plan')
+      if (!Array.isArray(input.collaboratorIds)) fail('Provide the complete collaborator list, or an empty list for solo work')
+      const collaborators = [...new Set(input.collaboratorIds)].filter(id => id !== card.leadId)
+      if (collaborators.length > 11 || collaborators.some(id => typeof id !== 'string' || !own(bots, id))) fail('Choose up to 11 collaborators from this team')
+      if ((card.deliveries ?? []).some(job => job.stepId && !['finished', 'cancelled'].includes(job.status)
+        && !(job.status === 'interrupted' && card.deliveries.some(child => child.parentId === job.id)))) fail('Wait for previous step executions to settle before changing the team')
+      card.collaboratorIds = collaborators
+      card.staffing = { summary: text(input.summary, 'the assignment rationale and responsibilities', 4000), at: now, actor }
+      activity = 'Requirement team assigned'
+      break
+    }
     case 'board-plan': {
       active(card); leadOnly(card, actor); noOpen(card)
       if (!['clarification', 'design'].includes(card.stage)) fail('Implementation needs a new reviewed revision before replacing its plan')

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createDraft, emptyBoard } from '../src/host/board.js'
 import { workflowChange } from '../src/host/board-workflow.js'
-import { boardToolGuard, install } from '../src/host/board-bots.js'
+import { BOARD_TOOLS, boardToolGuard, install } from '../src/host/board-bots.js'
 import { fakeContext } from './fake-ctx.js'
 import { install as installGroups } from '../src/host/groups.js'
 
@@ -68,6 +68,35 @@ test('plans reject cycles, wrong members, and review without independence', () =
   assert.throws(() => change(start(), 'board-plan', 'lead', { ...plan, steps: [plan.steps[0], { ...plan.steps[0] }] }), /unique/)
 })
 
+test('coordinator staffing is scoped, versioned and does not dispatch collaborators', () => {
+  const board = start()
+  const input = { collaboratorIds: ['lead', 'outsider', 'outsider'], summary: 'Outsider implements, the coordinator independently verifies.' }
+  assert.throws(() => change(board, 'board-assign', 'dev', input), /lead Bot/)
+  assert.throws(() => change(board, 'board-assign', 'user', input), /lead Bot/)
+  for (const collaboratorIds of [['missing'], ['__proto__'], [3], 'dev']) assert.throws(() => change(board, 'board-assign', 'lead', { ...input, collaboratorIds }), /collaborator/)
+  assert.throws(() => change(board, 'board-assign', 'lead', { ...input, version: 1 }), /changed/)
+  const result = change(board, 'board-assign', 'lead', input)
+  assert.deepEqual(result.card.collaboratorIds, ['outsider'])
+  assert.equal(result.card.leadId, 'lead')
+  assert.equal(result.card.projectPath, '/project')
+  assert.equal(result.card.staffing.summary, input.summary)
+  assert.equal(result.effects.length, 0)
+  assert.equal(result.card.deliveries.length, 1)
+  assert.match(boardToolGuard(result.card, 'dev', 'read'), /no longer assigned/)
+  assert.match(boardToolGuard(result.card, 'outsider', 'bash'), /read-only/)
+  assert.deepEqual(change(result.board, 'board-assign', 'lead', { collaboratorIds: [], summary: 'Small solo change; self-review is explicit.' }).card.collaboratorIds, [])
+  assert.throws(() => change(proposed(), 'board-assign', 'lead', input), /open decision/)
+  assert.throws(() => change(approved(), 'board-assign', 'lead', input), /before submitting/)
+  const paused = start(); paused.cards.card.status = 'paused'
+  assert.throws(() => change(paused, 'board-assign', 'lead', input), /not active/)
+  const revised = decide(proposed(), 'reject', 'Use another implementer').board
+  assert.deepEqual(change(revised, 'board-assign', 'lead', input).card.collaboratorIds, ['outsider'])
+  revised.cards.card.deliveries.push({ id: 'old', stepId: 'build', status: 'interrupted' }, { id: 'recovery', parentId: 'old', stepId: 'build', status: 'running' })
+  assert.throws(() => change(revised, 'board-assign', 'lead', input), /previous step executions/)
+  revised.cards.card.deliveries.at(-1).status = 'finished'
+  assert.deepEqual(change(revised, 'board-assign', 'lead', input).card.collaboratorIds, ['outsider'])
+})
+
 test('a collaborator cannot forge another step or mark work done without evidence', () => {
   const board = approved()
   assert.throws(() => change(board, 'board-step', 'lead', { stepId: 'build' }), /assigned Bot/)
@@ -125,6 +154,11 @@ test('tool mutations require the assigned task conversation, including for a Mai
   install(rt); t.after(() => ctx.dispose())
   rt.boardExecution = sessionId => sessionId === 'task' ? { card, job: { id: 'job' } } : undefined
   const tool = ctx.registeredTools.get('plan_requirement')
+  assert.equal(BOARD_TOOLS.length, 9)
+  assert.ok(BOARD_TOOLS.every(name => ctx.registeredTools.has(name)))
+  const assign = ctx.registeredTools.get('assign_requirement_bots')
+  assert.match(await assign.execute({ id: 'card', version: 2, collaboratorIds: [], summary: 'Solo' }, { agent: { id: 'lead-chat' } }), /task conversation/)
+  assert.deepEqual(JSON.parse(await assign.execute({ id: 'card', version: 2, collaboratorIds: [], summary: 'Solo' }, { agent: { id: 'task' } })), { updated: true })
   assert.match(await tool.execute({ id: 'card', version: 2, ...plan }, { agent: { id: 'lead-chat' } }), /task conversation/)
   assert.deepEqual(JSON.parse(await tool.execute({ id: 'card', version: 2, ...plan }, { agent: { id: 'task' } })), { updated: true })
 })

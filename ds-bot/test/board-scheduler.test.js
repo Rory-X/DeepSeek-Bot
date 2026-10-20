@@ -83,6 +83,41 @@ function fixture(saved, shared) {
 }
 const control = (f, card, command, requestId = command) => f.rt.boardMutate(command, { id: card.id, requestId })
 
+test('staffing persists card and task membership together while retaining the coordinator lease', async t => {
+  const f = fixture(); t.after(f.stop)
+  const draft = await f.rt.boardMutate('board-create', { requestId: 'staff', projectId: 'p', title: 'Staff work', description: 'Build', acceptance: 'Verify', leadId: 'lead' })
+  await f.rt.boardMutate('board-start', { id: draft.id, version: draft.version }); await f.pump()
+  let card = f.state.board.cards[draft.id]
+  const job = card.deliveries[0]; await f.take(job)
+  const room = f.state.rooms[card.roomId], scope = { sessionId: job.sessionId, jobId: job.id }
+  assert.deepEqual(room.members, ['lead'])
+  const args = { id: card.id, version: card.version, collaboratorIds: ['dev'], summary: 'Dev builds and lead verifies.' }
+  f.breakSave(true)
+  await assert.rejects(f.rt.boardMutate('board-assign', args, 'lead', scope), /disk full/)
+  assert.deepEqual(room.members, ['lead'])
+  assert.deepEqual(f.state.board.cards[card.id].collaboratorIds, [])
+  f.breakSave(false)
+  card = await f.rt.boardMutate('board-assign', args, 'lead', scope)
+  await f.pump()
+  assert.deepEqual(room.members, ['lead', 'dev'])
+  assert.equal(f.sent.length, 1)
+  assert.equal(f.rt.boardExecution(job.sessionId).job.outcome, undefined)
+  assert.equal(f.rt.boardExecution(job.sessionId).job.id, job.id)
+  const proposed = await f.rt.boardMutate('board-plan', { id: card.id, version: card.version, summary: 'Build then review', steps: [
+    { id: 'build', title: 'Build', phase: 'implementation', assigneeId: 'dev', scope: 'output.txt' },
+    { id: 'review', title: 'Review', phase: 'validation', assigneeId: 'lead', scope: 'output.txt', dependsOn: ['build'] },
+  ] }, 'lead', scope)
+  await f.end(job)
+  assert.equal(f.sent.length, 1)
+  const decision = proposed.decisions[0]
+  await f.rt.boardMutate('board-decide', { id: card.id, decisionId: decision.id, decisionVersion: decision.version, choice: 'approve' })
+  await f.pump()
+  assert.equal(f.sent.length, 2)
+  assert.equal(f.sent[1].toId, 'dev')
+  assert.deepEqual(room.members, ['lead', 'dev'])
+  assert.equal(f.state.board.cards[card.id].staffing.summary, args.summary)
+})
+
 test('a durable Bot lease prevents double dispatch even before the first message is consumed', async t => {
   const f = fixture(); t.after(f.stop)
   const a = f.add('A'), b = f.add('B', 'dev', 'q')

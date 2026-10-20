@@ -156,6 +156,14 @@ var BOARD_ZH = {
   "Confirm the plan": "确认方案",
   "Your decision": "等待你的决定",
   "Lead Bot": "主负责人",
+  "Coordinator Bot": "主控 Bot",
+  "Choose coordinator Bot": "选择主控 Bot",
+  "Search Bots": "搜索 Bot",
+  "No matching Bots": "没有匹配的 Bot",
+  "Team assignment": "团队分工",
+  "Requirement team assigned": "主控 Bot 已分配团队",
+  "After you start, this Bot assigns collaborators while clarifying the requirement.": "开始后，主控 Bot 会在需求澄清时分配协作 Bot。",
+  "Start asks the coordinator to clarify the requirement, assign Bots and propose a plan. Implementation waits for your approval.": "开始后由主控 Bot 澄清需求、分配 Bot 并提交方案；你确认方案后才开始执行。",
   "Unavailable Bot": "Bot 不可用",
   "{done} of {total} steps": "{done} / {total} 个步骤",
   "Deliverables": "交付物",
@@ -8535,7 +8543,7 @@ function Owners({ card, roster, label = false }) {
     { className: "bt-board-owners" },
     ids.slice(0, 4).map((id, index) => (0, import_react19.createElement)(
       "span",
-      { key: id, title: (index === 0 ? t("Lead Bot") + ": " : "") + (roster.byId[id]?.name ?? t("Unavailable Bot")) },
+      { key: id, title: (index === 0 ? t("Coordinator Bot") + ": " : "") + (roster.byId[id]?.name ?? t("Unavailable Bot")) },
       (0, import_react19.createElement)(BotAvatar, { bot: roster.byId[id], size: 28, main: (roster.mainBotIds ?? []).includes(id), live: false })
     )),
     ids.length > 4 ? (0, import_react19.createElement)("span", null, "+" + (ids.length - 4)) : null,
@@ -8751,6 +8759,7 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
     (0, import_react19.createElement)("p", { className: "bt-board-eyebrow" }, project?.title, " · ", t(COLUMNS.find(([id]) => id === card.column)?.[1] ?? "Backlog")),
     (0, import_react19.createElement)("h2", { className: "bt-board-detail-title" }, card.title),
     (0, import_react19.createElement)(Owners, { card, roster, label: true }),
+    card.staffing ? (0, import_react19.createElement)(Card, { title: t("Team assignment") }, (0, import_react19.createElement)("p", { className: "bt-board-prose" }, card.staffing.summary)) : null,
     confirmCancel ? (0, import_react19.createElement)(
       "section",
       { className: "bt-board-decision" },
@@ -8768,7 +8777,7 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
       { className: "bt-board-control-state", role: "status" },
       t({ paused: "Paused; progress retained", pausing: "Stopping work before pausing", cancelling: "Stopping work before cancellation", cancelled: "Cancelled; deliverables and history retained" }[card.status])
     ) : null,
-    card.status === "backlog" ? (0, import_react19.createElement)("p", { className: "bt-board-muted" }, t("Start asks the lead Bot to clarify and plan. Implementation waits for your approval.")) : null,
+    card.status === "backlog" ? (0, import_react19.createElement)("p", { className: "bt-board-muted" }, t("Start asks the coordinator to clarify the requirement, assign Bots and propose a plan. Implementation waits for your approval.")) : null,
     card.deliveryError || error ? (0, import_react19.createElement)("p", { className: "bt-board-error", role: "alert" }, t(card.deliveryError || error)) : null,
     card.deliveryError && card.deliveries?.some((job) => job.status === "failed") && !card.deliveries.some((job) => job.status === "failed" && job.mayHaveSent) ? (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: busy || readOnly, onClick: () => start("board-retry") }, t("Retry task delivery")) : null,
     (0, import_react19.createElement)(
@@ -8848,6 +8857,78 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
     ))) : null
   );
 }
+function CoordinatorPicker({ value, roster, onChange }) {
+  const { isOpen, shownPlace, leaving, button, menu, open, close } = useAnchoredMenu();
+  const [query, setQuery] = (0, import_react19.useState)("");
+  const selected = roster.byId[value];
+  const bots = roster.bots.filter((bot) => `${bot.name} ${bot.role ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const pick2 = (id) => {
+    onChange(id);
+    close();
+    button.current?.focus();
+  };
+  const identity = (bot, size) => (0, import_react19.createElement)(
+    "span",
+    { className: "bt-board-bot-identity" },
+    (0, import_react19.createElement)(BotAvatar, { bot, size, main: (roster.mainBotIds ?? []).includes(bot.id), live: true, gaze: size > 32 }),
+    (0, import_react19.createElement)(
+      "span",
+      { className: "bt-board-bot-copy" },
+      (0, import_react19.createElement)("strong", null, bot.name),
+      bot.role ? (0, import_react19.createElement)("span", { className: "bt-board-bot-role" }, bot.role) : null,
+      modelOf(bot, roster)?.name ? (0, import_react19.createElement)("small", null, modelOf(bot, roster).name) : null
+    )
+  );
+  const keys = (event) => {
+    const options = [...menu.current.querySelectorAll("[role=option]")];
+    const index = options.indexOf(document.activeElement);
+    if (event.key === "Enter" && event.target.tagName === "INPUT") {
+      event.preventDefault();
+      if (bots[0]) pick2(bots[0].id);
+    } else if (["ArrowDown", "ArrowUp"].includes(event.key) && options.length) {
+      event.preventDefault();
+      event.stopPropagation();
+      const next = index < 0 ? event.key === "ArrowDown" ? 0 : options.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+      options[next]?.focus();
+    }
+  };
+  return (0, import_react19.createElement)(
+    "div",
+    { className: "bt-board-bot-picker" },
+    (0, import_react19.createElement)(
+      "button",
+      {
+        ref: button,
+        type: "button",
+        className: "bt-board-bot-trigger",
+        "aria-label": t("Coordinator Bot"),
+        "aria-haspopup": "dialog",
+        "aria-expanded": isOpen,
+        onClick: () => {
+          if (isOpen) close();
+          else {
+            setQuery("");
+            open();
+          }
+        }
+      },
+      selected ? identity(selected, 44) : (0, import_react19.createElement)("span", { className: "bt-board-bot-copy" }, t("Choose a Bot")),
+      (0, import_react19.createElement)(Caret)
+    ),
+    shownPlace ? (0, import_react19.createElement)(
+      "div",
+      { ref: menu, role: "dialog", "aria-label": t("Choose coordinator Bot"), className: "bt-menu bt-model-menu bt-board-bot-menu", style: shownPlace, "data-leaving": leaving || void 0, onKeyDown: keys },
+      (0, import_react19.createElement)("input", { className: "bt-folder-input", autoFocus: true, value: query, placeholder: t("Search Bots"), "aria-label": t("Search Bots"), onChange: (event) => setQuery(event.target.value) }),
+      (0, import_react19.createElement)("div", { role: "listbox", "aria-label": t("Coordinator Bot") }, bots.map((bot) => (0, import_react19.createElement)(
+        "button",
+        { key: bot.id, type: "button", role: "option", "aria-selected": bot.id === value, onClick: () => pick2(bot.id) },
+        identity(bot, 32),
+        bot.id === value ? (0, import_react19.createElement)(CheckIcon) : null
+      ))),
+      !bots.length ? (0, import_react19.createElement)("p", { className: "bt-board-muted" }, t("No matching Bots")) : null
+    ) : null
+  );
+}
 function DraftDialog({ card, project, roster, onClose, onSaved }) {
   const [draft, setDraft] = (0, import_react19.useState)(() => ({
     requestId: crypto.randomUUID(),
@@ -8855,8 +8936,7 @@ function DraftDialog({ card, project, roster, onClose, onSaved }) {
     title: card?.title ?? "",
     description: card?.description ?? "",
     acceptance: card?.acceptance ?? "",
-    leadId: card?.leadId ?? roster.mainBotId ?? "",
-    collaboratorIds: card?.collaboratorIds ?? []
+    leadId: card?.leadId ?? roster.mainBotId ?? ""
   }));
   const [busy, setBusy] = (0, import_react19.useState)(false);
   const [error, setError] = (0, import_react19.useState)("");
@@ -8895,39 +8975,24 @@ function DraftDialog({ card, project, roster, onClose, onSaved }) {
       ),
       (0, import_react19.createElement)(
         Card,
-        { title: t("Ownership") },
-        (0, import_react19.createElement)(Row, { label: t("Lead Bot"), stack: true }, (0, import_react19.createElement)(
-          "select",
-          { className: "bt-bs-input", value: draft.leadId, onChange: (event) => change("leadId", event.target.value) },
-          (0, import_react19.createElement)("option", { value: "" }, t("Choose a Bot")),
-          roster.bots.map((bot) => (0, import_react19.createElement)("option", { key: bot.id, value: bot.id }, bot.name))
-        )),
-        (0, import_react19.createElement)(
-          "fieldset",
-          { className: "bt-board-collaborators" },
-          (0, import_react19.createElement)("legend", null, t("Collaborators")),
-          roster.bots.filter((bot) => bot.id !== draft.leadId).map((bot) => (0, import_react19.createElement)(
-            "label",
-            { key: bot.id },
-            (0, import_react19.createElement)("input", { type: "checkbox", checked: draft.collaboratorIds.includes(bot.id), onChange: (event) => change("collaboratorIds", event.target.checked ? [...draft.collaboratorIds, bot.id] : draft.collaboratorIds.filter((id) => id !== bot.id)) }),
-            (0, import_react19.createElement)(BotAvatar, { bot, size: 24, live: false }),
-            bot.name
-          ))
-        )
+        { title: t("Coordinator Bot") },
+        (0, import_react19.createElement)(CoordinatorPicker, { value: draft.leadId, roster, onChange: (id) => change("leadId", id) })
       ),
+      (0, import_react19.createElement)("p", { className: "bt-board-muted" }, t("After you start, this Bot assigns collaborators while clarifying the requirement.")),
       (0, import_react19.createElement)("p", { className: "bt-board-muted" }, t("Saving a draft does not start any Bot.")),
       error ? (0, import_react19.createElement)("p", { className: "bt-board-error", role: "alert" }, error) : null
     )
   );
 }
 var BOARD_CSS = [
+  ".bt-board-bot-picker{width:100%}.bt-board-bot-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:14px 16px;border:0;border-radius:12px;background:transparent;color:var(--bt-ink);text-align:left}.bt-board-bot-trigger:hover{background:var(--bt-hover)}.bt-board-bot-identity{display:flex;align-items:center;gap:12px;flex:1;min-width:0}.bt-board-bot-copy{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.bt-board-bot-copy strong{font-size:14px;font-weight:550}.bt-board-bot-role{font-size:12px;color:var(--bt-ink-2)}.bt-board-bot-copy small{font-size:11px;color:var(--bt-ink-3)}.bt-board-bot-copy>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bt-board-bot-menu{z-index:75}.bt-board-bot-menu [role=option]{gap:10px;padding:10px 8px}.bt-board-bot-menu [aria-selected=true]{background:var(--bt-active)}.bt-board-bot-menu .bt-mark svg{width:100%;height:100%;margin:0}.bt-board-bot-menu .bt-folder-input{flex:none;min-height:34px}.bt-board-bot-menu .bt-board-muted{padding:8px;margin:0}",
   ".bt-board-cancel-filter{display:flex;gap:7px;align-items:center;padding:4px 24px 14px;font-size:12px;color:var(--bt-ink-2)}.bt-board-queue{list-style:none;margin:0;padding:0}.bt-board-queue li{padding:14px;border-bottom:1px solid var(--bt-line);font-size:12px}.bt-board-queue-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.bt-board-queue-top strong{font-weight:550}.bt-board-queue p{margin:8px 0;overflow-wrap:anywhere}.bt-board-queue small{color:var(--bt-ink-3)}.bt-board-queue-link{border:0;padding:8px 0 0;background:transparent;color:var(--bt-accent);text-align:left}.bt-board-control-state{padding:12px;border:1px solid var(--bt-line);border-radius:8px;background:var(--bt-card);font-size:12px;color:var(--bt-star)}@media(max-width:899px){.bt-board-header-actions{max-width:70%;flex-wrap:wrap;justify-content:flex-end}.bt-board-detail-actions .bt-board-button{font-size:11px;padding:8px}.bt-board-cancel-filter{padding-left:16px}}",
   ".bt-board-detail-actions,.bt-board-decision-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.bt-board-answer{display:block;font-size:12px;margin:16px 0}.bt-board-answer textarea{display:block;width:100%;resize:vertical;margin-top:7px}.bt-board-decision-text{white-space:pre-wrap}.bt-board-reference{display:block;overflow-wrap:anywhere;font-size:11px;color:var(--bt-accent);margin-top:6px}.bt-board-evidence{padding:14px 16px;border-bottom:1px solid var(--bt-line);font-size:12px;overflow-wrap:anywhere}.bt-board-evidence strong{font-weight:550}.bt-board-evidence svg{display:inline-block;width:14px;height:14px;color:var(--bt-green);vertical-align:middle;margin-right:6px}.bt-board-evidence p{white-space:pre-wrap;color:var(--bt-ink-2);line-height:1.6}.bt-board-decision .bt-board-error{margin:12px 0 0}",
   ".bt-board-entry{position:relative;flex:none}.bt-board-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--bt-tag-bg);color:var(--bt-star);font-size:12px;font-weight:600}.bt-board-entry .bt-board-count{position:absolute;top:-3px;right:-4px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;font-size:10px;line-height:14px;box-shadow:0 0 0 2px var(--bt-main)}",
   '.bt-board{position:fixed;z-index:65;top:0;right:0;bottom:0;display:flex;flex-direction:column;background:var(--bt-main);color:var(--bt-ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;isolation:isolate}.bt-board *{box-sizing:border-box}.bt-board button,.bt-board input,.bt-board textarea,.bt-board select{font:inherit}.bt-board button{cursor:pointer}.bt-board button:disabled{cursor:default;opacity:.5}.bt-board :focus-visible{outline:2px solid var(--bt-accent);outline-offset:3px}.bt-board-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 24px 18px;border-bottom:1px solid var(--bt-line)}.bt-board-heading{display:flex;align-items:center;gap:10px}.bt-board-heading>svg{width:22px;height:22px;color:var(--bt-ink-2)}.bt-board h1{font-size:19px;font-weight:650;margin:0}.bt-board-header-actions{display:flex;gap:10px}.bt-board-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 14px;min-height:38px;border:1px solid var(--bt-line-2);border-radius:10px;background:var(--bt-card);color:var(--bt-ink);white-space:nowrap}.bt-board-primary{background:var(--bt-accent);color:var(--bt-accent-ink);border-color:var(--bt-accent)}',
   ".bt-board-toolbar{display:flex;align-items:center;gap:20px;padding:16px 24px 8px}.bt-board-projects{display:flex;flex:1;gap:6px;min-width:0;overflow:auto;padding:3px}.bt-board-project{display:flex;align-items:center;gap:8px;flex:none;padding:8px 12px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--bt-ink-2);white-space:nowrap}.bt-board-project[aria-pressed=true]{background:var(--bt-card);color:var(--bt-ink);border-color:var(--bt-line-2)}.bt-board-search{display:flex;align-items:center;gap:8px;max-width:230px;color:var(--bt-ink-3);padding:8px 10px;border:1px solid var(--bt-line);border-radius:8px;background:var(--bt-card)}.bt-board-search input{border:0;outline:none;background:transparent;color:var(--bt-ink);width:100%;min-width:0}.bt-board-project-info{display:flex;justify-content:space-between;gap:16px;padding:2px 27px 16px;font-size:12px;color:var(--bt-ink-3)}.bt-board-project-info>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bt-board-project-info>span:last-child{flex:none}",
   ".bt-board-columns{display:grid;grid-template-columns:repeat(4,minmax(240px,1fr));align-items:stretch;gap:14px;flex:1;min-height:0;overflow:auto;padding:0 24px 24px}.bt-board-column{display:flex;flex-direction:column;min-height:0;border:1px solid var(--bt-line);border-radius:16px;background:var(--bt-sidebar);--board-dot:var(--bt-ink-3)}.bt-board-column[data-column=in-progress]{--board-dot:var(--bt-accent)}.bt-board-column[data-column=needs-you]{--board-dot:var(--bt-star)}.bt-board-column[data-column=done]{--board-dot:var(--bt-green)}.bt-board-column-title{display:flex;align-items:center;gap:8px;padding:18px 16px 14px}.bt-board-column-title h2{font-size:14px;font-weight:600;margin:0}.bt-board-dot{display:inline-block;width:7px;height:7px;flex:none;border-radius:50%;background:var(--board-dot,var(--bt-ink-3))}.bt-board-column-count{margin-left:auto;color:var(--bt-ink-3);font-size:12px}.bt-board-column-cards{padding:0 10px 12px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:10px}.bt-board-card{display:flex;flex-direction:column;gap:12px;text-align:left;flex:none;width:100%;padding:16px 14px;border:1px solid var(--bt-line);border-radius:12px;background:var(--bt-card);color:var(--bt-ink)}.bt-board-card:hover{border-color:var(--bt-line-2);background:var(--bt-main)}.bt-board-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--bt-ink-3);font-size:11px}.bt-board-stage{color:var(--bt-ink-2)}.bt-board-card-title{font-size:15px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}.bt-board-card-summary{font-size:12px;color:var(--bt-ink-2);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.bt-board-waiting{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--bt-star);--board-dot:var(--bt-star)}.bt-board-step-count{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--bt-ink-3)}.bt-board-step-count svg{width:13px;height:13px}.bt-board-card-foot{display:flex;align-items:center;gap:8px;padding-top:3px}.bt-board-owners{display:flex;align-items:center;gap:3px;flex:none}.bt-board-owner-name{font-size:13px;margin-left:8px;color:var(--bt-ink-2)}.bt-board-time{color:var(--bt-ink-3);font-size:10px;white-space:nowrap}.bt-board-card-action{margin-left:auto;font-size:11px;padding:4px 8px;border-radius:6px;background:var(--bt-hover);color:var(--bt-ink-2)}.bt-board-action-review{color:var(--bt-accent);background:var(--bt-tag-bg)}.bt-board-attachment{display:flex;align-items:center;font-size:10px;color:var(--bt-ink-3)}.bt-board-attachment svg{width:13px}.bt-board-empty-column{margin:22px 8px;font-size:12px;text-align:center;color:var(--bt-ink-3)}.bt-board-empty{margin:auto;text-align:center;padding:40px;color:var(--bt-ink-2)}.bt-board-error{margin:10px 24px;color:var(--bt-danger);font-size:13px}",
-  ".bt-board-drawer-veil{position:absolute;inset:0;z-index:2;background:var(--bt-hover);display:flex;justify-content:flex-end}.bt-board-drawer{display:flex;flex-direction:column;width:min(540px,100%);height:100%;background:var(--bt-main);border-left:1px solid var(--bt-line-2);box-shadow:-12px 0 32px var(--bt-line);min-width:0}.bt-board-drawer-header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--bt-line);font-size:12px;color:var(--bt-ink-2)}.bt-board-drawer-body{flex:1;overflow:auto;padding:24px}.bt-board-drawer-foot{padding:14px 24px;border-top:1px solid var(--bt-line);display:flex;justify-content:flex-end}.bt-board-eyebrow{font-size:11px;color:var(--bt-ink-3);margin:0 0 10px}.bt-board-detail-title{font-size:23px;line-height:1.4;margin:0 0 16px;font-weight:600}.bt-board-prose{margin:0;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7}.bt-board-muted{color:var(--bt-ink-2);font-size:12px}.bt-board-stages{display:flex;list-style:none;padding:0;margin:26px 0;gap:4px}.bt-board-stages li{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px;font-size:10px;line-height:1.4;text-align:center;color:var(--bt-ink-3)}.bt-board-stage-index{width:25px;height:25px;border:1px solid var(--bt-line-2);border-radius:50%;display:flex;align-items:center;justify-content:center}.bt-board-stages li[data-current=true]{color:var(--bt-accent);font-weight:600}.bt-board-stages li[data-current=true] .bt-board-stage-index{border-color:var(--bt-accent);background:var(--bt-tag-bg)}.bt-board-stages li[data-complete=true] .bt-board-stage-index{color:var(--bt-green)}.bt-board-stage-index svg{width:14px}.bt-board-decision{padding:18px;border:1px solid var(--bt-star);border-radius:12px;background:var(--bt-card);margin:0 0 24px}.bt-board-decision .bt-board-eyebrow{color:var(--bt-star)}.bt-board-decision h3{font-size:15px;margin:0 0 8px}.bt-board-decision p{font-size:12px}.bt-board-steps,.bt-board-activity{list-style:none;padding:0;margin:0}.bt-board-steps li{padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--bt-line);font-size:13px}.bt-board-steps small,.bt-board-artifact small{display:block;color:var(--bt-ink-3);font-size:11px;margin-top:3px}.bt-board-step-state{width:20px;display:flex;justify-content:center;color:var(--bt-green)}.bt-board-artifact{display:flex;align-items:center;gap:10px;padding:14px;font-size:13px}.bt-board-artifact strong{font-weight:500}.bt-board-activity li{display:flex;justify-content:space-between;gap:16px;padding:12px 14px;font-size:12px;border-bottom:1px solid var(--bt-line)}.bt-board-activity small{color:var(--bt-ink-3);white-space:nowrap}.bt-board-collaborators{border:0;padding:12px 16px;margin:0}.bt-board-collaborators legend{font-size:12px;color:var(--bt-ink-2)}.bt-board-collaborators label{display:inline-flex;align-items:center;gap:6px;margin:4px 12px 4px 0;font-size:12px}.bt-board input[type=checkbox]{accent-color:var(--bt-accent)}.bt-board-form .bt-bs-input{width:100%;box-sizing:border-box}.bt-board-form .bt-bs-area{resize:vertical;min-height:90px}.bt-board-form .bt-board-error{margin:8px 0}.bt-board-drawer .bt-set-section h3{font-size:12px;font-weight:500;color:var(--bt-ink-2)}",
+  ".bt-board-drawer-veil{position:absolute;inset:0;z-index:2;background:var(--bt-hover);display:flex;justify-content:flex-end}.bt-board-drawer{display:flex;flex-direction:column;width:min(540px,100%);height:100%;background:var(--bt-main);border-left:1px solid var(--bt-line-2);box-shadow:-12px 0 32px var(--bt-line);min-width:0}.bt-board-drawer-header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--bt-line);font-size:12px;color:var(--bt-ink-2)}.bt-board-drawer-body{flex:1;overflow:auto;padding:24px}.bt-board-drawer-foot{padding:14px 24px;border-top:1px solid var(--bt-line);display:flex;justify-content:flex-end}.bt-board-eyebrow{font-size:11px;color:var(--bt-ink-3);margin:0 0 10px}.bt-board-detail-title{font-size:23px;line-height:1.4;margin:0 0 16px;font-weight:600}.bt-board-prose{margin:0;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7}.bt-board-muted{color:var(--bt-ink-2);font-size:12px}.bt-board-stages{display:flex;list-style:none;padding:0;margin:26px 0;gap:4px}.bt-board-stages li{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px;font-size:10px;line-height:1.4;text-align:center;color:var(--bt-ink-3)}.bt-board-stage-index{width:25px;height:25px;border:1px solid var(--bt-line-2);border-radius:50%;display:flex;align-items:center;justify-content:center}.bt-board-stages li[data-current=true]{color:var(--bt-accent);font-weight:600}.bt-board-stages li[data-current=true] .bt-board-stage-index{border-color:var(--bt-accent);background:var(--bt-tag-bg)}.bt-board-stages li[data-complete=true] .bt-board-stage-index{color:var(--bt-green)}.bt-board-stage-index svg{width:14px}.bt-board-decision{padding:18px;border:1px solid var(--bt-star);border-radius:12px;background:var(--bt-card);margin:0 0 24px}.bt-board-decision .bt-board-eyebrow{color:var(--bt-star)}.bt-board-decision h3{font-size:15px;margin:0 0 8px}.bt-board-decision p{font-size:12px}.bt-board-steps,.bt-board-activity{list-style:none;padding:0;margin:0}.bt-board-steps li{padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--bt-line);font-size:13px}.bt-board-steps small,.bt-board-artifact small{display:block;color:var(--bt-ink-3);font-size:11px;margin-top:3px}.bt-board-step-state{width:20px;display:flex;justify-content:center;color:var(--bt-green)}.bt-board-artifact{display:flex;align-items:center;gap:10px;padding:14px;font-size:13px}.bt-board-artifact strong{font-weight:500}.bt-board-activity li{display:flex;justify-content:space-between;gap:16px;padding:12px 14px;font-size:12px;border-bottom:1px solid var(--bt-line)}.bt-board-activity small{color:var(--bt-ink-3);white-space:nowrap}.bt-board input[type=checkbox]{accent-color:var(--bt-accent)}.bt-board-form .bt-bs-input{flex:0 0 auto;width:100%;box-sizing:border-box;margin:0;text-align:left}.bt-board-form .bt-select{flex:0 0 auto;height:38px}.bt-board-form .bt-bs-area{resize:vertical;min-height:90px}.bt-board-form .bt-board-error{margin:8px 0}.bt-board-drawer .bt-set-section h3{font-size:12px;font-weight:500;color:var(--bt-ink-2)}",
   "@media(max-width:899px){.bt-board{left:0!important}.bt-board-header{padding:16px;gap:8px}.bt-board h1{font-size:17px}.bt-board-heading{gap:6px}.bt-board-heading>svg{display:none}.bt-board-header-actions{gap:6px}.bt-board-header-actions .bt-board-button{font-size:11px;padding:8px;min-height:36px}.bt-board-toolbar{padding:10px 12px 4px;flex-wrap:wrap;gap:8px}.bt-board-projects{flex-basis:100%}.bt-board-project{padding:7px 10px;font-size:12px}.bt-board-search{max-width:none;width:100%;margin:0 3px;font-size:12px}.bt-board-project-info{padding:6px 16px 12px;font-size:10px}.bt-board-columns{grid-template-columns:repeat(4,minmax(280px,82vw));padding:0 12px 16px;gap:12px;scroll-snap-type:x proximity}.bt-board-column{scroll-snap-align:start}.bt-board-drawer{width:100%;border:0}.bt-board-drawer-body{padding:20px}.bt-board-stages{margin:22px 0}.bt-board-drawer-header{padding:12px 18px}.bt-board-drawer-foot{padding-bottom:calc(14px + env(safe-area-inset-bottom))}}"
 ].join("\n");
 

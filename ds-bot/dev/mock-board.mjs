@@ -21,6 +21,14 @@ export function boardReply({ messages, tools, textOf, tool, text }) {
   const filename = number => `board-demo-${number}-${id.slice(0, 8)}.mjs`
   const previousCard = later.flatMap(message => Array.isArray(message.content) ? message.content : [])
     .filter(block => block.type === 'tool_result').map(block => { try { return JSON.parse(textOf(block.content)).cards?.[0] } catch { return undefined } }).filter(Boolean).at(-1)
+  if (call?.name === 'list_bots' && previousCard?.description.includes('[staffing bench]')) {
+    const roster = later.flatMap(message => Array.isArray(message.content) ? message.content : [])
+      .filter(block => block.type === 'tool_result').map(block => { try { return JSON.parse(textOf(block.content)).bots } catch { return undefined } }).filter(Boolean).at(-1)
+    const developer = roster?.find(bot => bot.role === 'Frontend engineer' && bot.id !== previousCard.leadId)
+    if (!developer) return [text('No fixture developer exists; cannot assign this test requirement.')]
+    return [tool('assign_requirement_bots', { id, version: previousCard.version, collaboratorIds: [developer.id], summary: `${developer.name} implements the project filter. The coordinator independently reviews project isolation and empty results.` })]
+  }
+  if (call?.name === 'assign_requirement_bots') return read()
   if (call?.name === 'write') return Object.assign([tool('read', { file_path: filename(previousCard.number) })], { delay: Number(process.env.MOCK_BOARD_HOLD_MS ?? 0) || undefined })
   if (call?.name === 'read') return read()
   let data
@@ -45,6 +53,7 @@ export function boardReply({ messages, tools, textOf, tool, text }) {
       references: [card.projectPath + '/' + filename(card.number), 'Previous execution attempt ' + job.parentId],
     })]
   }
+  if (card.stage === 'clarification' && card.description.includes('[staffing bench]') && !card.staffing) return [tool('list_bots', {})]
   if (card.stage === 'clarification' && card.description.includes('Remember filters') && !card.decisions.length) return [tool('ask_requirement_user', {
     ...args, question: 'Should filters be remembered separately for each project?', recommendation: 'Keep one saved filter per project so switching projects restores the previous view.', impact: 'The implementation plan waits for this product choice. Read-only investigation can continue.',
   })]

@@ -57,7 +57,7 @@ export function editDraft(board, input, { bots, now = Date.now() }) {
   if (!previous) throw invalid('This requirement no longer exists')
   if (previous.version !== input.version) throw invalid('This requirement changed in another window. Reopen it before saving.')
   if (previous.status !== 'backlog') throw invalid('Active requirements need a reviewed revision')
-  const data = draftFields(input, bots)
+  const data = draftFields({ collaboratorIds: previous.collaboratorIds, ...input }, bots)
   const card = {
     ...previous, ...data, version: previous.version + 1, updatedAt: now,
     activity: [...previous.activity, { id: randomUUID(), at: now, actor: 'user', text: 'Draft updated' }],
@@ -106,6 +106,13 @@ export function install(rt) {
         : kind === 'board-edit' ? editDraft(before, body, context)
           : workflowChange(before, kind, body, { ...context, actor })
       if (board === before) return card
+      // Team and conversation membership share one durable write. Keep old Sessions
+      // for history; membership and execution guards revoke a removed Bot's access.
+      const room = kind === 'board-assign' && card.roomId ? rt.roomOf(card.roomId) : undefined
+      if (kind === 'board-assign' && card.roomId && (!room || room.boardCardId !== card.id)) throw invalid('The task conversation is no longer available')
+      if (kind === 'board-assign' && rt.boardBackground?.(previous).length) throw invalid('Wait for background tasks to stop before changing the team')
+      const previousMembers = room?.members
+      const members = [card.leadId, ...card.collaboratorIds]
       if (execution) {
         const job = card.deliveries.find(job => job.id === execution.jobId)
         if (job && kind === 'board-question' && job.stepId) {
@@ -116,8 +123,10 @@ export function install(rt) {
           || (kind === 'board-step' && ['done', 'blocked'].includes(body.status) && (!job.stepId || job.stepId === body.stepId)))) job.outcome = kind
       }
       rt.state.board = board
+      if (room) room.members = members
       try { await rt.save() } catch (error) {
         if (rt.state.board === board) rt.state.board = before
+        if (room?.members === members) room.members = previousMembers
         throw error
       }
       rt.drainBoard?.()

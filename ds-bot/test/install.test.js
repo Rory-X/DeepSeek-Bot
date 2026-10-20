@@ -105,6 +105,7 @@ test('apply registers listeners, tools, and effects in a fixed order', (t) => {
     'tools guard',
     'tool read_project_board',
     'tool create_requirement',
+    'tool assign_requirement_bots',
     'tool plan_requirement',
     'tool update_requirement_step',
     'tool ask_requirement_user',

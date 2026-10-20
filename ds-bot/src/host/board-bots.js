@@ -3,16 +3,17 @@ import { output } from './tools.js'
 import { membersOf } from './board-workflow.js'
 import { installScheduler } from './board-scheduler.js'
 
-export const BOARD_TOOLS = ['read_project_board', 'create_requirement', 'plan_requirement', 'update_requirement_step', 'resume_requirement_step', 'ask_requirement_user', 'submit_requirement', 'reconcile_requirement_work']
+export const BOARD_TOOLS = ['read_project_board', 'create_requirement', 'assign_requirement_bots', 'plan_requirement', 'update_requirement_step', 'resume_requirement_step', 'ask_requirement_user', 'submit_requirement', 'reconcile_requirement_work']
 const str = description => ({ type: 'string', required: true, description })
 const id = str('Requirement id from read_project_board')
 const version = { type: 'integer', required: true, description: 'Current requirement version; read again after any conflict' }
 const READ_TOOLS = new Set(['read', 'read_file', 'read_image', 'glob', 'grep', 'read_own_chat', 'read_group_chat', 'read_browser', 'list_bots', 'list_models', 'list_capabilities', 'list_secrets', 'recall', 'web_search', 'web_fetch', 'list_agents', 'job_list', 'job_output'])
 
 export function boardToolGuard(card, botId, name) {
+  if (!membersOf(card).includes(botId)) return 'You are no longer assigned to this requirement. Wait for a new assignment.'
   if (card.status !== 'active' && !READ_TOOLS.has(name) && name !== 'read_project_board') return 'This requirement is paused, stopping or cancelled. Do not execute more work.'
   if (BOARD_TOOLS.includes(name) || READ_TOOLS.has(name)) return
-  if (['message_bot', 'post_to_group', 'create_group', 'update_group', 'delete_group', 'create_bot', 'update_bot', 'stop_bot', 'ask_user', 'save_capability', 'delete_capability', 'attach_capability', 'detach_capability'].includes(name)) return 'Keep requirement work in its task conversation and board tools. The assigned members and project are fixed by the user.'
+  if (['message_bot', 'post_to_group', 'create_group', 'update_group', 'delete_group', 'create_bot', 'update_bot', 'stop_bot', 'ask_user', 'save_capability', 'delete_capability', 'attach_capability', 'detach_capability'].includes(name)) return 'Keep requirement work in its task conversation and board tools. The coordinator assigns existing team Bots with assign_requirement_bots before planning; the project and coordinator remain fixed by the user.'
   const writable = card.status === 'active' && card.approvedPlan === card.planVersion
     && ['implementation', 'validation'].includes(card.stage)
     && card.steps.some(step => step.assigneeId === botId && step.phase === card.stage && step.status === 'running')
@@ -28,6 +29,7 @@ const jobPrompt = (card, job) => [
   job.stepId ? `Assigned step: ${job.stepId}. Work only within its scope.` : '',
   'Read the latest requirement with read_project_board before changing it; use its current version. Save progress using board tools. A normal reply does not update the board.',
   'Collect background shell results using job_output and job_list before reporting completion. Keep processes managed by DSH; do not detach daemons with nohup, disown or an external supervisor. A pause stops processes, not their previous effects; continuation must inspect saved results.',
+  'During requirement clarification, the coordinator reads list_bots and calls assign_requirement_bots with the collaborators needed and their responsibilities (an empty list for solo work). Select existing team Bots for this requirement; do not create or reconfigure global Bots. The task conversation membership updates automatically. Assignment does not dispatch workers; plan_requirement defines their steps and user approval starts execution.',
   'Clarify only decisions that change product scope, behavior or acceptance. Use ask_requirement_user for these; routine implementation choices are yours. Propose implementation and validation steps with explicit scopes using plan_requirement, then end your turn and wait for user approval. Do not implement before that approval.',
   'When dispatched to a step, do the work now. Use update_requirement_step with evidence when finished; report blockers honestly. Do not use message_bot or @mentions to dispatch duplicate work: the board dispatches the approved steps. The lead is recalled when all validation is done and submits artifacts and evidence for every criterion using submit_requirement.',
   'Never change global Bot settings or claim final acceptance. Merge, publish, production restart or scope expansion requires explicit authorization in the requirement. A returned delivery requires a revised plan. Do not restart work merely because the process reconnects.',
@@ -76,15 +78,18 @@ export function install(rt) {
     if (execution.job.recovery && !execution.job.reconciled && operation !== 'board-question' && !(operation === 'board-step' && args.status === 'blocked')) throw new Error('Reconcile saved progress before changing this requirement')
     return rt.boardMutate(operation, args, actor, { sessionId: exec.agent.id, jobId: execution.job.id })
   }
-  register('read_project_board', 'Read assigned requirements, their current versions, plan, decisions, progress and acceptance criteria. Pass id for one card.', { id: { type: 'string' } }, (args, actor) => {
+  register('read_project_board', 'Read assigned requirements, their current versions, plan, decisions, progress and acceptance criteria, plus team Bot ids and roles for staffing. Pass id for one card.', { id: { type: 'string' } }, (args, actor) => {
     const data = rt.boardView()
     const cards = data.cards.filter(card => membersOf(card).includes(actor) && (!args.id || card.id === args.id))
-    return { projects: data.projects, cards }
+    return { projects: data.projects, cards, bots: Object.values(rt.state.bots ?? {}).map(({ id, name, role }) => ({ id, name, role })) }
   })
   register('create_requirement', 'Create a draft only. The user must review it and click Start; saving never dispatches work.', {
     projectId: str('Registered DSH project id'), requestId: str('Unique retry identifier'), title: str('Requirement title'), description: str('Requirement brief'), acceptance: str('One acceptance criterion per line'),
-    collaboratorIds: { type: 'array', items: { type: 'string' } },
-  }, (args, actor) => rt.boardMutate('board-create', { ...args, leadId: actor }, actor))
+  }, (args, actor) => rt.boardMutate('board-create', { ...args, leadId: actor, collaboratorIds: [] }, actor))
+  register('assign_requirement_bots', 'Coordinator only, in the assigned requirement conversation before plan submission. Read list_bots to select existing team Bots, then replace this requirement’s collaborators and sync its task group. Does not start work or change global Bot settings. Use an empty list for solo work.', {
+    id, version, collaboratorIds: { type: 'array', required: true, items: { type: 'string' }, description: 'Complete collaborator ids from read_project_board.bots, up to 11; the coordinator is retained automatically' },
+    summary: str('Why these Bots are needed and each responsibility; explain solo work if the list is empty'),
+  }, (args, actor, exec) => mutate('board-assign', args, actor, exec))
   register('plan_requirement', 'Lead only. Submit a concrete plan for user approval. Implementation remains blocked until approved. Multi-Bot plans require an independent reviewer.', {
     id, version, summary: str('Solution, tradeoffs and implementation plan'),
     steps: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {

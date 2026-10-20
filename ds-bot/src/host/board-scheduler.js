@@ -272,7 +272,7 @@ export function installScheduler(rt, prompt) {
     const owner = rt.groupOwners.get(sessionId)
     if (!owner) return undefined
     const found = find(current()?.botLeases?.[owner.botId])
-    if (!found || found.card.roomId !== owner.roomId || found.job.sessionId !== sessionId || found.card.status !== 'active'
+    if (!found || !membersOf(found.card).includes(owner.botId) || found.card.roomId !== owner.roomId || found.job.sessionId !== sessionId || found.card.status !== 'active'
       || found.job.bootId !== boot || found.job.epoch !== (found.card.runEpoch ?? 0) || !['sent', 'running', 'settling'].includes(found.job.status)) return undefined
     return found
   }
