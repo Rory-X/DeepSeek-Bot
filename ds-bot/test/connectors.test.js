@@ -17,7 +17,12 @@ const OFF = {
   vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } },
   cloudflare: { id: 'cloudflare', name: 'Cloudflare', ...off('cloudflare'), oauth: true, toolbox: false, toolboxCall: 'cloudflare_call', card: { glyph: 'cloudflare', about: "Zones, DNS records, analytics and Workers through Cloudflare's own MCP server.", docsUrl: 'https://developers.cloudflare.com/agents/model-context-protocol/', readOnlyNote: 'The named tools only read. Full access can change your account; every write still asks for your approval first.', consent: { title: 'Choose the access level on the authorization page', body: 'Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your Cloudflare account; every write still asks for your approval first.', acknowledge: "I'll choose the access level on the authorization page" } } },
 }
-const statuses = view => view.map(item => [item.id, item.state, item.account])
+// The built-ins these tests are about. A connector module added under src/host/connectors
+// hands the view one more row, and every line adds one; these assertions are about the
+// built-ins, so they ignore module rows instead of failing on every connector branch.
+const BUILTINS = new Set(['github', 'vercel', 'cloudflare'])
+const builtins = view => view.filter(item => BUILTINS.has(item.id))
+const statuses = view => builtins(view).map(item => [item.id, item.state, item.account])
 
 test('signIn asks GitHub who owns the token', async () => {
   const token = fresh()
@@ -192,11 +197,11 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   const token = fresh()
 
   const before = await call(ctx, 'state', {})
-  assert.deepEqual(before.value.connectors, [OFF.github, OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(builtins(before.value.connectors), [OFF.github, OFF.vercel, OFF.cloudflare])
 
   const connected = await call(ctx, 'connector-connect', { id: 'github', token: ` ${token} ` })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo', card: { glyph: 'github', about: "Issues, pull requests and repository context through GitHub's own MCP server.", docsUrl: 'https://docs.github.com', readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.' } }, OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(builtins(connected.value), [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo', card: { glyph: 'github', about: "Issues, pull requests and repository context through GitHub's own MCP server.", docsUrl: 'https://docs.github.com', readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.' } }, OFF.vercel, OFF.cloudflare])
   assert.equal(mounts.length, 1)
   assert.deepEqual(mounts[0].config, githubMount(token))
   const state = await call(ctx, 'state', {})
@@ -205,7 +210,7 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes(token))
 
   const disconnected = await call(ctx, 'connector-disconnect', { id: 'github' })
-  assert.deepEqual(disconnected.value, [OFF.github, OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(builtins(disconnected.value), [OFF.github, OFF.vercel, OFF.cloudflare])
   assert.equal(mounts[0].disposed, true)
   assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
 })
@@ -263,7 +268,7 @@ test('connecting Vercel mounts only its read tools, and the default team answers
 
   const connected = await call(ctx, 'connector-connect', { id: 'vercel', token })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(connected.value, [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } }, OFF.cloudflare])
+  assert.deepEqual(builtins(connected.value), [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } }, OFF.cloudflare])
   // The write tool is never registered, and Vercel is not mounted through DSH's client.
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts.length, 0)
@@ -659,13 +664,13 @@ test('each connector mounts and unmounts on its own', async (t) => {
 test('github: false hides only the GitHub connector', async (t) => {
   const { ctx, home } = setup({ github: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(builtins((await call(ctx, 'state', {})).value.connectors), [OFF.vercel, OFF.cloudflare])
 })
 
 test('vercel: false hides only the Vercel connector', async (t) => {
   const { ctx, home } = setup({ vercel: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual((await call(ctx, 'state', {})).value.connectors, [OFF.github, OFF.cloudflare])
+  assert.deepEqual(builtins((await call(ctx, 'state', {})).value.connectors), [OFF.github, OFF.cloudflare])
 })
 
 test('a GitHub address without https refuses to send the token', async (t) => {
