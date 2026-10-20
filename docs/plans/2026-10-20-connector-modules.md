@@ -49,6 +49,9 @@ connector lets a line add one file and nothing else.
 - A module that fails to import, has a bad id, repeats an id, lacks a display name, has an
   unknown mode, or claims a built-in id (GitHub, Vercel, Cloudflare) fails **plugin load**
   with an error naming the file. Nothing is skipped silently.
+- `blockedTools: [name | RegExp]` names tools the connector never offers. They stay out of
+  every tool list, and a pre-execute gate denies a call carrying the name (or its
+  `<id>_` prefixed form) before a card is made or a request is sent.
 - Load order is file-name order; external connectors appear in the Connectors view after
   the built-ins.
 - A profile still hides a connector with `<id>: false` and still overrides `url`/`api`.

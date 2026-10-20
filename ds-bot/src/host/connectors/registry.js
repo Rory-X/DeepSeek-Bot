@@ -66,6 +66,11 @@ const checkLevels = (file, id, connector) => {
     && (!Array.isArray(connector.settings) || connector.settings.some(field => field === null || typeof field !== 'object' || typeof field.name !== 'string' || field.name === ''))) {
     throw new Error(`Connector module ${file} ("${id}") settings must list fields with a name`)
   }
+  if (connector.blockedTools !== undefined
+    && (!Array.isArray(connector.blockedTools)
+      || connector.blockedTools.some(item => !(typeof item === 'string' && item !== '') && !(item instanceof RegExp)))) {
+    throw new Error(`Connector module ${file} ("${id}") blockedTools must list tool names`)
+  }
 }
 
 

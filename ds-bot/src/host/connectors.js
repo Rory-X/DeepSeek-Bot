@@ -229,6 +229,28 @@ export function install(rt) {
     return next()
   })
 
+  // Names a module refuses outright. They never enter a tool list, and this gate is the
+  // second line: whatever way a call with one of these names arrives, it is denied before a
+  // card is made or a request is sent.
+  const blockedNames = []
+  for (const [id, connector] of Object.entries(options)) {
+    const list = Array.isArray(connector.blockedTools) ? connector.blockedTools : []
+    if (list.length > 0) blockedNames.push({ id, connector, list })
+  }
+  if (blockedNames.length > 0) {
+    ctx.on('tools/pre-execute', async (exec, next) => {
+      const name = String(exec?.name ?? '')
+      if (name === '') return next()
+      for (const entry of blockedNames) {
+        const hit = entry.list.some(item => (item instanceof RegExp
+          ? item.test(name)
+          : name === item || name === `${entry.id}_${item}`))
+        if (hit) return { kind: 'deny', reason: `${entry.connector.displayName} does not run "${name}"; it is not offered to a model.` }
+      }
+      return next()
+    })
+  }
+
   // One approval card per conversation at a time; the write itself waits for Allow once.
   const approval = createApprovalDesk({
     rt,
