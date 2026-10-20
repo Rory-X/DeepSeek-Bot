@@ -1117,6 +1117,19 @@ test('a multi-instance connector gives each instance its own row, grant and tool
   assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes('access-a'))
 })
 
+test('a profile that turns the module off hides every instance and mounts none', async (t) => {
+  const state = { connectors: { demo: { level: 'read', settings: {} }, 'demo-2': { level: 'read', settings: {} } } }
+  const { ctx, rt, home, registered } = hostSetup({ state, config: { demo: false } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  // Instances that already exist in the team file stay hidden as well: the module is off.
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.deepEqual(rt.connectorsView(), [])
+  assert.equal(registered.length, 0)
+  // The late-instance pass that runs after a state load does not bring them back either.
+  assert.deepEqual(rt.connectorsView().filter(row => row.id.startsWith('demo')), [])
+})
+
 test('a saved single-instance authorization becomes the default instance without a rewrite', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })

@@ -274,6 +274,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       options[base] = buildOption(base, base)
       continue
     }
+    if (rt.config[base] === false) continue
     for (const id of instanceIdsOf(base)) {
       if (rt.config[id] === false) continue
       options[id] = buildOption(base, id)
@@ -1138,6 +1139,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     try {
       for (const base of Object.keys(connectors)) {
         if (connectors[base].instances === undefined) continue
+        if (rt.config[base] === false) continue
         for (const id of instanceIdsOf(base)) {
           if (options[id] !== undefined || rt.config[id] === false) continue
           options[id] = buildOption(base, id)
