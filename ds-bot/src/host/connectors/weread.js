@@ -71,13 +71,18 @@ export async function verifyWeread({ token, api = ORIGIN, fetch: request = fetch
 export default {
   id: 'weread',
   displayName: 'WeRead',
-  // Card copy. `glyph` names a mark the client draws itself; no WeRead artwork is copied.
-  about: 'Shelf, notes, highlights and reading statistics',
-  glyph: 'weread',
-  docsUrl: 'https://weread.qq.com/r/weread-skills',
-  readOnlyNote: 'Read-only: Bots can read your shelf, notes, highlights and reading statistics; nothing in the account is ever changed.',
+  // Card copy: the client draws the `glyph` mark itself (no WeRead artwork is copied) and
+  // shows `about`, the key page and the read-only sentence around the row.
+  card: {
+    glyph: 'weread',
+    about: 'Shelf, notes, highlights and reading statistics',
+    docsUrl: 'https://weread.qq.com/r/weread-skills',
+    readOnlyNote: 'Read-only: Bots can read your shelf, notes, highlights and reading statistics; nothing in the account is ever changed.',
+  },
   mode: 'rest-tools',
   api: ORIGIN,
+  // One key is the whole credential; the label is what the card's single input says.
+  credentials: [{ name: 'WEREAD_API_KEY', label: 'WeRead API key' }],
   tokenSecret: 'WEREAD_API_KEY',
   // A success omits `errcode` entirely, so an absent status is a success; a failure carries
   // `errcode` and `errmsg`. The two auth codes keep the sentence the card already shows.
