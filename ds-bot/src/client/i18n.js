@@ -143,6 +143,7 @@ const ZH = {
   'Switching the access level needs a new authorization.': '切换访问级别需要重新授权。',
   Capabilities: '能力',
   'Unavailable on this host.': '这台主机上不可用。',
+  Write: '可写',
   'Chat found': '已找到会话',
   'Chat id': '会话 ID',
   'Chat id (optional)': '会话 ID（可空）',

@@ -346,7 +346,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
               const item = capabilityItem(entry, index)
               const locked = item.available === false || (writesLocked && item.write === true)
               return h('li', { key: item.key, className: 'bt-connector-cap', 'data-write': item.write || undefined, 'data-locked': locked || undefined },
-                h('span', { className: 'bt-connector-cap-title' }, item.title),
+                h('span', { className: 'bt-connector-cap-title' }, item.title, item.write ? h('span', { className: 'bt-connector-cap-badge' }, t('Write')) : null),
                 item.description !== null ? h('span', { className: 'bt-connector-cap-note' }, item.description) : null,
                 locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
             })))
