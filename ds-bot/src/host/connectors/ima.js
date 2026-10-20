@@ -28,7 +28,6 @@ export const IMA_WRITE_PATHS = [
   '/openapi/wiki/v1/add_knowledge',
   '/openapi/wiki/v1/import_urls',
   '/openapi/wiki/v1/check_repeated_names',
-  '/openapi/wiki/v1/get_addable_knowledge_base_list',
 ]
 
 const AUTH_CODES = new Set([20004, 200002])
@@ -272,16 +271,85 @@ export const IMA_REST_TOOLS = [
       required: ['media_id'],
     },
   },
+  {
+    name: 'list_addable_kb',
+    description: 'List the ima knowledge bases this account may add notes or pages to.',
+    method: 'POST',
+    readOnly: true,
+    path: '/openapi/wiki/v1/get_addable_knowledge_base_list',
+    body: { cursor: 'cursor', limit: 'limit' },
+    parameters: {
+      type: 'object',
+      properties: {
+        cursor: { type: 'string', description: 'Page cursor; send "" for the first page.' },
+        limit: { type: 'number', minimum: 1, maximum: 50, description: 'How many knowledge bases to return (1-50).' },
+      },
+      required: ['cursor', 'limit'],
+    },
+  },
 ]
 
 // The registry loads this object by its default export, takes `id` as the key, and hands
 // the rest to connectors.js. ima has no MCP server, so it mounts through the REST adapter:
 // `credentials` asks the card for both secrets, `auth` builds both headers, `envelope`
 // unwraps code/msg/data, and `verify` proves the pair without reading user content.
-// Third batch: the write calls, declared against the connector write contract. They stay out
-// of `restTools` until the shared adapter accepts `write: true` (it refuses every POST that
-// is not `readOnly`), so the shipped read surface is unchanged and nothing here can run.
-// When the contract lands these join `restTools` as one list.
+// Third batch: the four write calls, declared against the connector write contract. They
+// stay out of `restTools` until the shared adapter accepts `write: true` (it refuses every
+// POST that is not `readOnly`), so the shipped read surface registers no write tool. When
+// the contract lands these join `restTools` as one list.
+// ima cannot take these even over HTTP (its own docs exclude Bilibili, YouTube and file://),
+// and a private or loopback address would make ima fetch something inside the network, so the
+// checks run before the approval card and before any request.
+export const IMA_URL_RULES = {
+  protocols: ['http:', 'https:'],
+  deniedHosts: ['bilibili.com', 'www.bilibili.com', 'b23.tv', 'youtube.com', 'www.youtube.com', 'youtu.be', 'm.youtube.com'],
+  deniedHostSuffixes: ['.local', '.internal', '.lan'],
+  deniedHostnames: ['localhost', 'localhost.localdomain'],
+}
+
+const isPrivateAddress = (hostname) => {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+    const [a, b] = hostname.split('.').map(Number)
+    if (a === 10 || a === 127 || a === 0) return true
+    if (a === 169 && b === 254) return true
+    if (a === 172 && b >= 16 && b <= 31) return true
+    if (a === 192 && b === 168) return true
+    if (a === 100 && b >= 64 && b <= 127) return true
+    return false
+  }
+  return hostname === '::1' || hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80') || hostname === '[::1]'
+}
+
+// Throws before anything is sent or shown on the card; returns the URLs unchanged.
+export function assertImportUrls(urls) {
+  if (!Array.isArray(urls) || urls.length === 0) throw new Error('Give at least one URL to import')
+  if (urls.length > 10) throw new Error('ima imports at most 10 URLs at a time')
+  for (const raw of urls) {
+    const text = typeof raw === 'string' ? raw.trim() : ''
+    if (text === '') throw new Error('A URL to import is empty')
+    let url
+    try {
+      url = new URL(text)
+    } catch {
+      throw new Error(`Not a URL: ${text.slice(0, 120)}`)
+    }
+    if (!IMA_URL_RULES.protocols.includes(url.protocol)) throw new Error(`ima imports http(s) URLs only; "${text.slice(0, 120)}" uses ${url.protocol}`)
+    const host = url.hostname.toLowerCase()
+    if (IMA_URL_RULES.deniedHostnames.includes(host) || IMA_URL_RULES.deniedHostSuffixes.some(suffix => host.endsWith(suffix)) || isPrivateAddress(host)) {
+      throw new Error(`ima cannot import "${text.slice(0, 120)}": the address is local, private or not a public page`)
+    }
+    if (IMA_URL_RULES.deniedHosts.some(denied => host === denied || host.endsWith(`.${denied}`))) {
+      throw new Error(`ima cannot import "${text.slice(0, 120)}": Bilibili and YouTube pages are not supported`)
+    }
+  }
+  return urls
+}
+
+// Any write argument the host must refuse before the approval card is drawn.
+export function validateWriteArgs(name, args = {}) {
+  if (name === 'import_url') assertImportUrls(args.urls)
+}
+
 const cutLine = text => (text.length <= 180 ? text : `${text.slice(0, 180)}…`)
 const firstUrl = (args) => (Array.isArray(args?.urls) && typeof args.urls[0] === 'string' ? args.urls[0] : '')
 
@@ -291,7 +359,7 @@ export function approvalFor(name, args = {}) {
   switch (name) {
     case 'create_note':
       return {
-        line: cutLine(`Create an ima note (${String(args.content ?? '').length} characters)`),
+        line: cutLine(`Create an ima note (${String(args.content ?? '').length} characters). This cannot be undone through the API.`),
         danger: false,
         reversible: false,
         change: 'creates a new note',
@@ -299,7 +367,7 @@ export function approvalFor(name, args = {}) {
       }
     case 'append_note':
       return {
-        line: cutLine(`Append ${String(args.content ?? '').length} characters to ima note ${String(args.note_id ?? '')}`),
+        line: cutLine(`Append ${String(args.content ?? '').length} characters to ima note ${String(args.note_id ?? '')}. This cannot be undone through the API.`),
         danger: false,
         reversible: false,
         change: 'appends to an existing note',
@@ -307,7 +375,7 @@ export function approvalFor(name, args = {}) {
       }
     case 'add_note_to_kb':
       return {
-        line: cutLine(`Add ima note ${String(args.note_id ?? '')} to knowledge base ${String(args.knowledge_base_id ?? '')}`),
+        line: cutLine(`Add ima note ${String(args.note_id ?? '')} to knowledge base ${String(args.knowledge_base_id ?? '')}. This cannot be undone through the API.`),
         danger: false,
         reversible: false,
         change: 'adds a note to a knowledge base',
@@ -316,7 +384,7 @@ export function approvalFor(name, args = {}) {
     case 'import_url': {
       const urls = Array.isArray(args.urls) ? args.urls : []
       return {
-        line: cutLine(`Import ${urls.length} URL${urls.length === 1 ? '' : 's'} into knowledge base ${String(args.knowledge_base_id ?? '')}: ${firstUrl(args)}`),
+        line: cutLine(`Import ${urls.length} URL${urls.length === 1 ? '' : 's'} into knowledge base ${String(args.knowledge_base_id ?? '')} (first: ${firstUrl(args)}). This cannot be undone through the API.`),
         danger: false,
         reversible: false,
         change: 'imports web pages into a knowledge base',
@@ -401,23 +469,90 @@ export const IMA_WRITE_TOOLS = [
       required: ['knowledge_base_id', 'folder_id', 'urls'],
     },
   },
-  {
-    name: 'list_addable_kb',
-    description: 'List the ima knowledge bases this account may add notes or pages to.',
-    method: 'POST',
-    readOnly: true,
-    path: '/openapi/wiki/v1/get_addable_knowledge_base_list',
-    body: { cursor: 'cursor', limit: 'limit' },
-    parameters: {
-      type: 'object',
-      properties: {
-        cursor: { type: 'string', description: 'Page cursor; send "" for the first page.' },
-        limit: { type: 'number', minimum: 1, maximum: 50, description: 'How many knowledge bases to return (1-50).' },
-      },
-      required: ['cursor', 'limit'],
-    },
-  },
 ]
+
+const scalar = value => ['string', 'number', 'boolean'].includes(typeof value)
+const scalarList = value => Array.isArray(value) && value.every(scalar)
+
+// Only the declaration's own fields go into a write body; a dotted one nests. An argument
+// the declaration does not name never reaches the request.
+export function buildWriteBody(definition, args = {}) {
+  const body = {}
+  const setPath = (field, value) => {
+    const parts = field.split('.')
+    let node = body
+    for (const part of parts.slice(0, -1)) node = node[part] ??= {}
+    node[parts.at(-1)] = value
+  }
+  for (const [field, mapping] of Object.entries(definition.body ?? {})) {
+    if (mapping !== null && typeof mapping === 'object') {
+      setPath(field, mapping.const)
+      continue
+    }
+    const value = args?.[mapping]
+    if (value === undefined || value === null) continue
+    if (!scalar(value) && !scalarList(value)) throw new Error(`"${mapping}" must be text, a number, a boolean or a list of those.`)
+    setPath(field, value)
+  }
+  return body
+}
+
+// Write tools for a custom mount: `mount({ level, secrets, approve })` calls this, and a
+// read level gets none. This is the fallback path while the shared REST adapter has no
+// write support; it keeps the adapter's rules (mapped body only, 20 s timeout, both
+// headers, every call approved first, nothing sent on refusal).
+export function createImaWriteTools({ level = 'read', secrets = {}, approve, output, redact = text => String(text), fetch: request = fetch } = {}) {
+  if (level !== 'write') return []
+  return IMA_WRITE_TOOLS.map((definition) => ({
+    name: `${IMA_TOOL_PREFIX}_${definition.name}`,
+    description: definition.description,
+    parameters: definition.parameters,
+    output,
+    async execute(args = {}, exec) {
+      let body
+      try {
+        validateWriteArgs(definition.name, args)
+        body = buildWriteBody(definition, args)
+      } catch (error) {
+        throw new Error(redact(String(error?.message ?? error)).slice(0, 300))
+      }
+      if (typeof definition.approval === 'function' && typeof approve === 'function') {
+        const summary = definition.approval(args)
+        await approve({
+          tool: definition.name,
+          line: summary.line,
+          danger: summary.danger,
+          change: summary.change,
+          reversible: summary.reversible,
+          target: summary.target,
+          exec,
+        })
+      }
+      let response
+      try {
+        response = await request(`${IMA_BASE}${definition.path}`, {
+          method: 'POST',
+          headers: { accept: 'application/json', 'content-type': 'application/json', ...auth({ secrets }) },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        })
+      } catch (error) {
+        if (error?.name === 'TimeoutError') throw new Error('ima did not answer in time')
+        throw new Error('Could not reach ima')
+      }
+      if (response.status === 401) throw new Error('ima did not accept this client id or API key')
+      if (response.status === 429) throw new Error('ima is rate limiting this key; try again later')
+      if (!response.ok) throw new Error(`ima answered ${response.status}`)
+      let parsed
+      try {
+        parsed = JSON.parse(await response.text())
+      } catch {
+        throw new Error('ima answered something this connector cannot read.')
+      }
+      return imaAnswer({ body: parsed, status: response.status })
+    },
+  }))
+}
 
 // Display only: the client draws this list and the one permission sentence. It never
 // registers a tool; the mounted tools are still `restTools`.
