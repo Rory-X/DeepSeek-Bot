@@ -644,7 +644,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     // A REST write asks on the same card as any other write: the module's approval hook
     // names the call, the framework redacts it and aims the card at the calling Session.
     const approve = async ({ tool, args, summary, exec }) => {
-      await requireApproval(connector, tool, exec, summarise(summary, defaultApprovalLine(tool, args)))
+      await requireApproval(id, tool, exec, summarise(summary, defaultApprovalLine(tool, args)))
     }
     const dispose = []
     try {

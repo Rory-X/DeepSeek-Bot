@@ -1041,7 +1041,7 @@ const demoGrant = (access, { level = 'read' } = {}) => ({
 
 // A connector host on its own definitions, so an instance case never depends on which
 // modules happen to live under src/host/connectors.
-function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), extraDefinitions = {}, config = {}, grants = {}, home, credentials } = {}) {
+function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), extraDefinitions = {}, config = {}, grants = {}, secrets = {}, home, credentials } = {}) {
   const dir = home ?? mkdtempSync(join(tmpdir(), 'dsb-connector-instances-'))
   const statePath = join(dir, 'state.json')
   writeFileSync(statePath, JSON.stringify(state))
@@ -1070,7 +1070,7 @@ function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), 
     readOnly: () => undefined,
     save: async () => { writeFileSync(statePath, JSON.stringify(state)) },
     loadSecrets: async () => {},
-    secretValue: () => undefined,
+    secretValue: name => secrets[name],
     secretEndpoint: async () => {},
     diagnostics: { record: entry => audit.push(entry) },
     selfOf: () => 'm1',
@@ -1557,4 +1557,56 @@ test('renaming an instance keeps its grant while a grant setting change drops it
   assert.deepEqual([changedRow.name, changedRow.needsReauth], ['Prod', true])
   assert.equal(credentials.records.has('ds-bot/connector-demo'), false)
   assert.deepEqual(rt.state.connectors.demo.settings, { label: 'Prod', projectId: 'proj-b' })
+})
+
+// A REST connector's write tool goes through the same approval card as a module that mounts
+// its own tools: the framework must name the connector by its id instead of handing the
+// definition itself to the approval path, and the request waits for Allow.
+test('a REST write asks on the approval card and sends nothing before the answer', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const requests = []
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ url: String(url), method: init.method, body: init.body })
+    return { ok: true, status: 200, text: async () => JSON.stringify({ note_id: 'n-1' }) }
+  }
+  const definition = {
+    displayName: 'Demo REST',
+    mode: 'rest-tools',
+    api: 'https://rest.demo.test',
+    tokenSecret: 'DEMO_REST_TOKEN',
+    levels: ['read', 'write'],
+    defaultLevel: 'read',
+    restTools: [
+      { name: 'list_notes', method: 'GET', path: '/notes', parameters: { type: 'object', properties: {} } },
+      {
+        name: 'create_note',
+        method: 'POST',
+        write: true,
+        path: '/notes',
+        body: { content: 'content' },
+        approval: async () => ({ line: 'Create a note' }),
+        parameters: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'] },
+      },
+    ],
+  }
+  const state = { connectors: { demo: { level: 'write', connectedAt: 1 } } }
+  const { ctx, rt, home } = hostSetup({ state, definition, secrets: { DEMO_REST_TOKEN: 'tok-rest' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const write = await until(() => ctx.registeredTools.get('demo_create_note'), 'the REST write tool')
+  assert.deepEqual(write.parameters.required, ['content'])
+  assert.deepEqual(requests, [])
+
+  // The call waits on the plugin's own card instead of failing on its way there.
+  const pending = write.execute({ content: '# Weekly' }, { agent: { id: 'm1' } })
+  const card = await until(() => rt.state.questions?.m1, 'the approval card')
+  assert.equal(card.kind, 'connector-approval')
+  assert.match(card.question, /Allow Chief to run Demo REST's demo_create_note\?/)
+  assert.equal(card.detail, 'Create a note')
+  assert.deepEqual(requests, [])
+
+  await rt.answerConnectorApproval('m1', card.id, { selected: ['Allow once'] })
+  assert.equal(await pending, '{"note_id":"n-1"}')
+  assert.deepEqual(requests, [{ url: 'https://rest.demo.test/notes', method: 'POST', body: '{"content":"# Weekly"}' }])
 })
