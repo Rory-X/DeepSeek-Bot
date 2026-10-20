@@ -81,6 +81,10 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, tur
     secretUpdate: (name, scope) => after(call('secret-update', { name, scope })),
     secretDelete: name => after(call('secret-delete', { name })),
     connectorConnect: (id, token) => after(call('connector-connect', { id, token })),
+    // A notification connector sends one message to prove the path, and remembers the chat
+    // a Test message found or the reader typed.
+    connectorTest: id => after(call('connector-test', { id })),
+    connectorSetChat: (id, chatId) => after(call('connector-set-chat', { id, chatId })),
     // A connector whose card declares several credential fields sends them together, by the
     // secret name the host named each field with.
     connectorConnectValues: (id, values) => after(call('connector-connect', { id, values })),
