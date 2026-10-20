@@ -13,30 +13,15 @@ const fresh = () => `tok_${randomBytes(16).toString('hex')}`
 const answer = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
 const off = id => ({ id, state: 'off', account: null })
 const OFF = {
-  github: { id: 'github', name: 'GitHub', ...off('github'), level: 'read', levels: ['read'], card: { glyph: 'github', about: "Issues, pull requests and repository context through GitHub's own MCP server.", docsUrl: 'https://docs.github.com', readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.' } },
   vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } },
   cloudflare: { id: 'cloudflare', name: 'Cloudflare', ...off('cloudflare'), level: 'read', levels: ['read', 'write'], oauth: true, toolbox: false, toolboxCall: 'cloudflare_call', card: { glyph: 'cloudflare', about: "Zones, DNS records, analytics and Workers through Cloudflare's own MCP server.", docsUrl: 'https://developers.cloudflare.com/agents/model-context-protocol/', readOnlyNote: 'The named tools only read. Full access can change your account; every write still asks for your approval first.', consent: { title: 'Choose the access level on the authorization page', body: 'Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your Cloudflare account; every write still asks for your approval first.', acknowledge: "I'll choose the access level on the authorization page" } } },
 }
 // The built-ins these tests are about. A connector module added under src/host/connectors
 // hands the view one more row, and every line adds one; these assertions are about the
 // built-ins, so they ignore module rows instead of failing on every connector branch.
-const BUILTINS = new Set(['github', 'vercel', 'cloudflare'])
+const BUILTINS = new Set(['vercel', 'cloudflare'])
 const builtins = view => view.filter(item => BUILTINS.has(item.id))
 const statuses = view => builtins(view).map(item => [item.id, item.state, item.account])
-
-test('signIn asks GitHub who owns the token', async () => {
-  const token = fresh()
-  let seen
-  const user = await signIn('github', token, { api: 'https://gh.test/', fetch: async (url, init) => { seen = { url, init }; return answer(200, { login: 'octo' }) } })
-  assert.deepEqual(user, { login: 'octo' })
-  assert.equal(seen.url, 'https://gh.test/user')
-  assert.equal(seen.init.headers.Authorization, `Bearer ${token}`)
-  assert.equal(seen.init.headers['X-GitHub-Api-Version'], '2022-11-28')
-  await assert.rejects(signIn('github', token, { fetch: async () => answer(401, {}) }), /did not accept/)
-  await assert.rejects(signIn('github', token, { fetch: async () => answer(500, {}) }), /GitHub answered 500/)
-  await assert.rejects(signIn('github', token, { fetch: async () => { throw new Error(`boom ${token}`) } }), /^Error: Could not reach GitHub$/)
-  await assert.rejects(signIn('github', token, { fetch: async () => answer(200, {}) }), /did not say who this token belongs to/)
-})
 
 test('signIn asks Vercel who owns the token, and keeps the default team', async () => {
   const token = fresh()
@@ -70,7 +55,7 @@ const teamHome = (state = TEAM) => {
 }
 
 // A loader that hands out a fake MCP client and records each mount.
-function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, cloudflare, secrets = [], state = TEAM, services = {}, config = {} } = {}) {
+function setup({ vercel = { api: 'https://vercel.test', url: 'https://mcp.vercel.test' }, cloudflare, secrets = [], state = TEAM, services = {}, config = {} } = {}) {
   const home = teamHome(state)
   if (secrets.length > 0) {
     writeFileSync(join(home, 'secrets.json'), JSON.stringify({
@@ -81,21 +66,7 @@ function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { a
   const mounts = []
   const registered = []
   const disposed = []
-  const plugin = { name: 'mcp-client', apply() {} }
-  const loader = {
-    import: async name => { assert.equal(name, '@deepseek-ai/dsh-mcp-client'); return { default: plugin } },
-    unwrapExports: exports => exports.default,
-  }
-  const ctx = fakeContext({ services: { loader, ...services } })
-  ctx.plugin = (given, config) => {
-    assert.equal(given, plugin)
-    const mount = { config, disposed: false }
-    mounts.push(mount)
-    return {
-      await: async () => { if (fail) throw new Error(`refused ${config.headers.Authorization}`) },
-      dispose: () => { mount.disposed = true },
-    }
-  }
+  const ctx = fakeContext({ services })
   const register = ctx.tools.register
   ctx.tools.register = tool => {
     registered.push(tool.name)
@@ -103,7 +74,7 @@ function setup({ fail = false, github = { api: 'https://gh.test' }, vercel = { a
     return () => { disposed.push(tool.name); undo() }
   }
   capture(ctx)
-  apply(ctx, { home, github, vercel, ...(cloudflare === undefined ? {} : { cloudflare }), ...config })
+  apply(ctx, { home, vercel, ...(cloudflare === undefined ? {} : { cloudflare }), ...config })
   // Only what a mount registers later matters here; the team tools come with apply().
   registered.length = 0
   disposed.length = 0
@@ -130,14 +101,6 @@ async function call(ctx, endpoint, payload, headers = {}) {
   const response = await ctx.route.fetch(new Request('http://localhost/api/bot', { method: 'POST', headers, body: JSON.stringify({ endpoint, payload }) }))
   return response.json()
 }
-
-const githubMount = token => ({
-  transport: 'streamable-http',
-  serverName: 'github',
-  url: 'https://api.githubcopilot.com/mcp/',
-  headers: { Authorization: `Bearer ${token}`, 'X-MCP-Toolsets': 'context,repos,issues,pull_requests' },
-  failOnStartupError: true,
-})
 
 const VERCEL_READ = ['search_vercel_documentation', 'list_projects', 'get_project', 'list_deployments', 'get_deployment', 'list_deployment_events', 'get_runtime_logs', 'get_runtime_errors', 'list_project_domains', 'list_domains', 'list_teams', 'get_team', 'get_git_deployment_context']
 const VERCEL_ACTIONS = ['create_deployment', 'cancel_deployment', 'request_promote', 'request_rollback']
@@ -188,80 +151,6 @@ function vercelBench({ user = { username: 'acme', defaultTeamId: 'team_1' }, sta
   return { fetch, calls }
 }
 
-test('connecting GitHub saves the token, kept out of every Bot shell, and mounts its MCP; disconnecting undoes both', async (t) => {
-  const realFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = realFetch })
-  globalThis.fetch = async () => answer(200, { login: 'octo' })
-  const { ctx, home, mounts } = setup()
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const token = fresh()
-
-  const before = await call(ctx, 'state', {})
-  assert.deepEqual(builtins(before.value.connectors), [OFF.github, OFF.vercel, OFF.cloudflare])
-
-  const connected = await call(ctx, 'connector-connect', { id: 'github', token: ` ${token} ` })
-  assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(builtins(connected.value), [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo', level: 'read', levels: ['read'], card: { glyph: 'github', about: "Issues, pull requests and repository context through GitHub's own MCP server.", docsUrl: 'https://docs.github.com', readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.' } }, OFF.vercel, OFF.cloudflare])
-  assert.equal(mounts.length, 1)
-  assert.deepEqual(mounts[0].config, githubMount(token))
-  const state = await call(ctx, 'state', {})
-  assert.deepEqual(state.value.secrets.map(secret => [secret.name, secret.scope]), [['GITHUB_TOKEN', []]])
-  assert.ok(!JSON.stringify(state).includes(token))
-  assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes(token))
-
-  const disconnected = await call(ctx, 'connector-disconnect', { id: 'github' }, { origin: 'https://dsh.test' })
-  assert.deepEqual(builtins(disconnected.value), [OFF.github, OFF.vercel, OFF.cloudflare])
-  assert.equal(mounts[0].disposed, true)
-  assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
-  // A connector entry that disappears is traceable later: name, id and origin, never a token.
-  const log = (await call(ctx, 'diagnostics-log')).value
-  assert.match(log, /connector-disconnect/)
-  assert.match(log, /GitHub \(github\) disconnected from https:\/\/dsh\.test/)
-  assert.ok(!log.includes(token))
-})
-
-test('a token GitHub refuses is not saved', async (t) => {
-  const realFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = realFetch })
-  globalThis.fetch = async () => answer(401, {})
-  const { ctx, home, mounts } = setup()
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const result = await call(ctx, 'connector-connect', { id: 'github', token: fresh() })
-  assert.equal(result.ok, false)
-  assert.match(result.error.message, /did not accept/)
-  assert.equal(mounts.length, 0)
-  assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
-})
-
-test('a failed MCP connection shows the error without the token, and Try again mounts again', async (t) => {
-  const realFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = realFetch })
-  globalThis.fetch = async () => answer(200, { login: 'octo' })
-  const { ctx, home, mounts } = setup({ fail: true })
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const token = fresh()
-  const result = await call(ctx, 'connector-connect', { id: 'github', token })
-  const [github] = result.value
-  assert.equal(github.state, 'error')
-  assert.ok(!github.error.includes(token), github.error)
-  assert.match(github.error, /\[secret:GITHUB_TOKEN\]/)
-  await call(ctx, 'connector-retry', { id: 'github' })
-  assert.equal(mounts.length, 2)
-})
-
-test('deleting GITHUB_TOKEN on the Secrets page unmounts GitHub', async (t) => {
-  const realFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = realFetch })
-  globalThis.fetch = async () => answer(200, { login: 'octo' })
-  const { ctx, home, mounts } = setup()
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  await call(ctx, 'connector-connect', { id: 'github', token: fresh() })
-  await call(ctx, 'secret-delete', { name: 'GITHUB_TOKEN' })
-  const state = await call(ctx, 'state', {})
-  assert.equal(mounts[0].disposed, true)
-  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['cloudflare', 'off', null]])
-})
-
 test('connecting Vercel mounts only its read tools, and the default team answers what needs one', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
@@ -273,7 +162,7 @@ test('connecting Vercel mounts only its read tools, and the default team answers
 
   const connected = await call(ctx, 'connector-connect', { id: 'vercel', token })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(builtins(connected.value), [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } }, OFF.cloudflare])
+  assert.deepEqual(builtins(connected.value), [{ id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } }, OFF.cloudflare])
   // The write tool is never registered, and Vercel is not mounted through DSH's client.
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts.length, 0)
@@ -301,9 +190,9 @@ test('a saved Vercel token connects on its own and fills the account and team', 
 
   const connectors = await until(async () => {
     const view = (await call(ctx, 'state', {})).value.connectors
-    return view[1]?.state === 'ready' ? view : undefined
+    return view[0]?.state === 'ready' ? view : undefined
   }, 'Vercel to connect from its saved token')
-  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } })
+  assert.deepEqual(connectors[0], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } })
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   // The account and its default team are kept in the team file, without the token.
   const savedText = readFileSync(join(home, 'state.json'), 'utf8')
@@ -326,9 +215,9 @@ test('a failed account check does not stop the saved-token mount', async (t) => 
 
   const connectors = await until(async () => {
     const view = (await call(ctx, 'state', {})).value.connectors
-    return view[1]?.state === 'ready' ? view : undefined
+    return view[0]?.state === 'ready' ? view : undefined
   }, 'Vercel to mount without an account')
-  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: null, level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } })
+  assert.deepEqual(connectors[0], { id: 'vercel', name: 'Vercel', state: 'ready', account: null, level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } })
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors?.vercel, undefined)
 })
@@ -341,7 +230,7 @@ test('replacing the saved Vercel token re-reads the account and its team', async
   const { ctx, home } = setup({ secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    const item = (await call(ctx, 'state', {})).value.connectors[0]
     return item?.state === 'ready' && item.account === 'acme' ? item : undefined
   }, 'the first token to connect')
 
@@ -351,7 +240,7 @@ test('replacing the saved Vercel token re-reads the account and its team', async
   await call(ctx, 'secret-set', { name: 'VERCEL_TOKEN', value: fresh(), purpose: 'replaced' })
 
   const view = await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    const item = (await call(ctx, 'state', {})).value.connectors[0]
     return item?.account === 'other' ? item : undefined
   }, 'the new token to bring its account')
   assert.equal(view.state, 'ready')
@@ -372,7 +261,7 @@ test('the write level mounts the vendor toolbox, and the read level takes it awa
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
 
   const ready = await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    const item = (await call(ctx, 'state', {})).value.connectors[0]
     return item?.state === 'ready' ? item : undefined
   }, 'Vercel to connect read-only')
   assert.equal(ready.level, 'read')
@@ -381,16 +270,16 @@ test('the write level mounts the vendor toolbox, and the read level takes it awa
   assert.ok(!registered.includes('vercel_create_deployment'))
 
   const raised = (await call(ctx, 'connector-set-level', { id: 'vercel', level: 'write' })).value
-  assert.equal(raised[1].level, 'write')
-  assert.deepEqual([raised[1].actions, raised[1].toolbox], [true, true])
+  assert.equal(raised[0].level, 'write')
+  assert.deepEqual([raised[0].actions, raised[0].toolbox], [true, true])
   await until(async () => (registered.includes('vercel_call') ? true : undefined), 'the toolbox')
   // 13 read + the two meta tools; no named action tool is registered.
   assert.deepEqual(registered.slice(-15).sort(), [...vercelNames(VERCEL_READ), 'vercel_search_tools', 'vercel_call'].sort())
   assert.ok(!registered.includes('vercel_create_deployment'))
 
   const lowered = (await call(ctx, 'connector-set-level', { id: 'vercel', level: 'read' })).value
-  assert.equal(lowered[1].level, 'read')
-  assert.equal(lowered[1].toolbox, false)
+  assert.equal(lowered[0].level, 'read')
+  assert.equal(lowered[0].toolbox, false)
   assert.deepEqual(registered.slice(-13).sort(), vercelNames(VERCEL_READ).sort())
   assert.ok(!registered.slice(-13).includes('vercel_create_deployment'))
 })
@@ -419,7 +308,7 @@ test('an unanswered approval is refused after the timeout, and nothing is sent',
   const { ctx, home } = setup({ state: writeState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }], config: { connectorApprovalTimeoutMs: 60 } })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    const item = (await call(ctx, 'state', {})).value.connectors[0]
     return item?.state === 'ready' && item.toolbox === true ? item : undefined
   }, 'Vercel at its write level')
 
@@ -442,7 +331,7 @@ test('a saved write level survives a restart', async (t) => {
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
 
   const ready = await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    const item = (await call(ctx, 'state', {})).value.connectors[0]
     return item?.state === 'ready' && item.toolbox === true ? item : undefined
   }, 'Vercel at its saved level')
   assert.equal(ready.level, 'write')
@@ -462,7 +351,7 @@ test('vercel_call asks on the approval card for a write target; blocked targets 
   const { ctx, home } = setup({ state: writeState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    const item = (await call(ctx, 'state', {})).value.connectors[0]
     return item?.state === 'ready' && item.toolbox === true ? item : undefined
   }, 'the toolbox to connect')
   const [gate] = ctx.listeners.get('tools/pre-execute')
@@ -505,7 +394,7 @@ test('an older team with the switches on reads as a write level', async (t) => {
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
 
   const ready = await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    const item = (await call(ctx, 'state', {})).value.connectors[0]
     return item?.state === 'ready' && item.toolbox === true ? item : undefined
   }, 'Vercel at the migrated level')
   assert.equal(ready.level, 'write')
@@ -543,7 +432,7 @@ test('a Vercel mount that fails shows the error without the token, and Try again
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
 
   const result = await call(ctx, 'connector-connect', { id: 'vercel', token })
-  const [, vercel] = result.value
+  const [vercel] = result.value
   assert.equal(vercel.state, 'error')
   assert.ok(!vercel.error.includes(token), vercel.error)
   assert.match(vercel.error, /\[secret:VERCEL_TOKEN\]/)
@@ -566,57 +455,31 @@ test('deleting VERCEL_TOKEN on the Secrets page unmounts Vercel and its tools', 
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   await call(ctx, 'secret-delete', { name: 'VERCEL_TOKEN' })
   const state = await call(ctx, 'state', {})
-  assert.deepEqual(statuses(state.value.connectors), [['github', 'off', null], ['vercel', 'off', null], ['cloudflare', 'off', null]])
+  assert.deepEqual(statuses(state.value.connectors), [['vercel', 'off', null], ['cloudflare', 'off', null]])
   assert.deepEqual([...disposed].sort(), vercelNames(VERCEL_READ).sort())
 })
 
-test('each connector mounts and unmounts on its own', async (t) => {
+test('a connector mounts and unmounts on its own', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
   const bench = vercelBench()
-  globalThis.fetch = async (url, init) => String(url) === 'https://gh.test/user' ? answer(200, { login: 'octo' }) : bench.fetch(url, init)
-  const { ctx, home, mounts, registered, disposed } = setup()
+  globalThis.fetch = bench.fetch
+  const { ctx, home, registered, disposed } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
 
-  await call(ctx, 'connector-connect', { id: 'github', token: fresh() })
   await call(ctx, 'connector-connect', { id: 'vercel', token: fresh() })
-  assert.equal(mounts.length, 1)
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
-  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'ready', 'acme'], ['cloudflare', 'off', null]])
+  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['vercel', 'ready', 'acme'], ['cloudflare', 'off', null]])
 
   await call(ctx, 'connector-disconnect', { id: 'vercel' })
   assert.deepEqual([...disposed].sort(), vercelNames(VERCEL_READ).sort())
-  assert.equal(mounts[0].disposed, false)
-  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['github', 'ready', 'octo'], ['vercel', 'off', null], ['cloudflare', 'off', null]])
-
-  await call(ctx, 'connector-disconnect', { id: 'github' })
-  assert.equal(mounts[0].disposed, true)
-})
-
-test('github: false hides only the GitHub connector', async (t) => {
-  const { ctx, home } = setup({ github: false })
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual(builtins((await call(ctx, 'state', {})).value.connectors), [OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(statuses((await call(ctx, 'state', {})).value.connectors), [['vercel', 'off', null], ['cloudflare', 'off', null]])
 })
 
 test('vercel: false hides only the Vercel connector', async (t) => {
   const { ctx, home } = setup({ vercel: false })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  assert.deepEqual(builtins((await call(ctx, 'state', {})).value.connectors), [OFF.github, OFF.cloudflare])
-})
-
-test('a GitHub address without https refuses to send the token', async (t) => {
-  const realFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = realFetch })
-  let asked = false
-  globalThis.fetch = async () => { asked = true; return answer(200, { login: 'octo' }) }
-  const { ctx, home, mounts } = setup({ github: { url: 'http://mcp.test/', api: 'https://gh.test' } })
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const refused = await call(ctx, 'connector-connect', { id: 'github', token: fresh() })
-  assert.equal(refused.ok, false)
-  assert.match(refused.error.message, /https/)
-  assert.equal(asked, false)
-  assert.equal(mounts.length, 0)
+  assert.deepEqual(builtins((await call(ctx, 'state', {})).value.connectors), [OFF.cloudflare])
 })
 
 test('a Vercel address without https refuses to send the token', async (t) => {
@@ -987,13 +850,13 @@ test('the access level is stored, shown and kept across a disconnect', async (t)
   const { ctx, home } = setup({ secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const ready = await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    const item = (await call(ctx, 'state', {})).value.connectors[0]
     return item?.state === 'ready' ? item : undefined
   }, 'Vercel to connect')
   assert.equal(ready.level, 'read')
 
   const raised = (await call(ctx, 'connector-set-level', { id: 'vercel', level: 'write' })).value
-  assert.equal(raised[1].level, 'write')
+  assert.equal(raised[0].level, 'write')
   assert.equal((await call(ctx, 'state', {})).value.secrets.length, 1)
 
   const refused = await call(ctx, 'connector-set-level', { id: 'vercel', level: 'admin' })
@@ -1001,15 +864,15 @@ test('the access level is stored, shown and kept across a disconnect', async (t)
   assert.match(refused.error.message, /no admin access level/)
 
   const gone = (await call(ctx, 'connector-disconnect', { id: 'vercel' })).value
-  assert.equal(gone[1].state, 'off')
-  assert.equal(gone[1].level, 'write')
+  assert.equal(gone[0].state, 'off')
+  assert.equal(gone[0].level, 'write')
   assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
 })
 
 test('only a connector that declares settings takes them', async (t) => {
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const result = await call(ctx, 'connector-set-settings', { id: 'github', values: { projectId: 'p1' } })
+  const result = await call(ctx, 'connector-set-settings', { id: 'cloudflare', values: { projectId: 'p1' } })
   assert.equal(result.ok, false)
   assert.match(result.error.message, /no settings/)
 })

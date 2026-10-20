@@ -95,24 +95,6 @@ const CLOUDFLARE_READ_SCOPES = [
 // reads, and `accountExtra` keeps what else the answer carries (Vercel's default team).
 // `accountTool` is a read tool that names the connected account after an OAuth mount.
 const BUILTIN_CONNECTORS = {
-  github: {
-    displayName: 'GitHub',
-    mode: 'mcp-client',
-    card: {
-      glyph: 'github',
-      about: "Issues, pull requests and repository context through GitHub's own MCP server.",
-      docsUrl: 'https://docs.github.com',
-      readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.',
-    },
-    mcpUrl: 'https://api.githubcopilot.com/mcp/',
-    api: 'https://api.github.com',
-    tokenSecret: 'GITHUB_TOKEN',
-    toolsets: 'context,repos,issues,pull_requests',
-    accountField: 'login',
-    checkPath: '/user',
-    checkHeaders: token => ({ Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'ds-bot', 'X-GitHub-Api-Version': '2022-11-28' }),
-    accountOf: user => user?.login,
-  },
   vercel: {
     displayName: 'Vercel',
     mode: 'read-tools',
@@ -182,9 +164,6 @@ for (const id of Object.keys(externalConnectors)) {
   if (Object.hasOwn(BUILTIN_CONNECTORS, id)) throw new Error(`Connector module "${id}" collides with a built-in connector`)
 }
 const CONNECTORS = { ...BUILTIN_CONNECTORS, ...externalConnectors }
-
-export const GITHUB = 'github'
-export const GITHUB_SECRET = 'GITHUB_TOKEN'
 
 // Asks the service who the token belongs to. Any token it accepts passes.
 export async function signIn(id, token, { api, fetch: request = fetch } = {}) {
