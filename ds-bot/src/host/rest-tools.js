@@ -176,6 +176,7 @@ export function createRestTools(id, connector, { token, secrets = {}, output, re
         }
         const envelope = definition.envelope ?? connector.envelope
         const hook = definition.answer ?? connector.answer
+        const limit = definition.resultMax ?? REST_RESULT_MAX
         // A service may answer its business error with a non-2xx status (WeRead uses 499);
         // its own envelope explains it better than "answered 499", so it is checked first
         // whenever the body parses as one.
@@ -189,11 +190,10 @@ export function createRestTools(id, connector, { token, secrets = {}, output, re
           // The envelope speaks for the body; a non-2xx status still means the call itself
           // failed (auth, rate limit, transport), so it is not reported as success.
           if (!response.ok) throw new Error(errorText(connector, response))
-          return cut(answer, redact, true)
+          return cut(answer, redact, true, limit)
         }
         if (envelope !== undefined) throw new Error(`${connector.displayName} answered something this connector cannot read.`)
         if (!response.ok) throw new Error(errorText(connector, response))
-        const limit = definition.resultMax ?? REST_RESULT_MAX
         if (typeof hook === 'function') {
           const answer = await hook({ body: parsed, status: response.status })
           return cut(typeof answer === 'string' ? answer : JSON.stringify(answer), redact, parsed !== undefined, limit)
