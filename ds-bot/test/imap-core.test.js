@@ -361,7 +361,7 @@ test('a failing write names no credential', async () => {
 
 
 test('Gmail label tools are opt-in, ask first and quote labels on the wire', async () => {
-  const server = imapServer({ capabilities: ['IMAP4rev1', 'X-GM-EXT-1'] })
+  const server = imapServer({ capabilities: ['IMAP4rev1', 'X-GM-EXT-1'], folders: [{ name: 'INBOX' }, { name: 'Work' }] })
   const asked = []
   const tools = gmailWriteTools({ server, approve: async (request) => { asked.push(request) } })
   assert.deepEqual(
@@ -394,4 +394,27 @@ test('a label write on a server without X-GM-EXT-1 fails before any write comman
 test('a plain mail connector gets no label tools, and an unknown tool name stays absent', () => {
   const tools = writeTools({ server: imapServer() })
   assert.deepEqual(tools.filter(entry => /labels|archive/.test(entry.name)), [])
+})
+
+
+test('adding a label that does not exist is refused before any write', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1', 'X-GM-EXT-1'], folders: [{ name: 'INBOX' }, { name: 'Work' }] })
+  const tools = gmailWriteTools({ server })
+  await assert.rejects(
+    gmailTool(tools, 'add_labels').execute({ uids: [1], labels: ['Wrok'] }, { agent: { id: 'm1' } }),
+    /The label "Wrok" does not exist in this account/,
+  )
+  assert.equal(server.commands.some(line => /X-GM-LABELS/.test(line)), false)
+  // Case does not decide existence, so the real label still goes through.
+  await gmailTool(tools, 'add_labels').execute({ uids: [1], labels: ['work'] }, { agent: { id: 'm1' } })
+  assert.ok(sent(server).includes('UID STORE 1 +X-GM-LABELS ("work")'))
+})
+
+test('removing a label needs no pre-check, and a system label is known without LIST', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1', 'X-GM-EXT-1'], folders: [{ name: 'INBOX' }] })
+  const tools = gmailWriteTools({ server })
+  await gmailTool(tools, 'remove_labels').execute({ uids: [2], labels: ['Never Created'] }, { agent: { id: 'm1' } })
+  assert.ok(sent(server).includes('UID STORE 2 -X-GM-LABELS ("Never Created")'))
+  await gmailTool(tools, 'add_labels').execute({ uids: [3], labels: ['\\Starred'] }, { agent: { id: 'm1' } })
+  assert.ok(sent(server).includes('UID STORE 3 +X-GM-LABELS ("\\\\Starred")'))
 })
