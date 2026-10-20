@@ -1,7 +1,7 @@
 // ima (ima.qq.com) has no MCP server. Its official OpenAPI is POST-only with a
 // `{ code, msg, data }` envelope, authenticated by a client id and an API key pair.
 // This file is the ima declaration for the shared REST adapter (src/host/rest-tools.js):
-// it names the service, the packed credential, the headers, and the nine read calls.
+// it names the service, the two credentials, the headers, and the nine read calls.
 //
 // The write endpoints are deliberately absent: import_doc, append_doc, create_media,
 // add_knowledge and import_urls change the user's notes or knowledge base, and
@@ -12,9 +12,8 @@
 // is enforced here, not by ima. Notes and knowledge bases are private data: a tool answer
 // is shown to the acting conversation, so these tools must not be used to post into groups.
 export const IMA_BASE = 'https://ima.qq.com'
-// The host connect form takes one token, so the card packs the pair as
-// "clientId:apiKey" (split at the first colon) and the pair is stored as one secret.
-export const IMA_TOKEN_SECRET = 'IMA_OPENAPI_TOKEN'
+export const IMA_CLIENT_ID_SECRET = 'IMA_OPENAPI_CLIENTID'
+export const IMA_API_KEY_SECRET = 'IMA_OPENAPI_APIKEY'
 // ima's own skill package sends its version in this header; the API reads it there.
 export const IMA_SKILL_VERSION = '1.1.10'
 export const IMA_TOOL_PREFIX = 'ima'
@@ -69,31 +68,20 @@ export const IMA_ENVELOPE = {
   },
 }
 
-// The card asks for the pair as one value: "clientId:apiKey". The client id has no colon
-// of its own, so the first colon is the separator and the rest belongs to the API key.
-export function parseCredentials(token) {
-  const text = typeof token === 'string' ? token : ''
-  const at = text.indexOf(':')
-  if (at < 0) throw new Error('ima credentials look like "clientId:apiKey"; the colon is missing')
-  const clientId = text.slice(0, at).trim()
-  const apiKey = text.slice(at + 1).trim()
-  if (clientId === '' || apiKey === '') throw new Error('ima credentials need a client id and an API key on both sides of the colon')
-  return { clientId, apiKey }
-}
+// The card and the team file keep two credentials for ima, not one token: the client id
+// identifies the key pair and the API key is the secret. Names are DSH secret names.
+export const IMA_CREDENTIALS = [
+  { name: IMA_CLIENT_ID_SECRET, label: 'Client ID' },
+  { name: IMA_API_KEY_SECRET, label: 'API key' },
+]
 
-const tokenOf = ({ token, secrets = {} } = {}) => (typeof token === 'string' && token !== '' ? token : secrets[IMA_TOKEN_SECRET])
-
-// The pair arrives packed; both headers are built here, in memory, and travel on every call.
-export const auth = ({ token, secrets } = {}) => {
-  let pair
-  try {
-    pair = parseCredentials(tokenOf({ token, secrets }))
-  } catch {
-    return { 'ima-openapi-ctx': `skill_version=${IMA_SKILL_VERSION}` }
-  }
+// Both headers travel on every call, plus the skill version ima's own package sends.
+export const auth = ({ secrets = {} } = {}) => {
+  const clientId = secrets[IMA_CLIENT_ID_SECRET]
+  const apiKey = secrets[IMA_API_KEY_SECRET]
   return {
-    'ima-openapi-clientid': pair.clientId,
-    'ima-openapi-apikey': pair.apiKey,
+    ...(typeof clientId === 'string' && clientId !== '' ? { 'ima-openapi-clientid': clientId } : {}),
+    ...(typeof apiKey === 'string' && apiKey !== '' ? { 'ima-openapi-apikey': apiKey } : {}),
     'ima-openapi-ctx': `skill_version=${IMA_SKILL_VERSION}`,
   }
 }
@@ -275,20 +263,18 @@ export const IMA_REST_TOOLS = [
 
 // The registry loads this object by its default export, takes `id` as the key, and hands
 // the rest to connectors.js. ima has no MCP server, so it mounts through the REST adapter:
-// `tokenSecret` holds "clientId:apiKey", `auth` builds both headers, `envelope`
+// `credentials` asks the card for both secrets, `auth` builds both headers, `envelope`
 // unwraps code/msg/data, and `verify` proves the pair without reading user content.
 export const connector = {
   id: IMA_TOOL_PREFIX,
   displayName: 'ima',
   mode: 'rest-tools',
   api: IMA_BASE,
-  tokenSecret: IMA_TOKEN_SECRET,
+  credentials: IMA_CREDENTIALS,
   auth,
   restTools: IMA_REST_TOOLS,
   envelope: IMA_ENVELOPE,
   verify: verifyIma,
-  credentialLabel: 'Client ID and API key',
-  credentialPlaceholder: 'clientId:apiKey',
   // What the card shows. Harmless if this framework version does not read them yet.
   glyph: 'ima',
   about: 'Read your ima notes and knowledge bases.',
@@ -298,11 +284,15 @@ export const connector = {
 
 export default connector
 
-// Confirms the packed pair without reading any user content. Returns `{ ok: true }`; ima
-// has no account name to show, so the card stays account-less.
-export async function verifyIma({ token, secrets, fetch: request = fetch } = {}) {
-  const pair = parseCredentials(tokenOf({ token, secrets }))
-  const headers = auth({ token: `${pair.clientId}:${pair.apiKey}` })
+// Confirms a client id / API key pair without reading any user content. Returns
+// `{ ok: true }`; ima has no account name to show, so the card stays account-less.
+export async function verifyIma({ secrets = {}, fetch: request = fetch } = {}) {
+  const headers = auth({ secrets })
+  const missing = [
+    ...(headers['ima-openapi-clientid'] === undefined ? [IMA_CLIENT_ID_SECRET] : []),
+    ...(headers['ima-openapi-apikey'] === undefined ? [IMA_API_KEY_SECRET] : []),
+  ]
+  if (missing.length > 0) throw new Error(`ima needs both a client id and an API key; missing ${missing.join(' and ')}`)
   let response
   try {
     response = await request(`${IMA_BASE}/openapi/wiki/v1/search_knowledge_base`, {

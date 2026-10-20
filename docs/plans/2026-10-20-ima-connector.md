@@ -25,7 +25,7 @@
 | `ima_get_media` | `/openapi/wiki/v1/get_media_info` | 取原文入口；笔记型返回 `notebook_id` 再走 `ima_get_note` |
 
 - 出站只有 `https://ima.qq.com`。文件上传才需要 COS（`*.myqcloud.com`），只读路线用不到，声明里没有上传相关调用。
-- 鉴权：两个 header + `ima-openapi-ctx: skill_version=1.1.10`。卡片按宿主 v1 的单 token 表单，填 `clientId:apiKey`（**第一个冒号**切分、两边 trim、都非空才允许连接），整串存为 `IMA_OPENAPI_TOKEN`；拆出的两半只进请求头，不写 state / view / diagnostics。
+- 鉴权：两个 header + `ima-openapi-ctx: skill_version=1.1.10`。连接器用 `credentials` 声明两个 secret 输入：`IMA_OPENAPI_CLIENTID`（Client ID）与 `IMA_OPENAPI_APIKEY`（API key）；两个都只进请求头，不写 state / view / diagnostics。
 - 回包是 `{ code, msg, data }`，声明为连接器 `envelope`：`code=0` 取 `data`；`code≠0` 抛错，不把失败当工具结果（`20004` / `200002` 鉴权、`20002` / `110021` 限频、`110030` / `210005` / `210011` / `210034` 无权限、其余带 code 与原文）。
 - 连接校验（verify）：`search_knowledge_base` 发 `{query:"",cursor:"",limit:1}`，`code=0` 即通过。ima 没有 whoami 接口，所以卡片不显示账号名。
 - 测试：`ds-bot/test/ima.test.js`，mock fetch 覆盖成功 / 401 / 超时 / 断网 / 业务码 / 半填凭据 / 非信封回包，并静态断言「写入端点不在声明里」「body 只发映射过的字段」。
@@ -40,18 +40,17 @@
 
 - 凭证是长期 bearer 且带写权限，只读是客户端白名单保证，不是服务端保证。
 - 限频只有 `20002` 这个码，数值未公开；鉴权失败实测出现过 `200002`（HTTP 401），文档写 `20004`，两种都按鉴权失败处理。
-- `search_notes` 的请求体需要嵌套 `query_info: { title, content }`，声明用点号键 `"query_info.title"` 表达；当前适配器 `requestBody` 只按字面键写平铺对象（实测发出 `{"query_info.title":"…"}`），需要适配器把点号键展开成嵌套对象（已报 Forge）。这是 9 个工具里唯一一个需要适配器改动的。
+- `search_notes` 的请求体需要嵌套 `query_info: { title, content }`，声明用点号键 `"query_info.title"` 表达；冻结底座 `integ/connector-base-next` 的 `requestBody` 已支持点号嵌套（`setPath`），实测发出 `{"query_info":{"title":…,"content":…}}`。
 - 卡片无账号名：ima 没有 whoami 接口，`verify` 只回 `{ ok: true }`；卡片应显示「已连接」，不显示账号。
-- 多冒号：第二个及之后的冒号属于 API key（按第一个冒号切），不要按最后一个切。
 - 真实 key 下的联调未做；mock 只覆盖协议形状，不覆盖 ima 真实字段演进。
 - `list_note` 的翻页游标语义文档没写清（响应无 `next_cursor`），先按「传 `""` 起页、再传上次结果」声明，联调时校正。
 
 ## 证据（2026-10-20）
 
-- 单测：`node --test test/ima.test.js` → 12 tests / 12 pass / 0 fail，约 0.9 s；覆盖成功、401、超时、断网、业务码、凭据格式（缺冒号 / 空半边 / 多冒号 / trim）、非信封回包、写入端点缺席、body 只发映射字段。
+- 单测：`node --test test/ima.test.js` → 11 tests / 11 pass / 0 fail，约 1.1 s；覆盖成功、401、超时、断网、业务码、半填凭据、非信封回包、写入端点缺席、body 只发映射字段。
 - 全量：`npm test` → 833 tests / 832 pass / 1 fail。唯一失败是 `test/work-dir.test.js` 的 `a model the user picks while the fresh part is made reaches the fresh part`（2 s 超时），在干净的主线 tip `2b77fa9` 主 worktree 上同样复现（19/20），与本次改动无关。
 - 门槛：`node scripts/build-client.mjs --check` 通过；`npm run lint` 0 error（14 条 warning 全是既有客户端文件，不在本次改动内）。
-- 适配器预检（用 Forge 分支未提交版 `rest-tools.js` 直接跑本声明）：9 个工具注册为 `ima_*`；两个 header + `ima-openapi-ctx` 正确；`code=0` 信封正确解包；`search_notes` 的 body 仍是平铺的点号键（见「已知限制」）。
+- 适配器集成（冻结点 `integ/connector-base-next` @ `100f603`）：9 个工具注册为 `ima_*`，逐条断言 host 只有 `ima.qq.com`、`POST`、两个 header + `ima-openapi-ctx`、body 只含映射字段（含 `query_info` 嵌套与 `target_content_format: 0` 常量）、`code=0` 解包、`20004/20002` 映射为工具错误。
 - 未做：真实 clientid/apikey 联调；UI 截图要等 `integ/connector-base` + 卡片渲染落地，计划两屏：连接器页 ima 卡片未连接态（390 / 1280 各一张）、连接后一次 `ima_search_kb_list` 空结果调用（不截真实笔记内容）。
 
 ## 变更
