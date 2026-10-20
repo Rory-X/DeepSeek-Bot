@@ -597,7 +597,7 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 button.bt-connector-main{cursor:pointer;min-height:24px}
 button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
 .bt-connector-chevron{flex:none;display:inline-flex;color:var(--bt-ink-3);transition:transform .15s ease}
-.bt-connector[data-open] .bt-connector-chevron{transform:rotate(90deg)}
+.bt-connector[data-open]>.bt-connector-head .bt-connector-chevron{transform:rotate(90deg)}
 .bt-connector-panel{display:flex;flex-direction:column;gap:12px;padding-top:10px;border-top:1px solid var(--bt-line);animation:bt-veil-in .16s ease-out}
 @media (prefers-reduced-motion:reduce){.bt-connector-chevron{transition:none}.bt-connector-panel{animation:none}}
 .bt-connector-action-row{display:flex;align-items:center;gap:12px}
@@ -661,6 +661,27 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-add-btn:disabled{opacity:.4;cursor:default}
 .bt-connector-add-plus{display:inline-flex;flex:none;color:var(--bt-ink-3)}
 .bt-connector-add .bt-connector-error{padding-left:0}
+/* A module keeps one card and puts its project authorizations inside it: a compact row per
+   grant under the base connection, with the add form under the list. */
+.bt-connector[data-group] .bt-connector-status{white-space:normal}
+.bt-connector-base .bt-connector-docs{padding-left:0}
+.bt-connector-projects{display:flex;flex-direction:column;gap:8px}
+.bt-connector-project-list{display:flex;flex-direction:column;gap:8px}
+.bt-connector-project{border:.5px solid var(--bt-line);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.bt-connector-project[data-open]{background:color-mix(in srgb,var(--bt-line) 10%,transparent)}
+.bt-connector-project-head{display:flex;align-items:center;gap:8px;min-width:0}
+.bt-connector-project-main{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;margin:0;padding:2px 0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
+.bt-connector-project-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-connector-project-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.bt-connector-project-name{font-size:13px;line-height:18px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-connector-project-status{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-connector-project[data-state=ready] .bt-connector-project-status{color:var(--bt-ink-2)}
+.bt-connector-project[data-state=error] .bt-connector-project-status{color:var(--bt-danger);white-space:normal}
+.bt-connector-project[data-open]>.bt-connector-project-head .bt-connector-chevron{transform:rotate(90deg)}
+.bt-connector-project-body{display:flex;flex-direction:column;gap:10px;padding-top:8px;border-top:.5px solid var(--bt-line);min-width:0}
+.bt-connector-project .bt-connector-error{padding-left:0}
+.bt-connector-add-form{display:flex;flex-direction:column;gap:8px;padding:10px;border:.5px dashed var(--bt-line-2);border-radius:10px;min-width:0}
+.bt-connector-add-form .bt-connector-form-row{justify-content:flex-end}
 /* A wide settings panel lays the instance fields out two by two; a phone keeps one column. */
 @media (min-width:900px){
 .bt-connector-instance-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
