@@ -20,6 +20,11 @@ import { connect as tlsConnect } from 'node:tls'
 const output = { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] }
 
 export const IMAP_PORT = 993
+// One attachment part is read at most this large; text is cut at this many characters; one
+// message lists at most this many attachments. Modules import these instead of guessing.
+export const ATTACH_MAX_BYTES = 2 * 1024 * 1024
+export const ATTACH_MAX_CHARS = 20_000
+export const ATTACH_MAX_COUNT = 50
 export const IMAP_MODE = 'imap-read'
 
 const CONNECT_TIMEOUT_MS = 15_000
@@ -334,6 +339,106 @@ export function parseFetchItems(items) {
     if (current !== undefined) current.literals.push(item.literal)
   }
   return messages
+}
+
+// ---------------------------------------------------------------- attachments
+
+// The BODYSTRUCTURE answer is an IMAP parenthesized list; only the fields DS Bot needs are
+// read (type, parameters, encoding, size, disposition). Values are strings or nested lists.
+function parseStructureExpression(text) {
+  let at = 0
+  const skip = () => { while (at < text.length && /\s/.test(text[at])) at += 1 }
+  const parse = () => {
+    skip()
+    if (text[at] === '(') {
+      at += 1
+      const list = []
+      for (;;) {
+        skip()
+        if (at >= text.length) throw new Error('The message structure is incomplete.')
+        if (text[at] === ')') { at += 1; return list }
+        list.push(parse())
+      }
+    }
+    if (text[at] === '"') {
+      at += 1
+      let value = ''
+      while (at < text.length && text[at] !== '"') {
+        if (text[at] === '\\' && at + 1 < text.length) { value += text[at + 1]; at += 2; continue }
+        value += text[at]
+        at += 1
+      }
+      at += 1
+      return value
+    }
+    const start = at
+    while (at < text.length && !/[\s()]/.test(text[at])) at += 1
+    return text.slice(start, at)
+  }
+  const value = parse()
+  if (!Array.isArray(value)) throw new Error('The message structure is not a list.')
+  return value
+}
+
+const structureParams = (node) => {
+  const params = new Map()
+  if (!Array.isArray(node)) return params
+  for (let at = 0; at + 1 < node.length; at += 2) {
+    const key = String(node[at] ?? '').toLowerCase()
+    const value = node[at + 1]
+    if (key !== '' && typeof value === 'string') params.set(key, value)
+  }
+  return params
+}
+
+// RFC 2231 and RFC 2047 names, then just the base file name: a mail never names a path.
+function decodeAttachmentName(raw) {
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined
+  let name = raw.trim()
+  const rfc2231 = /^([^']*)'[^']*'(.*)$/.exec(name)
+  if (rfc2231 !== null) {
+    try { name = decodeURIComponent(rfc2231[2].replace(/\+/g, ' ')) } catch { name = rfc2231[2] }
+  }
+  name = decodeWords(name).replace(/[\r\n\t]/g, ' ').trim()
+  const base = name.split(/[\\/]/).pop() ?? ''
+  const clean = base.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 120)
+  return clean === '' ? undefined : clean
+}
+
+const structureDisposition = (node) => {
+  for (let at = 7; at < node.length; at += 1) {
+    const item = node[at]
+    if (!Array.isArray(item) || typeof item[0] !== 'string') continue
+    const kind = item[0].toUpperCase()
+    if (kind !== 'ATTACHMENT' && kind !== 'INLINE') continue
+    const params = structureParams(item[1])
+    return { kind, filename: params.get('filename') ?? params.get('name') }
+  }
+  return { kind: undefined, filename: undefined }
+}
+
+// Every leaf part with its IMAP part number (1, 2, 1.1, ...), which is what BODY.PEEK
+// takes. A multipart answer nests lists; a single-part answer is one leaf named 1.
+function structureParts(node, prefix = '') {
+  if (!Array.isArray(node) || node.length === 0) return []
+  if (Array.isArray(node[0])) {
+    const children = node.filter(item => Array.isArray(item))
+    return children.flatMap((child, index) => structureParts(child, prefix === '' ? String(index + 1) : `${prefix}.${index + 1}`))
+  }
+  const type = String(node[0] ?? '').toUpperCase()
+  const subtype = String(node[1] ?? '').toUpperCase()
+  const params = structureParams(node[2])
+  const disposition = structureDisposition(node)
+  const filename = decodeAttachmentName(disposition.filename ?? params.get('filename') ?? params.get('name'))
+  return [{
+    part: prefix === '' ? '1' : prefix,
+    type: `${type}/${subtype}`,
+    params,
+    encoding: String(node[5] ?? '7BIT').toUpperCase(),
+    size: Number(node[6]) || 0,
+    disposition: disposition.kind,
+    filename,
+  }]
 }
 
 // ---------------------------------------------------------------- IMAP client
@@ -715,6 +820,62 @@ export class ImapClient {
     return result
   }
 
+  // The attachment leaves of one message, in IMAP part order. Read-only: the caller opens
+  // the mailbox with EXAMINE, and every fetch is BODY.PEEK, so nothing is marked read.
+  async #attachmentParts(uid) {
+    const answer = await this.#command(`UID FETCH ${uid} (UID BODYSTRUCTURE)`)
+    const text = answer.items.map(item => item.line ?? '').join('\n')
+    const at = text.indexOf('BODYSTRUCTURE')
+    if (at === -1) throw new Error('The mail server sent no message structure.')
+    const structure = parseStructureExpression(text.slice(at + 'BODYSTRUCTURE'.length))
+    return structureParts(structure)
+      .filter(part => part.disposition === 'ATTACHMENT' || part.filename !== undefined)
+      .slice(0, ATTACH_MAX_COUNT)
+  }
+
+  async fetchStructure(uid) {
+    return await this.#attachmentParts(uid)
+  }
+
+  // What is attached to one message: names, types and sizes, never the contents.
+  async listAttachments(uid) {
+    const parts = await this.#attachmentParts(uid)
+    return parts.map((part, index) => ({
+      index: index + 1,
+      filename: part.filename ?? `attachment ${index + 1}`,
+      type: part.type,
+      size: part.size,
+    }))
+  }
+
+  // The text of one attachment. A non-text part is refused with its type and size and no
+  // content; anything over the byte or character limit is refused or cut.
+  async readAttachment(uid, index, { maxBytes = ATTACH_MAX_BYTES, maxChars = ATTACH_MAX_CHARS } = {}) {
+    const parts = await this.#attachmentParts(uid)
+    if (!Number.isInteger(index) || index < 1 || index > parts.length) {
+      throw new Error(`This message has no attachment ${String(index)}.`)
+    }
+    const part = parts[index - 1]
+    if (!part.type.startsWith('TEXT/')) {
+      throw new Error(`Attachment "${part.filename ?? index}" is ${part.type}, ${part.size} bytes; only text attachments can be read.`)
+    }
+    if (part.size > maxBytes) {
+      throw new Error(`Attachment "${part.filename ?? index}" is ${part.size} bytes, over the ${maxBytes}-byte limit.`)
+    }
+    const answer = await this.#command(`UID FETCH ${uid} (UID BODY.PEEK[${part.part}]<0.${maxBytes}>)`)
+    const literal = parseFetchItems(answer.items)[0]?.literals[0]
+    if (literal === undefined) throw new Error('The mail server sent no attachment body.')
+    let bytes = literal
+    if (part.encoding === 'BASE64') {
+      bytes = Buffer.from(bytes.toString('latin1').replace(/\s+/g, ''), 'base64')
+    } else if (part.encoding === 'QUOTED-PRINTABLE') {
+      bytes = decodeQuotedPrintable(bytes)
+    }
+    let text = decodeCharset(bytes, part.params.get('charset'))
+    if (text.length > maxChars) text = `${text.slice(0, maxChars)}\n… (attachment cut: ${text.length} characters in all)`
+    return text
+  }
+
   close() {
     if (this.closed) return
     this.closed = true
@@ -744,6 +905,12 @@ const bounded = (value, fallback, min, max) => {
   const number = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : Number.parseInt(String(value ?? ''), 10)
   if (!Number.isFinite(number)) return fallback
   return Math.min(max, Math.max(min, number))
+}
+
+const positiveUid = (value) => {
+  const uid = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isInteger(uid) || uid <= 0) throw new Error('uid must be a positive number, from search or list_messages.')
+  return uid
 }
 
 const folderName = value => {
@@ -789,7 +956,7 @@ const lineOf = (message) => {
   return `UID ${message.uid} | ${date || 'no date'} | ${from || 'unknown sender'} | ${subject || '(no subject)'}`
 }
 
-export function createImapTools({ id, displayName, credential, account, host, port = IMAP_PORT, redact = String, connect, timeoutMs, connectTimeoutMs, gmailQuery = false } = {}) {
+export function createImapTools({ id, displayName, credential, account, host, port = IMAP_PORT, redact = String, connect, timeoutMs, connectTimeoutMs, gmailQuery = false, attachments = false } = {}) {
   const { mailbox, secret } = credentialParts(credential, account)
   let client
   let chain = Promise.resolve()
@@ -917,6 +1084,50 @@ export function createImapTools({ id, displayName, credential, account, host, po
         return lines.join('\n')
       }),
     },
+    ...(attachments ? [{
+      name: `${id}_list_attachments`,
+      description: `List the attachments of one ${displayName} message with their names, types and sizes (read-only).`,
+      parameters: {
+        type: 'object',
+        properties: {
+          uid: { type: 'integer', description: 'Message UID, from search or list_messages' },
+          folder: { type: 'string', description: 'Folder name; default INBOX' },
+        },
+        required: ['uid'],
+      },
+      output,
+      execute: args => run(async (imap) => {
+        const uid = positiveUid(args?.uid)
+        const folder = folderName(args?.folder)
+        await imap.examine(folder)
+        const attachments = await imap.listAttachments(uid)
+        if (attachments.length === 0) return `No attachment in message UID ${uid}.`
+        const shown = attachments.slice(0, ATTACH_MAX_COUNT)
+        return [`${attachments.length} attachment(s) in message UID ${uid}:`, ...shown.map(entry => `[${entry.index}] ${entry.filename} (${entry.type}, ${entry.size} bytes)`)].join('\n')
+      }),
+    },
+    {
+      name: `${id}_read_attachment`,
+      description: `Read a text attachment of one ${displayName} message (read-only; other types are refused with their type and size).`,
+      parameters: {
+        type: 'object',
+        properties: {
+          uid: { type: 'integer', description: 'Message UID, from search or list_messages' },
+          index: { type: 'integer', description: 'Attachment number from list_attachments, starting at 1' },
+          folder: { type: 'string', description: 'Folder name; default INBOX' },
+        },
+        required: ['uid', 'index'],
+      },
+      output,
+      execute: args => run(async (imap) => {
+        const uid = positiveUid(args?.uid)
+        const index = typeof args?.index === 'number' ? args.index : Number.parseInt(String(args?.index ?? ''), 10)
+        if (!Number.isInteger(index) || index < 1) throw new Error('index must be a positive number from list_attachments.')
+        const folder = folderName(args?.folder)
+        await imap.examine(folder)
+        return await imap.readAttachment(uid, index)
+      }),
+    }] : []),
   ]
 
   return {

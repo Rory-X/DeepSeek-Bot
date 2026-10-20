@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { createImapTools, createImapWriteTools, decodeMailboxName, encodeMailboxName, searchCriteria } from '../src/host/connectors/_imap.js'
+import { ATTACH_MAX_BYTES, createImapTools, createImapWriteTools, decodeMailboxName, encodeMailboxName, searchCriteria } from '../src/host/connectors/_imap.js'
 
 const CRLF = '\r\n'
 const source = readFileSync(fileURLToPath(new URL('../src/host/connectors/_imap.js', import.meta.url)), 'utf8')
@@ -417,4 +417,88 @@ test('removing a label needs no pre-check, and a system label is known without L
   assert.ok(sent(server).includes('UID STORE 2 -X-GM-LABELS ("Never Created")'))
   await gmailTool(tools, 'add_labels').execute({ uids: [3], labels: ['\\Starred'] }, { agent: { id: 'm1' } })
   assert.ok(sent(server).includes('UID STORE 3 +X-GM-LABELS ("\\\\Starred")'))
+})
+
+
+// A message with four parts: the body, a text attachment, a PDF, and one whose name is an
+// RFC 2047 encoded word. Sizes are what the server declares.
+const ATTACH_STRUCTURE = '(("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 21 1 NIL NIL NIL NIL)' +
+  '("TEXT" "PLAIN" ("CHARSET" "UTF-8" "NAME" "notes.txt") NIL NIL "BASE64" 24 1 NIL ("ATTACHMENT" ("FILENAME" "notes.txt")) NIL NIL)' +
+  '("APPLICATION" "PDF" ("NAME" "report.pdf") NIL NIL "BASE64" 1234 NIL NIL ("ATTACHMENT" ("filename" "../../evil.pdf")) NIL NIL)' +
+  '("TEXT" "PLAIN" ("CHARSET" "UTF-8" "NAME" "=?UTF-8?B?5Lya6K6uLnR4dA==?=") NIL NIL "BASE64" 12 1 NIL ("ATTACHMENT" ("FILENAME" "=?UTF-8?B?5Lya6K6uLnR4dA==?=")) NIL NIL)' +
+  ' "MIXED" ("BOUNDARY" "x") NIL NIL NIL)'
+const ATTACH_LITERAL = Buffer.from('aGVsbG8gYXR0YWNobWVudA==', 'utf8') // base64 of "hello attachment"
+
+const attachmentServer = ({ structure = ATTACH_STRUCTURE } = {}) => imapServer({
+  folders: [{ name: 'INBOX' }],
+  onLine: (line, socket) => {
+    const tag = tagOf(line)
+    if (/^A\d+ UID FETCH 9 \(UID BODYSTRUCTURE\)$/.test(line)) {
+      socket.send(`* 1 FETCH (UID 9 BODYSTRUCTURE ${structure})${CRLF}${tag} OK completed${CRLF}`)
+      return true
+    }
+    if (/^A\d+ UID FETCH 9 \(UID BODY\.PEEK\[2\]<\d+\.\d+>\)$/.test(line)) {
+      socket.send(`* 1 FETCH (UID 9 BODY[2]<0> {${ATTACH_LITERAL.length}}${CRLF}`)
+      socket.send(ATTACH_LITERAL.toString('utf8'))
+      socket.send(`${CRLF})${CRLF}${tag} OK completed${CRLF}`)
+      return true
+    }
+    return false
+  },
+})
+
+const gmailRead = server => createImapTools({
+  id: 'gmail',
+  displayName: 'Gmail',
+  credential: 'user@example.com:secret-code',
+  account: { mailbox: 'user@example.com' },
+  connect: server.connect,
+  attachments: true,
+  timeoutMs: 1_000,
+  connectTimeoutMs: 500,
+}).tools
+
+const readTool = (tools, name) => tools.find(entry => entry.name === `gmail_${name}`)
+
+test('attachments are listed by name, type and size, never by content', async () => {
+  const server = attachmentServer()
+  const tools = gmailRead(server)
+  const listed = await readTool(tools, 'list_attachments').execute({ uid: 9 })
+  assert.match(listed, /3 attachment\(s\) in message UID 9/)
+  assert.match(listed, /\[1\] notes\.txt \(TEXT\/PLAIN, 24 bytes\)/)
+  // The PDF's name is stripped to its base name, and the encoded word is decoded.
+  assert.match(listed, /\[2\] evil\.pdf \(APPLICATION\/PDF, 1234 bytes\)/)
+  assert.match(listed, /\[3\] 会议\.txt \(TEXT\/PLAIN, 12 bytes\)/)
+  assert.ok(!listed.includes('aGVsbG8'))
+})
+
+test('a text attachment is read with BODY.PEEK, and a non-text one is refused without content', async () => {
+  const server = attachmentServer()
+  const tools = gmailRead(server)
+  const text = await readTool(tools, 'read_attachment').execute({ uid: 9, index: 1 })
+  assert.equal(text, 'hello attachment')
+  const commands = sent(server)
+  assert.ok(commands.some(line => line.startsWith('EXAMINE "INBOX"')))
+  assert.ok(commands.some(line => /BODY\.PEEK\[2\]/.test(line)))
+  assert.equal(commands.some(line => /^(SELECT|STORE|APPEND|EXPUNGE)/.test(line)), false)
+
+  await assert.rejects(
+    readTool(tools, 'read_attachment').execute({ uid: 9, index: 2 }),
+    /APPLICATION\/PDF, 1234 bytes; only text attachments can be read/,
+  )
+  assert.equal(sent(server).some(line => /BODY\.PEEK\[3\]/.test(line)), false)
+
+  // An index past the list is refused before the part body is even asked for.
+  const fetches = () => sent(server).filter(line => /BODY\.PEEK\[/.test(line)).length
+  const before = fetches()
+  await assert.rejects(readTool(tools, 'read_attachment').execute({ uid: 9, index: 99 }), /no attachment 99/)
+  assert.equal(fetches(), before)
+})
+
+test('an attachment over the byte limit is refused before its body is fetched', async () => {
+  const tooBig = ATTACH_STRUCTURE.replace('"BASE64" 24 1', `"BASE64" ${ATTACH_MAX_BYTES + 1} 1`)
+  const server = attachmentServer({ structure: tooBig })
+  const tools = gmailRead(server)
+  await assert.rejects(readTool(tools, 'read_attachment').execute({ uid: 9, index: 1 }), /over the 2097152-byte limit/)
+  assert.equal(sent(server).some(line => /BODY\.PEEK\[2\]/.test(line)), false)
 })
