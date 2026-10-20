@@ -336,6 +336,7 @@ function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTim
       : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))
   return h('div', { ref: listRef, className: 'bt-list', role: 'region', 'aria-label': t('Bot list') },
     main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true, time: undefined }) : roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…')),
+    rowProps.wide ? sections.pinned.map(row) : null,
     rowProps.wide ? sections.folders.map(folder => h(BotFolderSection, { key: folder.id, folder, roster, actions: rowProps.actions, useUi: rowProps.useUi, renderRow: row })) : null,
     rowProps.wide ? sections.loose.map(row) : order.map(row),
     rowProps.wide ? h('button', { type: 'button', className: 'bt-bot-folder-empty', onClick: () => rowProps.actions.openBotFolders() }, t('New Bot folder')) : null)

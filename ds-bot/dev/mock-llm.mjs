@@ -20,6 +20,7 @@
 //   看群 名 (read_group_chat) · 转告 名: 消息, also over several lines (message_bot) · 搜索：查询1 | 查询2 (web_search)
 //   进目录 路径 (working_directory with cd)
 //   归组 名: A, B (Main Bot organize_bots)
+//   置顶分组 名 / 取消置顶分组 名 / 解散分组 名 (Main Bot organize_bots)
 //   插话 名: 消息 (message_bot when "now") · 排队 名: 消息 (message_bot when "queue") · 叫停 名: 原因 (stop_bot)
 //   In a message from a Bot: 转告 名: 消息 (hands it on with message_bot) · 慢慢做 N (answers after N seconds)
 //   长文 N / long N (N×1000 characters) · 长任务 N [K] (N steps of K×1000, default 4)
@@ -400,6 +401,9 @@ function decide(body) {
   }
   // Group management in a Bot's own chat, in a fixed command form the tests use.
   let order
+  if ((order = /^(置顶|取消置顶|解散)分组\s+([^\n]+)/m.exec(userText)) && isMain && tools.has('organize_bots')) {
+    return [tool('organize_bots', { action: { 置顶: 'pin', 取消置顶: 'unpin', 解散: 'dissolve' }[order[1]], folder: order[2].trim() })]
+  }
   if ((order = /^归组\s+([^\n:：]+)[:：]\s*([^\n]+)/m.exec(userText)) && isMain && tools.has('organize_bots')) {
     return [tool('organize_bots', { action: 'assign', folder: order[1].trim(), bots: order[2].split(/[,，]/).map(name => name.trim()).filter(Boolean) })]
   }
