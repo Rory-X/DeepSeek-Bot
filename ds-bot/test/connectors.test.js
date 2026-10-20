@@ -209,10 +209,15 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
   assert.ok(!JSON.stringify(state).includes(token))
   assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes(token))
 
-  const disconnected = await call(ctx, 'connector-disconnect', { id: 'github' })
+  const disconnected = await call(ctx, 'connector-disconnect', { id: 'github' }, { origin: 'https://dsh.test' })
   assert.deepEqual(builtins(disconnected.value), [OFF.github, OFF.vercel, OFF.cloudflare])
   assert.equal(mounts[0].disposed, true)
   assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
+  // A connector entry that disappears is traceable later: name, id and origin, never a token.
+  const log = (await call(ctx, 'diagnostics-log')).value
+  assert.match(log, /connector-disconnect/)
+  assert.match(log, /GitHub \(github\) disconnected from https:\/\/dsh\.test/)
+  assert.ok(!log.includes(token))
 })
 
 test('a token GitHub refuses is not saved', async (t) => {
