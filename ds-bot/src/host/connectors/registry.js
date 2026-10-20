@@ -10,6 +10,12 @@ import { pathToFileURL } from 'node:url'
 export const CONNECTOR_DIR = import.meta.dirname
 export const CONNECTOR_ID = /^[a-z][a-z0-9-]{0,39}$/
 export const CONNECTOR_MODES = ['mcp-client', 'read-tools', 'oauth-mcp', 'notify', 'rest-tools', 'imap', 'imap-read', 'custom']
+// A connector module may be mounted more than once, one instance per id
+// (`<id>`, `<id>-2`, ...). The first instance keeps the module id, so a team that used the
+// connector before instances existed keeps its state and grant untouched. Only OAuth
+// connectors can be instances: the grant is addressed by instance id, so each one holds
+// its own authorization and nothing is shared between them.
+export const INSTANCE_LIMIT = 64
 // An access level is what a connector may do once it is connected: read only, or read and
 // write. Every write tool is gated by it, so a connector that does not declare a level is
 // read only.
@@ -69,6 +75,54 @@ const checkLevels = (file, id, connector) => {
 }
 
 
+// The multi-instance declaration, normalized. The prefix is the module id itself: the first
+// instance must keep that id, or an existing team's state and grant would move. An id has
+// to leave room for a `-2` suffix (the shortest the framework ever adds).
+const checkInstances = (file, id, connector) => {
+  const instances = connector.instances
+  if (instances === undefined) return undefined
+  if (instances === null || typeof instances !== 'object' || Array.isArray(instances)) {
+    throw new Error(`Connector module ${file} ("${id}") instances must be an object`)
+  }
+  const prefix = instances.prefix ?? id
+  if (typeof prefix !== 'string' || !CONNECTOR_ID.test(prefix)) {
+    throw new Error(`Connector module ${file} ("${id}") instances needs a prefix matching ${CONNECTOR_ID}`)
+  }
+  if (prefix !== id) {
+    throw new Error(`Connector module ${file} ("${id}") instances prefix must be the module id "${id}"`)
+  }
+  if (id.length + 2 > 40) {
+    throw new Error(`Connector module ${file} ("${id}") instances needs an id short enough for a "-2" instance`)
+  }
+  if (connector.mode !== 'oauth-mcp') {
+    throw new Error(`Connector module ${file} ("${id}") instances needs a mode with per-instance credentials: oauth-mcp`)
+  }
+  const min = instances.min ?? 1
+  const max = instances.max ?? 8
+  if (!Number.isInteger(min) || min < 1) {
+    throw new Error(`Connector module ${file} ("${id}") instances needs a min of at least 1`)
+  }
+  if (!Number.isInteger(max) || max < min || max > INSTANCE_LIMIT) {
+    throw new Error(`Connector module ${file} ("${id}") instances needs a max from ${min} to ${INSTANCE_LIMIT}`)
+  }
+  return { prefix, min, max }
+}
+
+// A module id that another module reserves for one of its instances would make that
+// instance unreachable: creating it would find the id taken, and the file's own row would
+// pretend to be an instance. Refuse the pair at load, naming both files' ids.
+const checkInstanceIds = (loaded) => {
+  const bases = Object.keys(loaded).filter(id => loaded[id].instances !== undefined)
+  for (const base of bases) {
+    const reserved = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-[1-9][0-9]*$`)
+    for (const other of Object.keys(loaded)) {
+      if (other !== base && reserved.test(other)) {
+        throw new Error(`Connector module id "${other}" is reserved for instances of "${base}"`)
+      }
+    }
+  }
+}
+
 const moduleFiles = dir => readdirSync(dir, { withFileTypes: true })
   .filter(entry => entry.isFile() && entry.name.endsWith('.js') && !NOT_A_CONNECTOR.test(entry.name))
   .map(entry => entry.name)
@@ -103,9 +157,12 @@ export async function loadConnectorModules(dir = CONNECTOR_DIR) {
     }
     checkLevels(file, id, connector)
     checkDisplay(file, id, connector)
+    const instances = checkInstances(file, id, connector)
     const { id: key, ...definition } = connector
+    if (instances !== undefined) definition.instances = instances
     loaded[key] = definition
   }
+  checkInstanceIds(loaded)
   return loaded
 }
 
