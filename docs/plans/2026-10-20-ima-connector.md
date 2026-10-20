@@ -76,6 +76,8 @@
 
 ## 第三批：写能力接入计划（2026-10-20 定，未开工）
 
+状态（2026-10-20）：不依赖框架的部分已先落进模块——`IMA_WRITE_TOOLS`（P0/P1/P2 的 5 条声明草案，含 `write: true` 与 `approval`）、`approvalFor()` 文案、`IMA_CAPABILITIES` / `IMA_PERMISSIONS` 展示清单、`levels: ['read','write']`、notes/knowledge-base 两套错误码。它们**未接进 `restTools`**，所以现有挂载面仍是 9 个只读工具；等 Forge 的写契约冻结后再接线。
+
 范围（按审批卡逐次确认）：
 
 - **P0** `note/v1/import_doc` 新建笔记（Markdown）。

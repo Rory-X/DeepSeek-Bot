@@ -34,6 +34,24 @@ export const IMA_WRITE_PATHS = [
 const AUTH_CODES = new Set([20004, 200002])
 const RATE_CODES = new Set([20002, 110021])
 const PRIVATE_CODES = new Set([210005, 210011, 210034, 110030])
+// The notes module documents one table (1000xx, 310001) and the reference file another
+// (2100xx); both are mapped so a write failure says what to do whichever table the
+// service answers with.
+const NOTE_CODES = new Map([
+  [100001, 'ima rejected the request parameters'],
+  [100002, 'ima says one of the ids is not valid'],
+  [100003, 'ima had an internal error; try again later'],
+  [100004, 'ima rejected the size: too large, or the account is out of space'],
+  [100005, 'ima says this account may not do that'],
+  [100006, 'that ima note no longer exists'],
+  [100008, 'the note changed since it was read; read it again before writing'],
+  [100009, 'the content is over ima\'s size limit; split it into smaller parts'],
+  [310001, 'that ima notebook does not exist'],
+  [210006, 'that ima note no longer exists'],
+  [210008, 'the note changed since it was read; read it again before writing'],
+  [210009, 'the content is over ima\'s size limit; split it into smaller parts'],
+  [210035, 'that ima notebook does not exist'],
+])
 
 // ima reports a refused business call as HTTP 200 with a non-zero code, so the envelope,
 // not the status line, decides whether a call succeeded.
@@ -42,6 +60,10 @@ export function imaError(code, msg) {
   if (AUTH_CODES.has(code)) return 'ima did not accept this client id or API key'
   if (RATE_CODES.has(code)) return 'ima is rate limiting this key; try again later'
   if (PRIVATE_CODES.has(code)) return text === '' ? 'ima says this account may not read that' : `ima says this account may not read that: ${text}`
+  if (NOTE_CODES.has(code)) {
+    const said = NOTE_CODES.get(code)
+    return text === '' ? said : `${said}: ${text}`
+  }
   const named = text === '' ? '' : `: ${text}`
   return `ima answered ${code}${named}`
 }
@@ -256,11 +278,169 @@ export const IMA_REST_TOOLS = [
 // the rest to connectors.js. ima has no MCP server, so it mounts through the REST adapter:
 // `credentials` asks the card for both secrets, `auth` builds both headers, `envelope`
 // unwraps code/msg/data, and `verify` proves the pair without reading user content.
+// Third batch: the write calls, declared against the connector write contract. They stay out
+// of `restTools` until the shared adapter accepts `write: true` (it refuses every POST that
+// is not `readOnly`), so the shipped read surface is unchanged and nothing here can run.
+// When the contract lands these join `restTools` as one list.
+const cutLine = text => (text.length <= 180 ? text : `${text.slice(0, 180)}…`)
+const firstUrl = (args) => (Array.isArray(args?.urls) && typeof args.urls[0] === 'string' ? args.urls[0] : '')
+
+// What the approval card says for one write call. The framework cuts and redacts the line
+// again; `reversible: false` is what asks the client for its "cannot be undone" checkbox.
+export function approvalFor(name, args = {}) {
+  switch (name) {
+    case 'create_note':
+      return {
+        line: cutLine(`Create an ima note (${String(args.content ?? '').length} characters)`),
+        danger: false,
+        reversible: false,
+        change: 'creates a new note',
+        target: 'ima notes',
+      }
+    case 'append_note':
+      return {
+        line: cutLine(`Append ${String(args.content ?? '').length} characters to ima note ${String(args.note_id ?? '')}`),
+        danger: false,
+        reversible: false,
+        change: 'appends to an existing note',
+        target: String(args.note_id ?? ''),
+      }
+    case 'add_note_to_kb':
+      return {
+        line: cutLine(`Add ima note ${String(args.note_id ?? '')} to knowledge base ${String(args.knowledge_base_id ?? '')}`),
+        danger: false,
+        reversible: false,
+        change: 'adds a note to a knowledge base',
+        target: String(args.knowledge_base_id ?? ''),
+      }
+    case 'import_url': {
+      const urls = Array.isArray(args.urls) ? args.urls : []
+      return {
+        line: cutLine(`Import ${urls.length} URL${urls.length === 1 ? '' : 's'} into knowledge base ${String(args.knowledge_base_id ?? '')}: ${firstUrl(args)}`),
+        danger: false,
+        reversible: false,
+        change: 'imports web pages into a knowledge base',
+        target: String(args.knowledge_base_id ?? ''),
+      }
+    }
+    default:
+      return { line: `ima ${name}`, danger: false, reversible: false }
+  }
+}
+
+export const IMA_WRITE_TOOLS = [
+  {
+    name: 'create_note',
+    description: 'Create a new ima note from Markdown text. The first line becomes the title. Ask before running: this cannot be undone through the API.',
+    method: 'POST',
+    write: true,
+    path: '/openapi/note/v1/import_doc',
+    body: { content_format: { const: 1 }, content: 'content', folder_id: 'folder_id', folder_name: 'folder_name' },
+    approval: args => approvalFor('create_note', args),
+    parameters: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: 'The note body in Markdown. The first line becomes the title.' },
+        folder_id: { type: 'string', description: 'Notebook id to put the note in; omit it for the default notebook.' },
+        folder_name: { type: 'string', description: 'Notebook name, when the id is not at hand.' },
+      },
+      required: ['content'],
+    },
+  },
+  {
+    name: 'append_note',
+    description: 'Append Markdown text to an existing ima note. Read it with get_note first; this cannot be undone through the API.',
+    method: 'POST',
+    write: true,
+    path: '/openapi/note/v1/append_doc',
+    body: { note_id: 'note_id', content_format: { const: 1 }, content: 'content' },
+    approval: args => approvalFor('append_note', args),
+    parameters: {
+      type: 'object',
+      properties: {
+        note_id: { type: 'string', description: 'The note to append to; only the owner\'s own notes can be changed.' },
+        content: { type: 'string', description: 'The Markdown text to append.' },
+      },
+      required: ['note_id', 'content'],
+    },
+  },
+  {
+    name: 'add_note_to_kb',
+    description: 'Add an ima note to a knowledge base. Use list_addable_kb to find the knowledge base id.',
+    method: 'POST',
+    write: true,
+    path: '/openapi/wiki/v1/add_knowledge',
+    body: { media_type: { const: 11 }, title: 'title', knowledge_base_id: 'knowledge_base_id', folder_id: 'folder_id', 'note_info.content_id': 'note_id' },
+    approval: args => approvalFor('add_note_to_kb', args),
+    parameters: {
+      type: 'object',
+      properties: {
+        knowledge_base_id: { type: 'string', description: 'The knowledge base to add the note to.' },
+        note_id: { type: 'string', description: 'The note to add.' },
+        title: { type: 'string', description: 'The title the item gets in the knowledge base.' },
+        folder_id: { type: 'string', description: 'Folder inside the knowledge base; omit it for the root.' },
+      },
+      required: ['knowledge_base_id', 'note_id', 'title'],
+    },
+  },
+  {
+    name: 'import_url',
+    description: 'Import web pages or WeChat articles into an ima knowledge base. Bilibili, YouTube and file:// URLs are not supported.',
+    method: 'POST',
+    write: true,
+    path: '/openapi/wiki/v1/import_urls',
+    body: { knowledge_base_id: 'knowledge_base_id', folder_id: 'folder_id', urls: 'urls' },
+    approval: args => approvalFor('import_url', args),
+    parameters: {
+      type: 'object',
+      properties: {
+        knowledge_base_id: { type: 'string', description: 'The knowledge base to import into.' },
+        folder_id: { type: 'string', description: 'Folder inside the knowledge base; send the knowledge base id for its root.' },
+        urls: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 10, description: 'Web page URLs, 1-10.' },
+      },
+      required: ['knowledge_base_id', 'folder_id', 'urls'],
+    },
+  },
+  {
+    name: 'list_addable_kb',
+    description: 'List the ima knowledge bases this account may add notes or pages to.',
+    method: 'POST',
+    readOnly: true,
+    path: '/openapi/wiki/v1/get_addable_knowledge_base_list',
+    body: { cursor: 'cursor', limit: 'limit' },
+    parameters: {
+      type: 'object',
+      properties: {
+        cursor: { type: 'string', description: 'Page cursor; send "" for the first page.' },
+        limit: { type: 'number', minimum: 1, maximum: 50, description: 'How many knowledge bases to return (1-50).' },
+      },
+      required: ['cursor', 'limit'],
+    },
+  },
+]
+
+// Display only: the client draws this list and the one permission sentence. It never
+// registers a tool; the mounted tools are still `restTools`.
+export const IMA_CAPABILITIES = [
+  { key: 'read_notes', title: 'Read notes and knowledge bases', description: 'Search, list and read your notes, and search inside knowledge bases.', risk: 'read' },
+  { key: 'read_media', title: 'Read original files', description: 'Get the download entry for an item in a knowledge base.', risk: 'read' },
+  { key: 'create_note', title: 'Create a note', description: 'Write a new note from Markdown.', risk: 'write', preview: { change: 'creates a new note', reversible: false } },
+  { key: 'append_note', title: 'Append to a note', description: 'Add text to the end of an existing note.', risk: 'write', preview: { change: 'appends to an existing note', reversible: false } },
+  { key: 'add_note_to_kb', title: 'Add a note to a knowledge base', description: 'File one of your notes into a knowledge base.', risk: 'write', preview: { change: 'adds a note to a knowledge base', reversible: false } },
+  { key: 'import_url', title: 'Import web pages', description: 'Save web pages or WeChat articles into a knowledge base.', risk: 'write', preview: { change: 'imports web pages into a knowledge base', reversible: false } },
+]
+
+export const IMA_PERMISSIONS = {
+  summary: 'Read your ima notes and knowledge bases; with Full capabilities, create and append notes and add items to a knowledge base, each after your approval.',
+}
+
 export const connector = {
   id: IMA_TOOL_PREFIX,
   displayName: 'ima',
   mode: 'rest-tools',
   api: IMA_BASE,
+  levels: ['read', 'write'],
+  defaultLevel: 'read',
   credentials: IMA_CREDENTIALS,
   auth,
   restTools: IMA_REST_TOOLS,
@@ -268,6 +448,8 @@ export const connector = {
   verify: verifyIma,
   // The card reads its copy from `card` only (see the client's cardText): glyph, about,
   // docsUrl and readOnlyNote at the top level are ignored by the view.
+  capabilities: IMA_CAPABILITIES,
+  permissions: IMA_PERMISSIONS,
   card: {
     glyph: 'ima',
     about: 'Read your ima notes and knowledge bases.',
