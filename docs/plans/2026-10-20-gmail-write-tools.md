@@ -91,6 +91,7 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 - **`read_attachment`**：≤20,000 字符并带截断说明；二进制不返回字节；HTML/文本提取不发起任何网络请求（不取远程图片/链接），验收断网/mock 断言 0 出站。
 - **`include_quote` 断言**：默认（不传/`false`）发出的正文不含原邮件文本、卡显示 `quote original: no`；显式 `true` 时正文末尾附原文（≤8000 字符 + 截断提示，总长 ≤100KB）、卡显示 `quote original: yes`；原文只在批准后读取。
 - **标签不存在**：传不存在的标签名 → 清晰错误、`LIST` 之后 0 条 STORE 命令，不创建标签。
+- **标签预检竞态**：`LIST` 通过后、批准执行前标签被删的极端情况，按服务端结果如实报错，客户端不做兜底；“已知不存在时 0 条 STORE”是硬断言。
 - **`reply`/`forward` 的弹卡前读取**：只用 `EXAMINE` + `FETCH` 取最小字段（From/To/Subject/Message-ID），不整封下载，取到的内容不进 state/diagnostics。
 - **引用原文的时机**：`include_quote: true` 时，原邮件正文**在批准之后才 FETCH**（弹卡只需要头字段）；卡上只显示 `quote original: yes/no`。原文不写进审批卡、不进 `state.questions`、不进 state/diagnostics，总正文仍受 ≤100KB 限制，引用部分 ≤8000 字符并带截断提示。
 - **标签只打已有标签**：执行前先用 `LIST` 取现有标签并做存在性检查；不存在的标签直接报清晰错误、**不发 STORE 命令**，绝不回退去创建标签（即使 Gmail 服务端会隐式建标签也不触发）。
@@ -119,7 +120,45 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 16. **标签存在性预检**：执行前 `LIST` 取现有标签；不存在 → 清晰错误、0 条 STORE，绝不隐式创建。
 17. **取原文时机**：需要引用时，原文正文在批准后读取；弹卡阶段只取最小头字段，因此批准前不会有原文进入任何持久化位置。
 
-## 8. 单测计划（实现时随代码交付）
+## 8. 工具声明（给 Probe 的 diff 基线；实现必须逐字一致）
+
+**开关默认值**：`write: false`、`send: false`。能力关时对应工具不在注册表。
+
+**read-only 档（常驻 6 个；无需审批）**
+
+| 工具 | description 原文 |
+| --- | --- |
+| `gmail_list_folders` | List the folders of the connected Gmail mailbox (read-only). |
+| `gmail_search` | Search the connected Gmail mailbox and answer message UIDs (read-only). A Gmail search query such as is:unread or has:attachment may be given in `query`. |
+| `gmail_list_messages` | List the newest messages of a Gmail folder with sender, date and subject (read-only). |
+| `gmail_get_message` | Read one message of a Gmail folder: headers and its plain text body (read-only). |
+| `gmail_list_attachments` | List the attachments of one message: name, size and type (read-only). |
+| `gmail_read_attachment` | Read the text of one attachment, up to 20000 characters; binary files are named with their type and size only (read-only). |
+
+**+write 档（`write` 开时新增 6 个；每次调用先弹审批卡）**
+
+| 工具 | description 原文 |
+| --- | --- |
+| `gmail_mark_read` | Mark messages in a Gmail folder as read or unread. Every call asks for approval first. |
+| `gmail_label` | Add or remove existing Gmail labels on messages. Every call asks for approval first; labels are never created. |
+| `gmail_archive` | Archive messages: remove them from the inbox and keep them in All Mail. Every call asks for approval first. |
+| `gmail_save_draft` | Save a draft in Gmail without sending it. Every call asks for approval first. |
+| `gmail_move` | Move messages to another Gmail folder. Every call asks for approval first. |
+| `gmail_trash` | Move messages to Gmail's Trash, where they can be restored for 30 days; it never deletes permanently. Every call asks for approval first. |
+
+**+send 档（`send` 开时再新增 4 个；每次调用先弹审批卡，发信不可撤回）**
+
+| 工具 | description 原文 |
+| --- | --- |
+| `gmail_send` | Send an email from the connected Gmail address. Every call asks for approval first; sending cannot be undone. |
+| `gmail_reply` | Reply to one message. `include_quote` adds the original text and is off by default. Every call asks for approval first; sending cannot be undone. |
+| `gmail_forward` | Forward one message to new recipients. Every call asks for approval first; sending cannot be undone. |
+| `gmail_send_draft` | Send a draft that is already in Gmail's Drafts folder. Every call asks for approval first; sending cannot be undone. |
+
+**不注册（本轮任何档位都没有）**：`gmail_save_attachment`（路径策略未定）、永久删除/清空回收站、批量删除、过滤器/自动转发/签名等设置类。
+**审批卡文案**（含 `quote original: yes/no`）见 §2/§3 表格，与 description 分开维护。
+
+## 9. 单测计划（实现时随代码交付）
 
 - 每个写工具：allow → 发出的 IMAP/SMTP 命令正确；deny/cancel/timeout → 0 命令。
 - 批量 >10 拒绝；uid 非整数/注入拒绝；folder/标签名 CRLF 拒绝。
