@@ -158,6 +158,22 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 **不注册（本轮任何档位都没有）**：`gmail_save_attachment`（路径策略未定）、永久删除/清空回收站、批量删除、过滤器/自动转发/签名等设置类。
 **审批卡文案**（含 `quote original: yes/no`）见 §2/§3 表格，与 description 分开维护。
 
+**交付时的机器可读注册表**：代码落地、报 tip 时随 commit 提供 `docs/acceptance/gmail-tools-registry.json`，格式：
+
+```json
+{
+  "switchDefaults": { "write": false, "send": false },
+  "tiers": {
+    "readOnly": [{ "name": "gmail_list_folders", "description": "…" }],
+    "write":    [{ "name": "gmail_mark_read",   "description": "…" }],
+    "send":     [{ "name": "gmail_send",        "description": "…" }]
+  },
+  "unregistered": ["gmail_save_attachment"]
+}
+```
+
+Probe 用它与本节逐字节 diff；**description 任何改动都先改本节规格再改代码**，不一致记黄。
+
 ## 9. 单测计划（实现时随代码交付）
 
 - 每个写工具：allow → 发出的 IMAP/SMTP 命令正确；deny/cancel/timeout → 0 命令。
