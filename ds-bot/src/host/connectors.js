@@ -1,13 +1,12 @@
 // Connectors: outside services every Bot can use. A connector's tools are mounted on the
 // plugin context, so every Bot and Session gets them.
 //
-// GitHub uses DSH's own MCP client and the toolsets GitHub's server offers. A service
-// without a server-side tool filter (Vercel, and the OAuth connectors) goes through
-// `mcp.js` instead: DS Bot opens the session itself and registers only the read tools the
-// connector names, so the write tools are never in a model's context and cannot be called
-// at all.
+// A module that mounts a whole MCP server through DSH's own client (`mode: 'mcp-client'`)
+// keeps the server's own tool filter. The connectors that go through `mcp.js` (Vercel and
+// the OAuth connectors) have DS Bot open the session itself and register only the tools the
+// connector names, so an unlisted tool is never in a model's context and cannot be called.
 //
-// A connector with a saved token (GitHub, Vercel) keeps it in secrets.js; the token
+// A connector with a saved token (Vercel, a module's GitHub, …) keeps it in secrets.js; the token
 // reaches the service only in the MCP request headers, built here in memory, never
 // written to the DSH profile. A new token is shared with no Bot's shell: the tools do not
 // need it there, and a Bot that reads a planted instruction in an issue could send it
@@ -159,7 +158,7 @@ const BUILTIN_CONNECTORS = {
 
 // Connector modules under ./connectors/ register themselves when the plugin loads, so a
 // connector line adds one file and never edits this one. A module that takes a built-in id
-// is a configuration error, refused here rather than silently shadowing GitHub or Vercel.
+// is a configuration error, refused here rather than silently shadowing Vercel or Cloudflare.
 for (const id of Object.keys(externalConnectors)) {
   if (Object.hasOwn(BUILTIN_CONNECTORS, id)) throw new Error(`Connector module "${id}" collides with a built-in connector`)
 }
