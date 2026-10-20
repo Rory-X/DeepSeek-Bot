@@ -355,7 +355,8 @@ test('the level picks the tool surface, and the write tools exist only at write'
 test('an approval line names the branch and never carries the whole SQL', async () => {
   const long = `select * from users where email = '${'a'.repeat(120)}' and note = '${'b'.repeat(120)}'`
   const run = await neonActionApproval('run_sql', { sql: long, branch_id: 'br-1' }, { settings: { roleName: 'app_reader' } })
-  assert.equal(run.danger, false)
+  assert.ok(run.danger !== true)
+  assert.equal(run.reversible, false)
   assert.match(run.line, /app_reader/)
   assert.match(run.line, /br-1/)
   assert.ok(run.line.includes(sqlPreview(long)))
@@ -364,6 +365,7 @@ test('an approval line names the branch and never carries the whole SQL', async 
 
   const removed = await neonActionApproval('delete_branch', { branch_id: 'br-1' }, { settings: { projectId: 'spring-brook-12345678' } })
   assert.equal(removed.danger, true)
+  assert.equal(removed.reversible, false)
   assert.match(removed.line, /br-1/)
   assert.match(removed.line, /deleted and cannot be recovered/)
 
@@ -385,4 +387,17 @@ test('the approval line resolves a branch name through the mounted client', asyn
   assert.match(removed.line, /feature-copy/)
   const broken = await neonActionApproval('delete_branch', { branch_id: 'br-1' }, { client: { callTool: async () => { throw new Error('down') } } })
   assert.match(broken.line, /br-1/)
+})
+
+test('a configured address is the base every level builds its grant on', () => {
+  // A self-hosted or test MCP address replaces the host; the grant parameters are rebuilt
+  // per level, so a configured read-only address must not leak into the write grant.
+  const configured = configure({ url: 'https://mcp.test/mcp?readonly=true&category=querying&projectId=old' })
+  assert.equal(new URL(configured.url).searchParams.get('readonly'), 'true')
+  const read = new URL(neonAuthorize({ level: 'read' }).url)
+  assert.deepEqual([read.origin + read.pathname, read.searchParams.get('readonly'), read.searchParams.getAll('category').length], ['https://mcp.test/mcp', 'true', 5])
+  const write = new URL(neonAuthorize({ level: 'write', settings: { projectId: 'spring-brook-12345678', roleName: 'app_reader' } }).url)
+  assert.deepEqual([write.searchParams.get('readonly'), write.searchParams.get('projectId')], [null, 'spring-brook-12345678'])
+  // Put the real address back for the tests after this one.
+  configure({})
 })
