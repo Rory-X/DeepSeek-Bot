@@ -147,6 +147,8 @@ const ZH = {
   Capabilities: '能力',
   'Unavailable on this host.': '这台主机上不可用。',
   Write: '可写',
+  Destructive: '破坏性',
+  'Capabilities that write open after switching to Can write.': '写能力在切换到 Can write 后才会开放。',
   'Chat found': '已找到会话',
   'Chat id': '会话 ID',
   'Chat id (optional)': '会话 ID（可空）',

@@ -117,13 +117,20 @@ const levelItem = entry => (typeof entry === 'string'
       description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
       write: entry?.write === true || entry?.danger === true || entry?.id === 'write',
     })
-const capabilityItem = (entry, index) => ({
-  key: typeof entry?.key === 'string' ? entry.key : `capability-${index}`,
-  title: typeof entry?.title === 'string' ? entry.title : typeof entry?.name === 'string' ? entry.name : String(entry?.key ?? ''),
-  description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
-  write: entry?.write === true || entry?.danger === true,
-  available: entry?.available !== false,
-})
+const capabilityItem = (entry, index) => {
+  const risk = entry?.risk === 'destructive' || entry?.danger === true
+    ? 'destructive'
+    : entry?.risk === 'write' || entry?.write === true ? 'write' : 'read'
+  return {
+    key: typeof entry?.key === 'string' ? entry.key : `capability-${index}`,
+    title: typeof entry?.title === 'string' ? entry.title : typeof entry?.name === 'string' ? entry.name : String(entry?.key ?? ''),
+    description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
+    // What the write would change, when the module says: drawn under the description.
+    change: typeof entry?.preview?.change === 'string' && entry.preview.change !== '' ? entry.preview.change : null,
+    risk,
+    available: entry?.available !== false,
+  }
+}
 
 function statusText(connector) {
   if (connector.state === 'connecting') return connector.oauth === true ? t('Waiting for the browser…') : t('Connecting…')
@@ -253,6 +260,10 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const levels = Array.isArray(connector.levels) ? connector.levels.filter(entry => entry !== null) : []
   const currentLevel = typeof connector.level === 'string' ? connector.level : null
   const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter(entry => entry !== null && typeof entry === 'object') : []
+  const capWrites = capabilities.some((entry) => {
+    const item = capabilityItem(entry, 0)
+    return item.risk !== 'read'
+  })
   const permissions = typeof connector.permissions?.summary === 'string' && connector.permissions.summary !== '' ? connector.permissions.summary : null
   // The host says why a connector is not ready at its level, and when a level change needs
   // the reader to authorize again.
@@ -355,12 +366,17 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         capabilities.length > 0
           ? h('div', { className: 'bt-connector-setting' },
             h('div', { className: 'bt-connector-action-title' }, t('Capabilities')),
+            capWrites && currentLevel === 'read'
+              ? h('div', { className: 'bt-connector-hint' }, t('Capabilities that write open after switching to Can write.'))
+              : null,
             h('ul', { className: 'bt-connector-caps' }, capabilities.map((entry, index) => {
               const item = capabilityItem(entry, index)
-              const locked = item.available === false || (writesLocked && item.write === true)
-              return h('li', { key: item.key, className: 'bt-connector-cap', 'data-write': item.write || undefined, 'data-locked': locked || undefined },
-                h('span', { className: 'bt-connector-cap-title' }, item.title, item.write ? h('span', { className: 'bt-connector-cap-badge' }, t('Write')) : null),
+              const locked = item.available === false || (writesLocked && item.risk !== 'read')
+              const badge = item.risk === 'destructive' ? t('Destructive') : item.risk === 'write' ? t('Write') : null
+              return h('li', { key: item.key, className: 'bt-connector-cap', 'data-risk': item.risk, 'data-locked': locked || undefined },
+                h('span', { className: 'bt-connector-cap-title' }, item.title, badge !== null ? h('span', { className: 'bt-connector-cap-badge' }, badge) : null),
                 item.description !== null ? h('span', { className: 'bt-connector-cap-note' }, item.description) : null,
+                item.change !== null ? h('span', { className: 'bt-connector-cap-change' }, item.change) : null,
                 locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
             })))
           : null)
