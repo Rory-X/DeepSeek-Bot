@@ -15,6 +15,7 @@
 // An OAuth connector (`mode: 'oauth-mcp'`) has no secret of its own: the user authorizes
 // once in the browser, and the grant lives in DSH's credential store (see oauth/flow.js),
 // outside the team file, the Secrets page and every shell.
+import { blockedToolMatches } from './blocked-tools.js'
 import { buildCloudflareToolIndex, CLOUDFLARE_TOOLBOX_TOOLS, createCloudflareCallTool, createCloudflareSearchTool, isBlockedCloudflareTool } from './cloudflare-toolbox.js'
 import { createApprovalDesk } from './connector-approval.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
@@ -241,10 +242,9 @@ export function install(rt) {
       const name = String(exec?.name ?? '')
       if (name === '') return next()
       for (const entry of blockedNames) {
-        const hit = entry.list.some(item => (item instanceof RegExp
-          ? item.test(name)
-          : name === item || name === `${entry.id}_${item}`))
-        if (hit) return { kind: 'deny', reason: `${entry.connector.displayName} does not run "${name}"; it is not offered to a model.` }
+        if (blockedToolMatches(entry.list, entry.id, name)) {
+          return { kind: 'deny', reason: `${entry.connector.displayName} does not run "${name}"; it is not offered to a model.` }
+        }
       }
       return next()
     })

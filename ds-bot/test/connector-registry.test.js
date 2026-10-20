@@ -51,6 +51,19 @@ test('display-only capability descriptions are kept for the view', async () => {
   }
 })
 
+test('blocked tool names and patterns are kept for the gate', async () => {
+  const { dir, cleanup } = withModules({
+    'shiny.js': `export default { id: 'shiny', displayName: 'Shiny', mode: 'custom', blockedTools: ['delete_repository', /_secret$/] }\n`,
+  })
+  try {
+    const loaded = await loadConnectorModules(dir)
+    assert.deepEqual(loaded.shiny.blockedTools[0], 'delete_repository')
+    assert.ok(loaded.shiny.blockedTools[1] instanceof RegExp)
+  } finally {
+    cleanup()
+  }
+})
+
 test('helpers and tests beside a connector are not loaded', async () => {
   const { dir, cleanup } = withModules({
     '_helper.js': `export default { id: 'hidden', displayName: 'Hidden', mode: 'notify' }\n`,
@@ -80,6 +93,9 @@ test('a broken connector module fails at load with the file name', async () => {
     [`export default { id: 'badcaps', displayName: 'C', mode: 'rest-tools', capabilities: 'all' }\n`, /capabilities must be a list/],
     [`export default { id: 'badrisk', displayName: 'C', mode: 'rest-tools', capabilities: [{ key: 'k', title: 'T', risk: 'maybe' }] }\n`, /risk of read, write, destructive/],
     [`export default { id: 'badperm', displayName: 'C', mode: 'rest-tools', permissions: { summary: '' } }\n`, /permissions need a summary/],
+    [`export default { id: 'badblocked', displayName: 'B', mode: 'custom', blockedTools: 'delete_repository' }\n`, /blockedTools must list tool names/],
+    [`export default { id: 'emptyblocked', displayName: 'B', mode: 'custom', blockedTools: [''] }\n`, /blockedTools must list tool names/],
+    [`export default { id: 'numberblocked', displayName: 'B', mode: 'custom', blockedTools: [42] }\n`, /blockedTools must list tool names/],
     [`export default 42\n`, /must export a connector object/],
     [`export default { id: 'boom', displayName: 'Boom', mode: 'notify', api: foo }\n`, /did not load/],
   ]

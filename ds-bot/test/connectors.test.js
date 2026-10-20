@@ -975,18 +975,21 @@ test('a blocked tool name is denied before a card or a request', async (t) => {
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const gates = ctx.listeners.get('tools/pre-execute') ?? []
   const gateFor = async (name) => {
-    let passed = 0
     for (const gate of gates) {
+      let passed = 0
       const result = await gate({ name, arguments: {} }, () => { passed += 1; return Promise.resolve({ kind: 'allow' }) })
       if (result?.kind === 'deny') return { result, passed }
     }
-    return { passed }
+    return {}
   }
 
+  // The declaring connector's gate denies the bare name and the mounted, prefixed name; it
+  // never calls next, so nothing behind it runs.
   for (const name of ['github_delete_repository', 'delete_repository']) {
     const blocked = await gateFor(name)
     assert.equal(blocked.result?.kind, 'deny', name)
     assert.match(blocked.result.reason, /GitHub does not run/)
+    assert.equal(blocked.passed, 0, name)
   }
   // A normal GitHub tool is not affected, and no approval card was made for either.
   assert.equal((await gateFor('github_list_issues')).result, undefined)
