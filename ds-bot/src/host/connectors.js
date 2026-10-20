@@ -994,9 +994,15 @@ export function install(rt) {
       if (note !== undefined) throw new Error(note)
       return await oauth.start(body.id, { origin: meta.origin, level, settings: settingsOf(body.id) })
     },
-    async 'connector-disconnect'(body) {
+    async 'connector-disconnect'(body, meta) {
       known(body.id)
       const connector = options[body.id]
+      // Who took a connector away, and from where: a connector entry disappearing is the
+      // one change a user may need to trace later. No token or secret is recorded.
+      rt.diagnostics?.record?.({
+        source: 'connector-disconnect',
+        text: `${connector.displayName} (${body.id}) disconnected from ${typeof meta?.origin === 'string' && meta.origin !== '' ? meta.origin : 'an unknown origin'}`,
+      })
       // The settings and the chosen level describe the connector, not the grant: a
       // reconnect should not ask for the project id and role again.
       const kept = (id) => {
