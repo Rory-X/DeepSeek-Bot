@@ -2,6 +2,7 @@
 
 状态：规格待 Marshal/Probe 确认后实施；底座（`_imap-write.js`、`_smtp.js`、能力开关、审批接入）由 Forge 提供。
 范围：**P1 + P2**，凭证走现有应用密码（IMAP 写 + SMTP），零外部依赖。
+Marshal 拍板（2026-10-20）：写能力默认关（卡片开“完整能力”才注册）；`save_attachment` 本轮不做；回复默认不附原文（`include_quote` 默认 false）；标签只打已有标签、不做创建。
 **不做**：P3（永久删除、批量删除、发信带附件）；**永不做**：过滤器/自动转发/签名等设置类（可静默外泄整箱）。
 只读版（第二批）不变。
 
@@ -47,7 +48,7 @@ capabilities: {
 | `gmail_move` | `uids[]`、`folder?`、`target`（目标文件夹） | 10 封/次 | 中-高 | **Move 3 Gmail messages to “Receipts”?** / “They leave the current folder and appear in Receipts. Nothing is permanently deleted.” |
 | `gmail_trash` | `uids[]`、`folder?` | 10 封/次 | 高 | **Move 3 Gmail messages to Trash?** / “They can be restored from Trash for 30 days. This tool never deletes permanently.” |
 | `gmail_send` | `to[]`、`cc?[]`、`bcc?[]`、`subject`、`body` | 1 封/次；收件人合计 ≤20 | 高 | **Send this message as you@gmail.com?** / “To: … Cc: … Subject: … Preview: … This cannot be undone.” |
-| `gmail_reply` | `uid`、`folder?`、`body`、`replyAll?` | 1 封/次；收件人合计 ≤20 | 高 | **Reply to “<subject>”?** / “To: … (reply all: yes/no) Preview: … This cannot be undone.” |
+| `gmail_reply` | `uid`、`folder?`、`body`、`replyAll?`、`include_quote?`（默认 false；true 才在正文末尾附原邮件文本，≤8000 字符） | 1 封/次；收件人合计 ≤20 | 高 | **Reply to “<subject>”?** / “To: … (reply all: yes/no; quote original: yes/no) Preview: … This cannot be undone.” |
 | `gmail_forward` | `uid`、`folder?`、`to[]`、`body?` | 1 封/次；收件人合计 ≤20 | 高 | **Forward “<subject>” to …?** / “This cannot be undone.” |
 | `gmail_send_draft` | `draftUid`（Drafts 里的 uid） | 1 封/次 | 高 | **Send the saved draft “<subject>”?** / “To: … Preview: … This cannot be undone.” |
 
@@ -65,7 +66,7 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
   - 标签/归档：`UID STORE ±X-GM-LABELS`（Gmail 扩展；归档=去掉 `\Inbox`）；
   - 移动/回收站：`UID COPY` 到目标（回收站=`[Gmail]/Trash`）+ `UID EXPUNGE <本次 uid 集合>`（UIDPLUS，只作用于本次 uid）；**禁止裸 `EXPUNGE`**——它会顺手永久删掉同文件夹里其它已标 `\Deleted` 的邮件。验收会预置一封无关 `\Deleted` 邮件，证明它活着；
   - 草稿：`APPEND "[Gmail]/Drafts" (...)`（需要 literal 与 continuation 支持）。
-- **SMTP**：`smtp.gmail.com:465`（TLS），AUTH 用应用密码；From = `GMAIL_ADDRESS`；回复带 `In-Reply-To` / `References`，主题已以 `Re:` 开头就不再叠加；纯文本正文（HTML 可选，v1 不做）；SMTP 只走 envelope 收件人（不把 Bcc 写进可见 header）；发送失败**不自动重试**，部分收件人被拒时如实报告。
+- **SMTP**：`smtp.gmail.com:465`（TLS），AUTH 用应用密码；From = `GMAIL_ADDRESS`；回复带 `In-Reply-To` / `References`，主题已以 `Re:` 开头就不再叠加；**回复默认不附原文**（`include_quote: true` 才附，≤8000 字符），审批卡显示“是否引用原文”；纯文本正文（HTML 可选，v1 不做）；SMTP 只走 envelope 收件人（不把 Bcc 写进可见 header）；发送失败**不自动重试**，部分收件人被拒时如实报告。
 - **凭证**：沿用 `GMAIL_ADDRESS` + `GMAIL_APP_PASSWORD` 两字段；写能力不需要新凭证。应用密码=整箱权限，写能力只是把“能发/能改”真正用起来，风险提示沿用只读版文档。
 
 ## 5. 依赖 Forge 的底座改动（与 Marshal 已转清单对齐）
@@ -109,6 +110,7 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 11. **只读面 4 → 6 是变更**：第三批 read-only 白名单为 6 个工具，第二批 4 工具的签收作废、以第三批重新签收为准。
 12. **附件提取 0 出站**：`read_attachment` 只解析已下载的有限字节；HTML 不加载远程图片/链接，不发起任何网络请求。
 13. **弹卡前只读最小字段**：`reply`/`forward` 构造卡片只取 From/To/Subject/Message-ID，不整封下载，内容不进 state/diagnostics。
+14. **回复默认不附原文**（Marshal 拍板）：`gmail_reply.include_quote` 默认 `false`，为 `true` 时正文末尾附原邮件文本（≤8000 字符）；审批卡显示“quote original: yes/no”。
 
 ## 8. 单测计划（实现时随代码交付）
 
