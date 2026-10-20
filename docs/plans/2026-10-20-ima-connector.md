@@ -80,8 +80,8 @@
 - 读级 10 个工具：原 9 个 + `ima_list_addable_kb`（`get_addable_knowledge_base_list`，只读、常驻、不弹卡）。
 - 写级再挂 4 个：`ima_create_note` / `ima_append_note` / `ima_add_note_to_kb` / `ima_import_url`，声明在 `IMA_WRITE_TOOLS`（`write: true` + `approval`），P2 到来前**未进 `restTools`**，所以现在一个写工具也注册不了。
 - 审批行统一带「This cannot be undone through the API.」，`reversible: false`、`change`/`target` 按语义给（note_id / kb_id / URL 数量）；框架 redact + 截 200 字。
-- URL 前置校验：`assertImportUrls()` 在弹卡与发请求之前拒绝 `file://`、非 http(s)、B 站 / YouTube / b23.tv、`localhost` / `.local` / 环回 / 私网 / 链路本地地址；规则在 `IMA_URL_RULES` 可逐条断言。
-- 兜底挂载 `createImaWriteTools({ level, secrets, approve })`：read 级返回空，write 级返回 4 个工具；复用共享口径（只发映射字段、20 s 超时、双 header、先审批后发送、拒绝零请求），等 P2 核心收敛后改接 `restTools`。
+- URL 前置校验：`assertImportUrls()` 在 `import_url` 的 approval 钩子里执行，于弹卡与发请求之前拒绝 `file://`、非 http(s)、B 站 / YouTube / b23.tv、`localhost` / `.local` / 环回 / 私网 / 链路本地地址；规则在 `IMA_URL_RULES` 可逐条断言。
+- 写工具已并进共享 `restTools`（`write: true` + `approval`），P2 核心 `b5fafb0` 起由适配器按级别构建：read 级 10 个、write 级 14 个；每次写先弹审批卡，拒绝/超时/取消零请求。
 - `levels: ['read','write']`、`defaultLevel: 'read'`、`IMA_CAPABILITIES` / `IMA_PERMISSIONS`、notes/knowledge-base 两套错误码均已声明。
 
 范围（按审批卡逐次确认）：

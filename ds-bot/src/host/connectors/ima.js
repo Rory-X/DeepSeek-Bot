@@ -293,10 +293,8 @@ export const IMA_REST_TOOLS = [
 // the rest to connectors.js. ima has no MCP server, so it mounts through the REST adapter:
 // `credentials` asks the card for both secrets, `auth` builds both headers, `envelope`
 // unwraps code/msg/data, and `verify` proves the pair without reading user content.
-// Third batch: the four write calls, declared against the connector write contract. They
-// stay out of `restTools` until the shared adapter accepts `write: true` (it refuses every
-// POST that is not `readOnly`), so the shipped read surface registers no write tool. When
-// the contract lands these join `restTools` as one list.
+// Third batch: the four write calls. The shared adapter builds them only at the write level
+// and asks on the approval card before each call; the read level never sees them.
 // ima cannot take these even over HTTP (its own docs exclude Bilibili, YouTube and file://),
 // and a private or loopback address would make ima fetch something inside the network, so the
 // checks run before the approval card and before any request.
@@ -458,7 +456,11 @@ export const IMA_WRITE_TOOLS = [
     write: true,
     path: '/openapi/wiki/v1/import_urls',
     body: { knowledge_base_id: 'knowledge_base_id', folder_id: 'folder_id', urls: 'urls' },
-    approval: args => approvalFor('import_url', args),
+    approval: (args) => {
+      // Refused before the card is drawn and before anything leaves the host.
+      assertImportUrls(args?.urls)
+      return approvalFor('import_url', args)
+    },
     parameters: {
       type: 'object',
       properties: {
@@ -470,89 +472,6 @@ export const IMA_WRITE_TOOLS = [
     },
   },
 ]
-
-const scalar = value => ['string', 'number', 'boolean'].includes(typeof value)
-const scalarList = value => Array.isArray(value) && value.every(scalar)
-
-// Only the declaration's own fields go into a write body; a dotted one nests. An argument
-// the declaration does not name never reaches the request.
-export function buildWriteBody(definition, args = {}) {
-  const body = {}
-  const setPath = (field, value) => {
-    const parts = field.split('.')
-    let node = body
-    for (const part of parts.slice(0, -1)) node = node[part] ??= {}
-    node[parts.at(-1)] = value
-  }
-  for (const [field, mapping] of Object.entries(definition.body ?? {})) {
-    if (mapping !== null && typeof mapping === 'object') {
-      setPath(field, mapping.const)
-      continue
-    }
-    const value = args?.[mapping]
-    if (value === undefined || value === null) continue
-    if (!scalar(value) && !scalarList(value)) throw new Error(`"${mapping}" must be text, a number, a boolean or a list of those.`)
-    setPath(field, value)
-  }
-  return body
-}
-
-// Write tools for a custom mount: `mount({ level, secrets, approve })` calls this, and a
-// read level gets none. This is the fallback path while the shared REST adapter has no
-// write support; it keeps the adapter's rules (mapped body only, 20 s timeout, both
-// headers, every call approved first, nothing sent on refusal).
-export function createImaWriteTools({ level = 'read', secrets = {}, approve, output, redact = text => String(text), fetch: request = fetch } = {}) {
-  if (level !== 'write') return []
-  return IMA_WRITE_TOOLS.map((definition) => ({
-    name: `${IMA_TOOL_PREFIX}_${definition.name}`,
-    description: definition.description,
-    parameters: definition.parameters,
-    output,
-    async execute(args = {}, exec) {
-      let body
-      try {
-        validateWriteArgs(definition.name, args)
-        body = buildWriteBody(definition, args)
-      } catch (error) {
-        throw new Error(redact(String(error?.message ?? error)).slice(0, 300))
-      }
-      if (typeof definition.approval === 'function' && typeof approve === 'function') {
-        const summary = definition.approval(args)
-        await approve({
-          tool: definition.name,
-          line: summary.line,
-          danger: summary.danger,
-          change: summary.change,
-          reversible: summary.reversible,
-          target: summary.target,
-          exec,
-        })
-      }
-      let response
-      try {
-        response = await request(`${IMA_BASE}${definition.path}`, {
-          method: 'POST',
-          headers: { accept: 'application/json', 'content-type': 'application/json', ...auth({ secrets }) },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(TIMEOUT_MS),
-        })
-      } catch (error) {
-        if (error?.name === 'TimeoutError') throw new Error('ima did not answer in time')
-        throw new Error('Could not reach ima')
-      }
-      if (response.status === 401) throw new Error('ima did not accept this client id or API key')
-      if (response.status === 429) throw new Error('ima is rate limiting this key; try again later')
-      if (!response.ok) throw new Error(`ima answered ${response.status}`)
-      let parsed
-      try {
-        parsed = JSON.parse(await response.text())
-      } catch {
-        throw new Error('ima answered something this connector cannot read.')
-      }
-      return imaAnswer({ body: parsed, status: response.status })
-    },
-  }))
-}
 
 // Display only: the client draws this list and the one permission sentence. It never
 // registers a tool; the mounted tools are still `restTools`.
@@ -578,7 +497,7 @@ export const connector = {
   defaultLevel: 'read',
   credentials: IMA_CREDENTIALS,
   auth,
-  restTools: IMA_REST_TOOLS,
+  restTools: [...IMA_REST_TOOLS, ...IMA_WRITE_TOOLS],
   answer: imaAnswer,
   verify: verifyIma,
   // The card reads its copy from `card` only (see the client's cardText): glyph, about,
