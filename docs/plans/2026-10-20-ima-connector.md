@@ -48,12 +48,29 @@
 ## 证据（2026-10-20）
 
 - 单测：`node --test test/ima.test.js` → 14 tests / 14 pass / 0 fail；覆盖成功、401、超时、断网、业务码、半填凭据、非信封回包、写入端点缺席、body 只发映射字段，以及「声明 → 冻结底座适配器」的 9 个工具挂载、逐条请求与错误映射。
-- 底座上（`094ea60`）：861 tests / 861 pass / 0 fail，约 215 s；此时 14 条 ima 单测全跑，含「声明 → 适配器」集成断言。
-- 现网主线 `26c61ae`（Bot 文件夹版，不含连接器底座）：928 tests / 923 pass / 0 fail / 5 skipped，约 270 s；`build-client --check` 通过；`lint` 0 error（12 条 warning 全是既有文件）。跳过的 5 条里有 3 条是 ima 的适配器集成断言——主线还没有 `rest-tools.js`，声明本身仍是可加载的独立模块，等底座 rebase 到新主线后这些断言自动恢复执行。
+- 最终现网底座 `d51b7d8`（第一批已上线，含 rest-tools / 多字段凭据 / 卡片）：981 tests / 979 pass / 0 fail / 2 skipped，约 228 s；`build-client --check` 通过；`lint` 0 error（13 条 warning 全是既有文件）。14 条 ima 单测全跑（含适配器集成断言），registry 同时加载 `ima` 与 `neon`。
+- 卡片客户端在 `d51b7d8` 上已支持多字段 `inputs`，且 `account` 为 null 时只显示 `Connected`（不再出现 "Connected as …"）。
 - 门槛：`node scripts/build-client.mjs --check` 通过；`npm run lint` 0 error（14 条 warning 全是既有客户端文件，不在本次改动内）。
 - 适配器集成（冻结点 `integ/connector-base-next` @ `100f603`）：9 个工具注册为 `ima_*`，逐条断言 host 只有 `ima.qq.com`、`POST`、两个 header + `ima-openapi-ctx`、body 只含映射字段（含 `query_info` 嵌套与 `target_content_format: 0` 常量）、`code=0` 解包、`20004/20002` 映射为工具错误。
 - UI 证据（Prism 的卡片线 `feat/connector-cards`，宿主 mock，非真实库）：`shots/cards/ima-01-two-fields-{390,1280}.png`（Client ID / API key 两个 masked 输入、各自 label、只读说明）、`ima-02-ready-{390,1280}.png`（Connected，无 actions / toolbox）。md5：390 两图 `02ff12e5…` / `dbf4a6c5…`，1280 两图 `497cd039…` / `a7b654f8…`。
 - 未做：真实 clientid/apikey 联调，以及「真实库一次工具调用」的截图（`ima_search_kb_list` 空结果）——要等底座 + 卡片合入、用户在卡片里填入 key 后才能拍，不截真实笔记内容。
+
+## 后续：写能力盘点（只报清单，未排期）
+
+官方 skill 包 1.1.10 共 17 个端点，除 `check_skill_update` 与 9 个只读调用外，全部可写端点如下。凭证是同一对 clientid/apikey，**没有只读 key 也没有 scope，写权限已经包含在凭证里**，所以「凭据够不够」一列都是「够」，不需要用户额外 OAuth 授权；真正的门是每次调用的审批卡，以及写操作**不可撤回**（没有任何 delete / update 端点）。
+
+| 能力 | 端点 | 风险 | 凭据够 | 额外授权 | 优先级 |
+| --- | --- | --- | --- | --- | --- |
+| 新建笔记（仅 Markdown） | `note/v1/import_doc` | 中：创建内容，无法通过 API 撤回 | 够 | 无 | P0 |
+| 追加到已有笔记 | `note/v1/append_doc` | 中高：污染已有正文，无回滚；单篇有大小上限（100009） | 够 | 无 | P1 |
+| 笔记入库 | `wiki/v1/add_knowledge`（`media_type=11`） | 中：内容进入知识库可见范围 | 够 | 无 | P2（依赖 P0 或已有 note_id） |
+| 导入网页/公众号文章 | `wiki/v1/import_urls` | 中：服务端抓取外部 URL；`folder_id` 必填，根目录传 kb id | 够 | 无（URL 来源由用户给） | P2 |
+| 上传文件到知识库 | `wiki/v1/create_media` → COS 直传 → `wiki/v1/add_knowledge` | 高：读本地文件、出站到 `*.myqcloud.com`、临时 COS 凭据、类型/大小校验、不可撤回 | 够 | **需要**：本地文件读取 + COS 出站域名的显式同意（审批卡写清） | P3（工作量最大） |
+| 写前选择目标库 | `wiki/v1/get_addable_knowledge_base_list` | 低（只读） | 够 | 无 | P1（配合写工具） |
+| 写前重名检查 | `wiki/v1/check_repeated_names` | 低（只读） | 够 | 无 | P3（随文件上传） |
+| 更新笔记正文 / 删除笔记 / 删除或移动知识库条目 / 重命名 / 删除知识库 / 分享权限 | — | 官方 1.1.10 **没有这些端点** | — | — | 不做，只能引导用户去 ima 客户端 |
+
+写能力接入时的额外注意：① 错误码有两套（notes `SKILL.md` 用 `1000xx`/`310001`，`references/api.md` 用 `2100xx`），envelope 映射要把两套都补上；② 审批卡要展示目标（kb 名称/note 标题）、内容摘要与长度、URL 或文件名；③ 文件上传的 COS 临时凭证只留在宿主内存，不下发模型或 shell；④ 每次写调用单独获批，拒绝/超时一律不发送。
 
 ## 变更
 
