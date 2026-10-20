@@ -195,15 +195,27 @@ allow-list, with evidence why.
 
 ```js
 { name, description, method: 'POST', write: true,
-  path, body: { field: 'argumentName', other: { const: value } },
-  approval(args) { return { line, danger } },     // optional; default names method and path
+  path, body: { field: 'argumentName', other: { const: value },
+                list: { items: { field: 'argumentName' | { const: value } } } },
+  approval(args) { return { line, danger, change, reversible, target } },  // optional, async allowed
   parameters }
 ```
 
 Validation at build time: a POST must declare exactly one of `readOnly: true` or
-`write: true`, and both need an explicit `body` mapping. Only level `write` registers the
-write tools; every execute asks first and sends nothing unless allowed. The body and header
-rules of read-only POST do not change.
+`write: true`, and both need an explicit `body` mapping. A body field may be a **list of
+objects** when it names its element schema (`items`): every element is built from the
+declared sub-fields only, so an argument the definition does not name never reaches the
+request, and a list that does not fit the schema is refused before the call. Only level
+`write` registers the write tools; every execute asks first and sends nothing unless
+allowed. The body and header rules of read-only POST do not change.
+
+`approval(args, { read })` may be async: a connector that wants to name the target on the
+card (ima's note title, WeRead's shelf name) can read it first and return the real name;
+the framework waits at most three seconds and falls back to the method and path. `read` runs
+one **read-only** tool of the same connector (never a write tool) and returns its text, so
+resolving a name cannot change anything; it answers undefined when the connector has no
+such read tool. The card's fields match `actionApproval` (`line`, `danger`, `change`,
+`reversible`, `target`).
 
 ### toolboxes
 
