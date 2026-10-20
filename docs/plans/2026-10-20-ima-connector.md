@@ -52,7 +52,8 @@
 - 现网主线 `26c61ae`（Bot 文件夹版，不含连接器底座）：928 tests / 923 pass / 0 fail / 5 skipped，约 270 s；`build-client --check` 通过；`lint` 0 error（12 条 warning 全是既有文件）。跳过的 5 条里有 3 条是 ima 的适配器集成断言——主线还没有 `rest-tools.js`，声明本身仍是可加载的独立模块，等底座 rebase 到新主线后这些断言自动恢复执行。
 - 门槛：`node scripts/build-client.mjs --check` 通过；`npm run lint` 0 error（14 条 warning 全是既有客户端文件，不在本次改动内）。
 - 适配器集成（冻结点 `integ/connector-base-next` @ `100f603`）：9 个工具注册为 `ima_*`，逐条断言 host 只有 `ima.qq.com`、`POST`、两个 header + `ima-openapi-ctx`、body 只含映射字段（含 `query_info` 嵌套与 `target_content_format: 0` 常量）、`code=0` 解包、`20004/20002` 映射为工具错误。
-- 未做：真实 clientid/apikey 联调；UI 截图要等 `integ/connector-base` + 卡片渲染落地，计划两屏：连接器页 ima 卡片未连接态（390 / 1280 各一张）、连接后一次 `ima_search_kb_list` 空结果调用（不截真实笔记内容）。
+- UI 证据（Prism 的卡片线 `feat/connector-cards`，宿主 mock，非真实库）：`shots/cards/ima-01-two-fields-{390,1280}.png`（Client ID / API key 两个 masked 输入、各自 label、只读说明）、`ima-02-ready-{390,1280}.png`（Connected，无 actions / toolbox）。md5：390 两图 `02ff12e5…` / `dbf4a6c5…`，1280 两图 `497cd039…` / `a7b654f8…`。
+- 未做：真实 clientid/apikey 联调，以及「真实库一次工具调用」的截图（`ima_search_kb_list` 空结果）——要等底座 + 卡片合入、用户在卡片里填入 key 后才能拍，不截真实笔记内容。
 
 ## 变更
 
