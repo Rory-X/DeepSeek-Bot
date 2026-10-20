@@ -98,6 +98,18 @@ test('a configured Neon address cannot turn read-only off', () => {
   assert.deepEqual([forced.mode, forced.readTools, forced.oauth.scopes], ['oauth-mcp', neon.readTools, ['read']])
 })
 
+test('the framework merge of a profile override keeps the read-only grant', () => {
+  // What connectors.js does: merge the definition and the override, then merge configure()'s
+  // answer over both, and mount from that.
+  const override = { url: 'https://mcp.neon.tech/mcp?readonly=false&projectId=proj-9' }
+  const merged = { ...neon, ...override, url: override.url, ...configure(override) }
+  const url = new URL(merged.url)
+  assert.deepEqual([url.searchParams.get('readonly'), url.searchParams.get('projectId')], ['true', 'proj-9'])
+  assert.deepEqual(merged.readTools, neon.readTools)
+  assert.deepEqual(merged.oauth.scopes, ['read'])
+  assert.equal(merged.mode, 'oauth-mcp')
+})
+
 test('a Neon mount can register only the read whitelist, and run_sql answers', async () => {
   const server = neonServer()
   const client = new McpHttpClient(ADDRESS, 'access-1', { fetch: server.fetch })
