@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { test } from 'node:test'
 import { decodeMailboxName, decodeWords, extractText, parseCredential, parseHeaders, searchCriteria } from '../src/host/connectors/_imap.js'
-import qqmail, { QQMAIL_TOOLS, createQQMailTools, signInQQMail } from '../src/host/connectors/qqmail.js'
+import qqmail, { QQMAIL_TOOLS, createQQMailTools, createQQMailWriteTools, signInQQMail } from '../src/host/connectors/qqmail.js'
 
 const CRLF = '\r\n'
 const HEADER_FIELDS = 'FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO CONTENT-TYPE CONTENT-TRANSFER-ENCODING'
@@ -63,6 +63,9 @@ function imapServer({ greeting, exists = 3, onLine } = {}) {
       if (/^A\d+ LOGIN /.test(line)) return ok(socket, line, '[CAPABILITY IMAP4rev1 ID] LOGIN completed')
       if (/^A\d+ ID /.test(line)) return bad(socket, line, 'Unknown command')
       if (/^A\d+ EXAMINE /.test(line)) return socket.send(`* ${exists} EXISTS\r\n${tagOf(line)} OK [READ-ONLY] EXAMINE completed\r\n`)
+      if (/^A\d+ SELECT /.test(line)) return socket.send(`* ${exists} EXISTS\r\n${tagOf(line)} OK [READ-WRITE] SELECT completed\r\n`)
+      if (/^A\d+ CAPABILITY/.test(line)) return socket.send(`* CAPABILITY IMAP4rev1${CRLF}${tagOf(line)} OK CAPABILITY completed${CRLF}`)
+      if (/^A\d+ UID STORE /.test(line)) return socket.send(`${tagOf(line)} OK STORE completed${CRLF}`)
       if (/^A\d+ LIST /.test(line)) return socket.send(`* LIST (\\HasNoChildren) "/" "INBOX"\r\n${tagOf(line)} OK LIST completed\r\n`)
       if (/^A\d+ UID SEARCH /.test(line)) return socket.send(`* SEARCH\r\n${tagOf(line)} OK SEARCH completed\r\n`)
       if (/^A\d+ UID FETCH /.test(line)) return socket.send(`${tagOf(line)} OK FETCH completed\r\n`)
@@ -97,11 +100,26 @@ test('the connector is one read-only IMAP module the registry can load', async (
   await assert.rejects(qqmail.verify({ values: { QQMAIL_ADDRESS: 'user@qq.com' } }), /authorization code is missing/)
   assert.throws(() => qqmail.mount({ secrets: { QQMAIL_AUTH_CODE: 'abcdefghijklmnop' }, redact: String }), /joined by a colon/)
   // Mounting is lazy: it answers the four tools without opening a connection.
-  const mounted = qqmail.mount({ secrets: { QQMAIL_ADDRESS: 'user@qq.com', QQMAIL_AUTH_CODE: 'abcdefghijklmnop' }, redact: String })
+  const secrets = { QQMAIL_ADDRESS: 'user@qq.com', QQMAIL_AUTH_CODE: 'abcdefghijklmnop' }
+  const mounted = qqmail.mount({ secrets, redact: String })
   assert.equal(mounted.mailbox, 'user@qq.com')
   assert.deepEqual(mounted.tools.map(tool => tool.name), QQMAIL_TOOLS)
   await mounted.close()
   assert.deepEqual(QQMAIL_TOOLS, ['qqmail_list_folders', 'qqmail_search', 'qqmail_list_messages', 'qqmail_get_message'])
+  // Write tools are opt-in: the module declares both levels and the IMAP write capability.
+  assert.deepEqual(qqmail.levels, ['read', 'write'])
+  assert.equal(qqmail.defaultLevel, 'read')
+  assert.deepEqual(qqmail.imap, { write: true })
+  assert.ok(qqmail.capabilities.some(capability => capability.risk === 'write'))
+  assert.equal(typeof qqmail.permissions.summary, 'string')
+  // At read level, or at write level without the framework's approve hook, only read tools.
+  assert.deepEqual(qqmail.mount({ secrets, redact: String, level: 'read' }).tools.map(tool => tool.name), QQMAIL_TOOLS)
+  const guarded = qqmail.mount({ secrets, redact: String, level: 'write' })
+  assert.deepEqual(guarded.tools.map(tool => tool.name), QQMAIL_TOOLS)
+  await guarded.close()
+  const writable = qqmail.mount({ secrets, redact: String, level: 'write', approve: async () => {} })
+  assert.deepEqual(writable.tools.map(tool => tool.name), [...QQMAIL_TOOLS, 'qqmail_mark_read', 'qqmail_mark_unread', 'qqmail_move_messages', 'qqmail_delete_messages', 'qqmail_save_draft'])
+  await writable.close()
 })
 
 test('the framework registry loads the module and maps the card onto its two credentials', async (t) => {
@@ -125,6 +143,28 @@ test('the framework registry loads the module and maps the card onto its two cre
   assert.throws(() => connectValues(loaded, { token: 'user@qq.com:abcdefghijklmnop' }), /Paste QQ Mail address first/)
   assert.throws(() => connectValues(loaded, { values: { QQMAIL_ADDRESS: 'user@qq.com' } }), /Paste Authorization code first/)
   assert.throws(() => connectValues(loaded, {}), /Paste/)
+})
+
+test('a write tool asks the framework first and then changes the mailbox', async () => {
+  const server = imapServer()
+  let asked
+  const write = createQQMailWriteTools({
+    secrets: { QQMAIL_ADDRESS: 'user@qq.com', QQMAIL_AUTH_CODE: 'abcdefghijklmnop' },
+    approve: async (request) => { asked = request },
+    connect: server.connect,
+    timeoutMs: 2_000,
+  })
+  const exec = { agent: { id: 'm1' } }
+  const text = await write.find(tool => tool.name === 'qqmail_mark_read').execute({ uids: [5] }, exec)
+  assert.equal(text, 'Marked 1 message(s) in "INBOX" as read.')
+  assert.equal(asked.tool, 'qqmail_mark_read')
+  // The framework aims the card at the Session that asked, so exec travels with the ask.
+  assert.equal(asked.exec, exec)
+  assert.match(asked.line, /Mark 1 message\(s\) in "INBOX" as read \(UID 5\)/)
+  assert.deepEqual(server.commands.map(plain).filter(line => /^(SELECT|UID STORE)/.test(line)), [
+    'SELECT "INBOX"',
+    'UID STORE 5 +FLAGS.SILENT (\\Seen)',
+  ])
 })
 
 test('a credential is address:code, and a bad one never echoes the code', () => {

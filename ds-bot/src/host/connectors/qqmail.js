@@ -8,7 +8,7 @@
 // tool definitions come from `_imap.js` beside it (the registry skips underscore files).
 // `mode: 'imap'` is the framework's non-HTTP mail mode: the card asks for the address and
 // the code, `verify` checks them once when they are saved, and `mount` answers the tools.
-import { createImapTools, signInImap } from './_imap.js'
+import { createImapTools, createImapWriteTools, signInImap } from './_imap.js'
 
 export const QQMAIL_ID = 'qqmail'
 export const QQMAIL_HOST = 'imap.qq.com'
@@ -21,6 +21,23 @@ export const QQMAIL_TOOLS = ['qqmail_list_folders', 'qqmail_search', 'qqmail_lis
 // itself never leaves the DSH credential store; the team file keeps only the address.
 export function signInQQMail(credential, options = {}) {
   return signInImap(credential, { host: QQMAIL_HOST, ...options })
+}
+
+// The write tools live behind the connector's own access level and its approval card: the
+// framework mounts them only at level 'write' and only when it hands in its approve hook.
+export function createQQMailWriteTools({ secrets, approve, redact, connect, timeoutMs, connectTimeoutMs } = {}) {
+  return createImapWriteTools({
+    id: QQMAIL_ID,
+    displayName: 'QQ Mail',
+    host: QQMAIL_HOST,
+    credential: secrets?.[QQMAIL_SECRET],
+    account: { mailbox: secrets?.[QQMAIL_ADDRESS_SECRET] },
+    approve,
+    redact,
+    connect,
+    timeoutMs,
+    connectTimeoutMs,
+  })
 }
 
 export function createQQMailTools({ credential, account, redact, connect, timeoutMs, connectTimeoutMs } = {}) {
@@ -49,6 +66,17 @@ export default {
   ],
   accountField: 'account',
   readOnly: true,
+  // The user picks the level; writing is never on by default and every write asks first.
+  levels: ['read', 'write'],
+  defaultLevel: 'read',
+  imap: { write: true },
+  capabilities: [
+    { key: 'read', title: 'Read mail', description: 'List folders, search mail and read a message without marking it.', risk: 'read' },
+    { key: 'mark_read', title: 'Mark read or unread', description: 'Change the read state of messages.', risk: 'write' },
+    { key: 'move_delete', title: 'Move or delete messages', description: 'Move messages between folders or to Trash.', risk: 'write' },
+    { key: 'save_draft', title: 'Save a draft', description: 'Write a draft in the Drafts folder; nothing is sent.', risk: 'write' },
+  ],
+  permissions: { summary: 'IMAP read and write with the mailbox authorization code; sending mail is not part of this connector.' },
   // The settings card reads its copy from `card`, not from top-level fields: the mark, the
   // one-line about, the read-only note and the help link all live here together.
   card: {
@@ -66,10 +94,18 @@ export default {
     return { account: mailbox }
   },
   // The mount is lazy: the tools open (and reopen) the connection on their first call, so a
-  // plugin start does not log in to every mailbox before it is used.
-  mount: ({ secrets, redact }) => createQQMailTools({
-    credential: secrets[QQMAIL_SECRET],
-    account: { mailbox: secrets[QQMAIL_ADDRESS_SECRET] },
-    redact,
-  }),
+  // plugin start does not log in to every mailbox before it is used. Write tools are added
+  // only at level 'write' and only when the framework handed in its approve hook: without
+  // one, the connector still mounts read-only rather than exposing an unapproved write.
+  mount: ({ secrets, redact, state, level, approve }) => {
+    const read = createQQMailTools({
+      credential: secrets[QQMAIL_SECRET],
+      account: { mailbox: secrets[QQMAIL_ADDRESS_SECRET] },
+      redact,
+    })
+    const writeLevel = (level ?? state?.level ?? 'read') === 'write'
+    if (!writeLevel || typeof approve !== 'function') return { mailbox: read.mailbox, tools: read.tools, close: read.close }
+    const write = createQQMailWriteTools({ secrets, approve, redact })
+    return { mailbox: read.mailbox, tools: [...read.tools, ...write], close: read.close }
+  },
 }
