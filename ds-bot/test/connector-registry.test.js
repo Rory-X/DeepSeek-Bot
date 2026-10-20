@@ -38,6 +38,19 @@ test('this plugin ships no external connector modules yet', () => {
   assert.deepEqual(CONNECTOR_MODES, ['mcp-client', 'read-tools', 'oauth-mcp', 'notify', 'rest-tools', 'imap', 'imap-read', 'custom'])
 })
 
+test('display-only capability descriptions are kept for the view', async () => {
+  const { dir, cleanup } = withModules({
+    'shiny.js': `export default { id: 'shiny', displayName: 'Shiny', mode: 'custom', capabilities: [{ key: 'deploy', title: 'Deploy', description: 'Ship a build', risk: 'write', preview: { target: 'project', change: 'a deployment', reversible: true } }], permissions: { summary: 'Read a project and ship a build.', scopes: ['read', 'write'] } }\n`,
+  })
+  try {
+    const loaded = await loadConnectorModules(dir)
+    assert.equal(loaded.shiny.capabilities[0].risk, 'write')
+    assert.deepEqual(loaded.shiny.permissions.scopes, ['read', 'write'])
+  } finally {
+    cleanup()
+  }
+})
+
 test('helpers and tests beside a connector are not loaded', async () => {
   const { dir, cleanup } = withModules({
     '_helper.js': `export default { id: 'hidden', displayName: 'Hidden', mode: 'notify' }\n`,
@@ -64,6 +77,9 @@ test('a broken connector module fails at load with the file name', async () => {
     [`export default { id: 'baddefault', displayName: 'L', mode: 'rest-tools', levels: ['read'], defaultLevel: 'write' }\n`, /defaultLevel/],
     [`export default { id: 'badhook', displayName: 'L', mode: 'rest-tools', authorize: 'nope' }\n`, /needs authorize to be a function/],
     [`export default { id: 'badsettings', displayName: 'L', mode: 'rest-tools', settings: [{ label: 'x' }] }\n`, /settings must list fields with a name/],
+    [`export default { id: 'badcaps', displayName: 'C', mode: 'rest-tools', capabilities: 'all' }\n`, /capabilities must be a list/],
+    [`export default { id: 'badrisk', displayName: 'C', mode: 'rest-tools', capabilities: [{ key: 'k', title: 'T', risk: 'maybe' }] }\n`, /risk of read, write, destructive/],
+    [`export default { id: 'badperm', displayName: 'C', mode: 'rest-tools', permissions: { summary: '' } }\n`, /permissions need a summary/],
     [`export default 42\n`, /must export a connector object/],
     [`export default { id: 'boom', displayName: 'Boom', mode: 'notify', api: foo }\n`, /did not load/],
   ]

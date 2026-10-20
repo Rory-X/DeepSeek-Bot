@@ -38,7 +38,9 @@ export default {
   readiness({ level, settings }) { /* undefined when ready, else the reason the row is off */ },
   authorize({ level, settings }) { return { url, scopes } },  // OAuth only; without it the old url/scopes apply
   toolsOf({ level, settings }) { return { readTools, actionTools } },  // replaces the static lists when present
-  actionApproval(name, args, { client }) { return { line, danger } },    // async allowed
+  actionApproval(name, args, { client }) { return { line, danger, change, reversible, target } },  // async allowed
+  capabilities: [{ key, title, description, risk: 'read' | 'write' | 'destructive', preview? }],
+  permissions: { summary, scopes? },
   configure(override) { /* may return { unavailable: 'reason' } */ },
 }
 ```
@@ -58,7 +60,17 @@ export default {
 - `actionApproval` makes the card's one line from the call's arguments. It may be async and
   receives the mounted client for a read-tools connector, so a hook can resolve a branch
   name through a read call. It must return within three seconds; a throw or a timeout
-  falls back to the framework's default line.
+  falls back to the framework's default line. Besides `line` and `danger` it may return
+  `change` (what this call changes), `reversible` (false means the client asks for the
+  "I know this cannot be undone" checkbox before Allow) and `target` (the object it acts
+  on). The framework writes `target`, `change` and `reversible` onto the approval question,
+  so a client can render a preview block without parsing the line.
+- `capabilities` and `permissions` are **display only**: the client draws an operation list
+  grouped by risk and one permission sentence, and hides a block whose fields are missing.
+  They never register a tool. The real capability remains the mounted tool list
+  (`readTools`/`actionTools`/`restTools`/the vendor toolbox). `capabilities[].preview` may
+  carry `{ target, change, reversible }` as a default example; the per-call values come
+  from `actionApproval`.
 
 ### Neon example (module side)
 
@@ -126,6 +138,13 @@ The view row adds:
 - `settings`: `[{ name, label, value? }]` — current normalized values, never a secret;
 - `levelNote`: the reason the row is off when `readiness` gave one;
 - `needsReauth: true` when the stored grant cannot be classified (see above).
+
+`toolbox` stays a separate field from `level`: the level is the authorization boundary
+(a change re-authorizes), the toolbox is the vendor catalog mounted **inside** a write
+grant. It is derived (`toolbox: level === 'write' && connector.toolbox === true`) and is a
+capability flag, not a second switch to toggle. There is no `pendingLevel`: the client
+preselects the new level locally, calls `connector-set-level`, and renders whatever level
+the view returns after the call.
 
 The old `actions` / `toolbox` fields stay for one release as **derived** values
 (`actions: level === 'write'`, `toolbox: level === 'write' && connector.toolbox`) so a
