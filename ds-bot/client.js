@@ -3394,6 +3394,19 @@ ${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"],${NOT_DESKTOP} bod
 .bt-nav-body{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
 .bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:8px;max-width:min(300px,88%);min-height:44px;box-sizing:border-box;padding:6px 12px 6px 6px;border:0;border-radius:16px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font:inherit;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
 .bt-chief-bar:active{background:color-mix(in srgb,var(--bt-card),var(--bt-ink) 8%)}
+/* Several Main Bots in the phone's stand-in: one pill, a segment each, panned sideways
+   when they do not all fit. One Main Bot keeps the name-and-role card above. */
+.bt-chief-group{padding:4px 6px;gap:0;overflow:visible}
+.bt-chief-group:active{background:var(--bt-card)}
+.bt-chief-track{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 auto;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;padding:0 2px}
+.bt-chief-track::-webkit-scrollbar{display:none}
+.bt-chief-seg{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:var(--bt-ink);font:inherit;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease,scale .12s ease}
+.bt-chief-seg:hover{background:var(--bt-hover)}
+.bt-chief-seg:active{scale:.96}
+.bt-chief-seg-name{font-size:13px;line-height:18px;font-weight:500;white-space:nowrap}
+.bt-chief-fade{position:absolute;top:4px;bottom:4px;width:14px;pointer-events:none;z-index:1}
+.bt-chief-fade-left{left:5px;border-radius:16px 0 0 16px;background:linear-gradient(to right,var(--bt-card),transparent)}
+.bt-chief-fade-right{right:5px;border-radius:0 16px 16px 0;background:linear-gradient(to left,var(--bt-card),transparent)}
 .bt-chief-text{display:flex;flex-direction:column;min-width:0;text-align:left}
 .bt-chief-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:20px;font-weight:600}
 .bt-chief-role{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
@@ -9753,7 +9766,6 @@ function TeamSidebar(props) {
     return entries2.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at);
   }, [roster, updated]);
   const mains = (0, import_react21.useMemo)(() => (roster.mainBotIds ?? []).map((id) => roster.byId[id]).filter(Boolean), [roster]);
-  const main = mains[0];
   const onPhone = props.useMobileNav((value) => value);
   const atList = props.useNavLevel((value) => value === "list");
   useListGlide(listRef, wide, order.map((entry) => entry.item.id).join(","));
@@ -9772,7 +9784,6 @@ function TeamSidebar(props) {
       actions,
       listRef,
       mains,
-      main,
       order,
       markedUnread,
       typeToSearch,
@@ -9924,8 +9935,12 @@ function useChiefBar(listRef) {
   }, [listRef]);
   return out;
 }
-function ChiefBar({ main, actions }) {
-  if (main === void 0) return null;
+function ChiefBar({ mains, actions }) {
+  const list = (mains ?? []).filter(Boolean);
+  if (list.length === 0) return null;
+  return list.length === 1 ? (0, import_react21.createElement)(ChiefPill, { main: list[0], actions }) : (0, import_react21.createElement)(ChiefGroup, { mains: list, actions });
+}
+function ChiefPill({ main, actions }) {
   const name = main.name;
   return (0, import_react21.createElement)(
     "button",
@@ -9946,8 +9961,36 @@ function ChiefBar({ main, actions }) {
     )
   );
 }
+function ChiefGroup({ mains, actions }) {
+  const row = (0, import_react21.useRef)(null);
+  const [edges, setEdges] = (0, import_react21.useState)({ left: false, right: false });
+  useHorizontalScroll(row, setEdges);
+  return (0, import_react21.createElement)(
+    "div",
+    { className: "bt-chief-bar bt-chief-group", "data-bt-chief-bar": "" },
+    (0, import_react21.createElement)(
+      "div",
+      { ref: row, className: "bt-chief-track", role: "group", "aria-label": t("Main Bots") },
+      mains.map((main) => (0, import_react21.createElement)(
+        "button",
+        {
+          key: main.id,
+          type: "button",
+          className: "bt-chief-seg",
+          "aria-label": t("Open {name}'s chat", { name: main.name }),
+          title: main.name,
+          onClick: () => actions.openSession(main.id)
+        },
+        (0, import_react21.createElement)(BotAvatar, { bot: main, size: 28, state: "idle", main: true, badge: true, live: false }),
+        (0, import_react21.createElement)("span", { className: "bt-chief-seg-name" }, main.name)
+      ))
+    ),
+    edges.left ? (0, import_react21.createElement)("span", { className: "bt-chief-fade bt-chief-fade-left", "aria-hidden": true }) : null,
+    edges.right ? (0, import_react21.createElement)("span", { className: "bt-chief-fade bt-chief-fade-right", "aria-hidden": true }) : null
+  );
+}
 var listScrollTop = 0;
-function MobileNavList({ roster, actions, listRef, mains, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+function MobileNavList({ roster, actions, listRef, mains, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, "down");
   const chiefOut = useChiefBar(listRef);
   (0, import_react21.useLayoutEffect)(() => {
@@ -9995,7 +10038,7 @@ function MobileNavList({ roster, actions, listRef, mains, main, order, markedUnr
       "div",
       { className: "bt-nav-body" },
       // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
-      chiefOut ? (0, import_react21.createElement)(ChiefBar, { main, actions }) : null,
+      chiefOut ? (0, import_react21.createElement)(ChiefBar, { mains, actions }) : null,
       (0, import_react21.createElement)(BotList, { listRef, mains, order, roster, markedUnread, rowProps, showTime: true })
     ),
     menu.menu

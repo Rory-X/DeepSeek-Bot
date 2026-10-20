@@ -282,7 +282,6 @@ export function TeamSidebar(props) {
     return entries.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at)
   }, [roster, updated])
   const mains = useMemo(() => (roster.mainBotIds ?? []).map(id => roster.byId[id]).filter(Boolean), [roster])
-  const main = mains[0]
   // On a phone the list is a page of its own: the sidebar hands over to it instead of
   // showing the rail, so only one copy of the list is ever mounted. It is mounted at the
   // list level only: over the conversation it would still take the taps meant for the back
@@ -305,7 +304,7 @@ export function TeamSidebar(props) {
   const moving = props.useNavMotion(value => value !== 'idle')
   if (onPhone && (atList || moving)) {
     return createPortal(h(MobileNavList, {
-      roster, actions, listRef, mains, main, order, markedUnread, typeToSearch,
+      roster, actions, listRef, mains, order, markedUnread, typeToSearch,
       // The page is the full-width list: its rows carry names, previews and the unread dot.
       rowProps: { ...rowProps, wide: true }, useUpdate: props.useUpdate,
     }), document.body)
@@ -470,8 +469,17 @@ function useChiefBar(listRef) {
 
 // The card's stand-in: the mark with its Main Bot star, the name and the role, on a small
 // rounded card under the top row. It is a button, and it goes where the card goes.
-function ChiefBar({ main, actions }) {
-  if (main === undefined) return null
+function ChiefBar({ mains, actions }) {
+  const list = (mains ?? []).filter(Boolean)
+  if (list.length === 0) return null
+  // One Main Bot keeps the card the phone always had; several share one pill, one segment
+  // each, so the stand-in still reaches every Main Bot.
+  return list.length === 1
+    ? h(ChiefPill, { main: list[0], actions })
+    : h(ChiefGroup, { mains: list, actions })
+}
+
+function ChiefPill({ main, actions }) {
   const name = main.name
   return h('button', {
     type: 'button', className: 'bt-chief-bar', 'data-bt-chief-bar': '',
@@ -484,6 +492,23 @@ function ChiefBar({ main, actions }) {
       main.role ? h('span', { className: 'bt-chief-role' }, main.role) : null))
 }
 
+function ChiefGroup({ mains, actions }) {
+  const row = useRef(null)
+  const [edges, setEdges] = useState({ left: false, right: false })
+  useHorizontalScroll(row, setEdges)
+  return h('div', { className: 'bt-chief-bar bt-chief-group', 'data-bt-chief-bar': '' },
+    h('div', { ref: row, className: 'bt-chief-track', role: 'group', 'aria-label': t('Main Bots') },
+      mains.map(main => h('button', {
+        key: main.id, type: 'button', className: 'bt-chief-seg',
+        'aria-label': t("Open {name}'s chat", { name: main.name }), title: main.name,
+        onClick: () => actions.openSession(main.id),
+      },
+      h(BotAvatar, { bot: main, size: 28, state: 'idle', main: true, badge: true, live: false }),
+      h('span', { className: 'bt-chief-seg-name' }, main.name)))),
+    edges.left ? h('span', { className: 'bt-chief-fade bt-chief-fade-left', 'aria-hidden': true }) : null,
+    edges.right ? h('span', { className: 'bt-chief-fade bt-chief-fade-right', 'aria-hidden': true }) : null)
+}
+
 // The phone's list page: the same list as the sidebar, on a page of its own. Its root
 // carries the hook the styles and the test bench read, and its brand opens the same
 // account menu the footer avatar does — the shell's settings seat is not on this page.
@@ -492,7 +517,7 @@ function ChiefBar({ main, actions }) {
 // than its top, so the position is kept here, outside the page that comes and goes.
 let listScrollTop = 0
 
-function MobileNavList({ roster, actions, listRef, mains, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+function MobileNavList({ roster, actions, listRef, mains, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, 'down')
   const chiefOut = useChiefBar(listRef)
   // Restored before the first paint, so the list is never shown at its top first.
@@ -524,7 +549,7 @@ function MobileNavList({ roster, actions, listRef, mains, main, order, markedUnr
     roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
     h('div', { className: 'bt-nav-body' },
       // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
-      chiefOut ? h(ChiefBar, { main, actions }) : null,
+      chiefOut ? h(ChiefBar, { mains, actions }) : null,
       h(BotList, { listRef, mains, order, roster, markedUnread, rowProps, showTime: true })),
     menu.menu)
 }
