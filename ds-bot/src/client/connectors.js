@@ -93,9 +93,8 @@ const tokenLabel = id => (TOKEN_LABELS[id] ?? (() => t('Token')))()
 const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
 
 // The card data a connector declares in its view: an icon name, one line about it, where its
-// documentation is, what a read-only grant means, and the consent to show before a browser
-// leaves for its authorization page. A module that also has Chinese puts the same keys under
-// `card.zh`, and the reader's language picks one; no service is named here.
+// documentation is, and the words on its fields. A module that also has Chinese puts the same
+// keys under `card.zh`, and the reader's language picks one; no service is named here.
 const wantsChinese = () => language().startsWith('zh')
 const cardText = (connector, key) => {
   const value = connector.card?.[key]
@@ -104,25 +103,6 @@ const cardText = (connector, key) => {
   return wantsChinese() && typeof chinese === 'string' && chinese !== '' ? chinese : value
 }
 const cardAbout = connector => cardText(connector, 'about') ?? ABOUT[connector.id]?.()
-// A card shows a consent only when it declares one: the access-level wording and the gate
-// belong to the service that has them, never to a fallback.
-const cardConsent = (connector) => {
-  const consent = connector.card?.consent
-  if (consent === null || typeof consent !== 'object' || typeof consent.title !== 'string') return null
-  const chinese = wantsChinese() ? connector.card?.zh?.consent : undefined
-  const pick = (key, fallback) => {
-    const zh = chinese?.[key]
-    if (wantsChinese() && typeof zh === 'string' && zh !== '') return zh
-    return typeof fallback === 'string' ? fallback : null
-  }
-  return {
-    title: pick('title', consent.title),
-    body: pick('body', consent.body) ?? '',
-    // Only a connector whose authorization page asks the reader to choose says so in the
-    // card; without that line the consent is information, not a gate.
-    acknowledge: pick('acknowledge', consent.acknowledge),
-  }
-}
 
 // One settings section inside a connector's panel: a title, what the switch does, and the
 // switch itself. Any connector with settings renders these; the card owns the panel.
@@ -187,11 +167,6 @@ function ConnectorRow({ connector, actions }) {
   const [chatDraft, setChatDraft] = useState(null)
   // `null` follows the view, so a chat id the host finds after a Test shows up in the field.
   const chatValue = chatDraft ?? (typeof connector.chatId === 'string' ? connector.chatId : '')
-  // A connector that declares a consent shows its own wording before the browser leaves;
-  // one that declares none is a token or notification connector and shows none.
-  const consent = oauth && connector.state === 'off' ? cardConsent(connector) : null
-  const consentGate = consent !== null && consent.acknowledge !== null
-  const [consentAck, setConsentAck] = useState(false)
   const configured = typeof connector.clientId === 'string' && connector.clientId !== ''
   const [appForm, setAppForm] = useState(false)
   const [appId, setAppId] = useState('')
@@ -288,9 +263,7 @@ function ConnectorRow({ connector, actions }) {
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   // The card names its own glyph; a host that declares none keeps the mark its id had.
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark
-  // What the connector says about itself: its docs, the words on its token field, and what a
-  // read-only grant means.
-  const readOnlyNote = cardText(connector, 'readOnlyNote')
+  // What the connector says about itself: its docs and the words on its token field.
   const docsUrl = typeof connector.card?.docsUrl === 'string' && connector.card.docsUrl !== '' ? connector.card.docsUrl : TOKEN_URLS[connector.id]
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
@@ -323,7 +296,7 @@ function ConnectorRow({ connector, actions }) {
             ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
             : oauth
               ? (manual && !configured && !appForm ? null : h('button', {
-                type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || (consentGate && !consentAck),
+                type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy,
                 onClick: (event) => { event.stopPropagation(); void startAuthorization() },
               }, connector.state === 'error' ? t('Connect again') : t('Connect')))
               : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: (event) => { event.stopPropagation(); setForm(true) } }, t('Connect')))),
@@ -350,24 +323,8 @@ function ConnectorRow({ connector, actions }) {
         ? null
         : h('div', { className: 'bt-connector-hint' }, t('Send the bot a message first, then press Test.')))
       : null,
-    // What a read-only grant means, in the connector's own words: it says before connecting
-    // what the Bots may do, and stays there once connected.
-    readOnlyNote !== null ? h('div', { className: 'bt-connector-readonly' }, readOnlyNote) : null,
     oauth && docsUrl !== undefined ? h('div', { className: 'bt-connector-docs' },
       h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation'))) : null,
-    consent !== null
-      ? h('div', { className: 'bt-connector-scope' },
-        h('div', { className: 'bt-connector-scope-title' }, consent.title),
-        consent.body !== '' ? h('div', { className: 'bt-connector-scope-body' }, consent.body) : null,
-        consent.acknowledge !== null
-          ? h('label', { className: 'bt-connector-consent' },
-            h('input', {
-              type: 'checkbox', className: 'bt-connector-check', checked: consentAck,
-              onChange: (event) => setConsentAck(event.target.checked),
-            }),
-            h('span', null, consent.acknowledge))
-          : null)
-      : null,
     hasOptions && details
       ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
         toolboxOffered

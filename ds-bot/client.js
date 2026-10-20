@@ -385,9 +385,6 @@ var ZH = {
   "Save and connect": "保存并连接",
   "Open the authorization page": "打开授权页面",
   "Use a different app": "换一个应用",
-  "Choose the access level on the authorization page": "在授权页选择权限范围",
-  "Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.": "Requested scopes 是只读权限，也是这个连接器申请的权限。Full access 允许 Bot 修改你的 {service} 账号，每次写操作仍会先请求你批准。",
-  "I'll choose the access level on the authorization page": "我会在授权页自行选择权限范围",
   "Each run asks for your approval": "每次执行都会弹出审批",
   "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
   "Projects, deployments, and logs": "项目、部署和日志",
@@ -3353,18 +3350,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
 .bt-connector-input{flex:1 1 auto;min-width:0;border:0;background:none;color:inherit;font:inherit;font-size:13px;outline:none;padding:0}
 .bt-connector-hint{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
-/* The access choice on the authorization page: a quiet accent panel under the card's row,
-   with the acknowledgement that arms the first Connect press. */
-.bt-connector-scope{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--bt-accent) 7%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 26%,transparent);animation:bt-veil-in .18s ease-out}
-.bt-connector-scope-title{font-size:12px;line-height:17px;font-weight:600}
-.bt-connector-scope-body{font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
-.bt-connector-consent{display:flex;align-items:flex-start;gap:8px;min-height:32px;padding:3px 0 1px;font-size:12px;line-height:17px;cursor:pointer}
-.bt-connector-check{flex:none;width:16px;height:16px;margin:0.5px 0 0;accent-color:var(--bt-accent);cursor:pointer}
-@media (prefers-reduced-motion:reduce){.bt-connector-scope{animation:none}}
 .bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
-/* What a connector says about itself: a quiet panel for a read-only grant, and a docs link. */
-.bt-connector-readonly{padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-accent) 6%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 22%,transparent);font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
 .bt-connector-docs{padding-left:48px;font-size:12px;line-height:16px}
 /* A notification connector keeps its chat id beside the connection, under the head. */
 .bt-connector-chat{display:flex;flex-direction:column;gap:6px;padding-left:48px;}
@@ -3440,6 +3427,19 @@ ${NOT_DESKTOP} body[data-bt-nav-motion] [class*="_centerCol"],${NOT_DESKTOP} bod
 .bt-nav-body{position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
 .bt-chief-bar{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:2;display:flex;align-items:center;gap:8px;max-width:min(300px,88%);min-height:44px;box-sizing:border-box;padding:6px 12px 6px 6px;border:0;border-radius:16px;background:var(--bt-card);box-shadow:0 8px 20px -6px rgba(0,0,0,.22),0 0 0 .5px var(--bt-line-2);color:var(--bt-ink);font:inherit;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out}
 .bt-chief-bar:active{background:color-mix(in srgb,var(--bt-card),var(--bt-ink) 8%)}
+/* Several Main Bots in the phone's stand-in: one pill, a segment each, panned sideways
+   when they do not all fit. One Main Bot keeps the name-and-role card above. */
+.bt-chief-group{padding:4px 6px;gap:0;overflow:visible}
+.bt-chief-group:active{background:var(--bt-card)}
+.bt-chief-track{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 auto;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;padding:0 2px}
+.bt-chief-track::-webkit-scrollbar{display:none}
+.bt-chief-seg{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:var(--bt-ink);font:inherit;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background-color .12s ease,scale .12s ease}
+.bt-chief-seg:hover{background:var(--bt-hover)}
+.bt-chief-seg:active{scale:.96}
+.bt-chief-seg-name{font-size:13px;line-height:18px;font-weight:500;white-space:nowrap}
+.bt-chief-fade{position:absolute;top:4px;bottom:4px;width:14px;pointer-events:none;z-index:1}
+.bt-chief-fade-left{left:5px;border-radius:16px 0 0 16px;background:linear-gradient(to right,var(--bt-card),transparent)}
+.bt-chief-fade-right{right:5px;border-radius:0 16px 16px 0;background:linear-gradient(to left,var(--bt-card),transparent)}
 .bt-chief-text{display:flex;flex-direction:column;min-width:0;text-align:left}
 .bt-chief-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:20px;font-weight:600}
 .bt-chief-role{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;color:var(--bt-ink-3)}
@@ -10059,7 +10059,6 @@ function TeamSidebar(props) {
     return entries2.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at);
   }, [roster, updated]);
   const mains = (0, import_react23.useMemo)(() => (roster.mainBotIds ?? []).map((id) => roster.byId[id]).filter(Boolean), [roster]);
-  const main = mains[0];
   const onPhone = props.useMobileNav((value) => value);
   const atList = props.useNavLevel((value) => value === "list");
   useListGlide(listRef, wide, order.map((entry) => entry.item.id).join(","));
@@ -10078,7 +10077,6 @@ function TeamSidebar(props) {
       actions,
       listRef,
       mains,
-      main,
       order,
       markedUnread,
       typeToSearch,
@@ -10146,21 +10144,33 @@ function useHorizontalScroll(ref, setEdges) {
     };
     const onDown = (event) => {
       if (event.pointerType !== "mouse" || event.button !== 0) return;
-      drag = { x: event.clientX, left: row.scrollLeft, moved: false };
+      drag = { x: event.clientX, left: row.scrollLeft, moved: false, pointerId: event.pointerId, captured: false };
       row.dataset.dragging = "";
-      row.setPointerCapture?.(event.pointerId);
     };
     const onMove = (event) => {
       if (drag === null) return;
       const dx = event.clientX - drag.x;
-      if (Math.abs(dx) > 4) drag.moved = true;
+      if (!drag.moved && Math.abs(dx) > 4) {
+        drag.moved = true;
+        try {
+          row.setPointerCapture(event.pointerId);
+          drag.captured = true;
+        } catch {
+        }
+      }
       if (drag.moved) row.scrollLeft = drag.left - dx;
     };
     const onUp = () => {
       if (drag === null) return;
-      const moved = drag.moved;
+      const { moved, captured, pointerId } = drag;
       drag = null;
       delete row.dataset.dragging;
+      if (captured) {
+        try {
+          row.releasePointerCapture(pointerId);
+        } catch {
+        }
+      }
       if (moved) {
         swallowClick = true;
         setTimeout(() => {
@@ -10230,8 +10240,12 @@ function useChiefBar(listRef) {
   }, [listRef]);
   return out;
 }
-function ChiefBar({ main, actions }) {
-  if (main === void 0) return null;
+function ChiefBar({ mains, actions }) {
+  const list = (mains ?? []).filter(Boolean);
+  if (list.length === 0) return null;
+  return list.length === 1 ? (0, import_react23.createElement)(ChiefPill, { main: list[0], actions }) : (0, import_react23.createElement)(ChiefGroup, { mains: list, actions });
+}
+function ChiefPill({ main, actions }) {
   const name = main.name;
   return (0, import_react23.createElement)(
     "button",
@@ -10252,8 +10266,36 @@ function ChiefBar({ main, actions }) {
     )
   );
 }
+function ChiefGroup({ mains, actions }) {
+  const row = (0, import_react23.useRef)(null);
+  const [edges, setEdges] = (0, import_react23.useState)({ left: false, right: false });
+  useHorizontalScroll(row, setEdges);
+  return (0, import_react23.createElement)(
+    "div",
+    { className: "bt-chief-bar bt-chief-group", "data-bt-chief-bar": "" },
+    (0, import_react23.createElement)(
+      "div",
+      { ref: row, className: "bt-chief-track", role: "group", "aria-label": t("Main Bots") },
+      mains.map((main) => (0, import_react23.createElement)(
+        "button",
+        {
+          key: main.id,
+          type: "button",
+          className: "bt-chief-seg",
+          "aria-label": t("Open {name}'s chat", { name: main.name }),
+          title: main.name,
+          onClick: () => actions.openSession(main.id)
+        },
+        (0, import_react23.createElement)(BotAvatar, { bot: main, size: 28, state: "idle", main: true, badge: true, live: false }),
+        (0, import_react23.createElement)("span", { className: "bt-chief-seg-name" }, main.name)
+      ))
+    ),
+    edges.left ? (0, import_react23.createElement)("span", { className: "bt-chief-fade bt-chief-fade-left", "aria-hidden": true }) : null,
+    edges.right ? (0, import_react23.createElement)("span", { className: "bt-chief-fade bt-chief-fade-right", "aria-hidden": true }) : null
+  );
+}
 var listScrollTop = 0;
-function MobileNavList({ roster, actions, listRef, mains, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+function MobileNavList({ roster, actions, listRef, mains, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, "down");
   const chiefOut = useChiefBar(listRef);
   (0, import_react23.useLayoutEffect)(() => {
@@ -10301,7 +10343,7 @@ function MobileNavList({ roster, actions, listRef, mains, main, order, markedUnr
       "div",
       { className: "bt-nav-body" },
       // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
-      chiefOut ? (0, import_react23.createElement)(ChiefBar, { main, actions }) : null,
+      chiefOut ? (0, import_react23.createElement)(ChiefBar, { mains, actions }) : null,
       (0, import_react23.createElement)(BotList, { listRef, mains, order, roster, markedUnread, rowProps, showTime: true })
     ),
     menu.menu
@@ -13827,23 +13869,6 @@ var cardText = (connector, key) => {
   return wantsChinese() && typeof chinese === "string" && chinese !== "" ? chinese : value;
 };
 var cardAbout = (connector) => cardText(connector, "about") ?? ABOUT[connector.id]?.();
-var cardConsent = (connector) => {
-  const consent = connector.card?.consent;
-  if (consent === null || typeof consent !== "object" || typeof consent.title !== "string") return null;
-  const chinese = wantsChinese() ? connector.card?.zh?.consent : void 0;
-  const pick2 = (key, fallback) => {
-    const zh = chinese?.[key];
-    if (wantsChinese() && typeof zh === "string" && zh !== "") return zh;
-    return typeof fallback === "string" ? fallback : null;
-  };
-  return {
-    title: pick2("title", consent.title),
-    body: pick2("body", consent.body) ?? "",
-    // Only a connector whose authorization page asks the reader to choose says so in the
-    // card; without that line the consent is information, not a gate.
-    acknowledge: pick2("acknowledge", consent.acknowledge)
-  };
-};
 function ConnectorOption({ title, note, checked, disabled = false, describedby, onChange }) {
   return (0, import_react34.createElement)(
     "div",
@@ -13900,9 +13925,6 @@ function ConnectorRow({ connector, actions }) {
   const notify = connector.mode === "notify";
   const [chatDraft, setChatDraft] = (0, import_react34.useState)(null);
   const chatValue = chatDraft ?? (typeof connector.chatId === "string" ? connector.chatId : "");
-  const consent = oauth && connector.state === "off" ? cardConsent(connector) : null;
-  const consentGate = consent !== null && consent.acknowledge !== null;
-  const [consentAck, setConsentAck] = (0, import_react34.useState)(false);
   const configured = typeof connector.clientId === "string" && connector.clientId !== "";
   const [appForm, setAppForm] = (0, import_react34.useState)(false);
   const [appId, setAppId] = (0, import_react34.useState)("");
@@ -13996,7 +14018,6 @@ function ConnectorRow({ connector, actions }) {
   const [details, setDetails] = (0, import_react34.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark;
-  const readOnlyNote = cardText(connector, "readOnlyNote");
   const docsUrl = typeof connector.card?.docsUrl === "string" && connector.card.docsUrl !== "" ? connector.card.docsUrl : TOKEN_URLS[connector.id];
   const row = (0, import_react34.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
@@ -14050,7 +14071,7 @@ function ConnectorRow({ connector, actions }) {
         } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react34.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? manual && !configured && !appForm ? null : (0, import_react34.createElement)("button", {
           type: "button",
           className: "bt-soft bt-soft-sm",
-          disabled: busy || consentGate && !consentAck,
+          disabled: busy,
           onClick: (event) => {
             event.stopPropagation();
             void startAuthorization();
@@ -14093,30 +14114,10 @@ function ConnectorRow({ connector, actions }) {
       ),
       typeof connector.chatId === "string" && connector.chatId !== "" ? null : (0, import_react34.createElement)("div", { className: "bt-connector-hint" }, t("Send the bot a message first, then press Test."))
     ) : null,
-    // What a read-only grant means, in the connector's own words: it says before connecting
-    // what the Bots may do, and stays there once connected.
-    readOnlyNote !== null ? (0, import_react34.createElement)("div", { className: "bt-connector-readonly" }, readOnlyNote) : null,
     oauth && docsUrl !== void 0 ? (0, import_react34.createElement)(
       "div",
       { className: "bt-connector-docs" },
       (0, import_react34.createElement)("a", { className: "bt-connector-link", href: docsUrl, target: "_blank", rel: "noopener noreferrer" }, t("Documentation"))
-    ) : null,
-    consent !== null ? (0, import_react34.createElement)(
-      "div",
-      { className: "bt-connector-scope" },
-      (0, import_react34.createElement)("div", { className: "bt-connector-scope-title" }, consent.title),
-      consent.body !== "" ? (0, import_react34.createElement)("div", { className: "bt-connector-scope-body" }, consent.body) : null,
-      consent.acknowledge !== null ? (0, import_react34.createElement)(
-        "label",
-        { className: "bt-connector-consent" },
-        (0, import_react34.createElement)("input", {
-          type: "checkbox",
-          className: "bt-connector-check",
-          checked: consentAck,
-          onChange: (event) => setConsentAck(event.target.checked)
-        }),
-        (0, import_react34.createElement)("span", null, consent.acknowledge)
-      ) : null
     ) : null,
     hasOptions && details ? (0, import_react34.createElement)(
       "div",
