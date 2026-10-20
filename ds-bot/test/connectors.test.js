@@ -1015,7 +1015,7 @@ function demoDefinition(overrides = {}) {
 const DEMO_TOOL_LIST = ['ping', 'pong'].map(name => ({ name, description: `Demo ${name}`, inputSchema: { type: 'object', properties: {} } }))
 
 // One fake Demo MCP server: it lists the whitelist and records the token each call carries.
-function demoBench() {
+function demoBench({ tools = DEMO_TOOL_LIST } = {}) {
   const calls = []
   const fetch = async (url, init = {}) => {
     assert.equal(String(url), 'https://mcp.demo.test/mcp')
@@ -1023,7 +1023,7 @@ function demoBench() {
     calls.push({ method: body.method, name: body.params?.name, authorization: init.headers?.authorization })
     if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Demo', version: '1' } })
     if (body.method === 'notifications/initialized') return emptyAnswer()
-    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: DEMO_TOOL_LIST })
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools })
     if (body.method === 'tools/call') return mcpAnswer(body.id, { content: [{ type: 'text', text: `ran ${body.params.name}` }] })
     throw new Error(`unexpected method ${body.method}`)
   }
@@ -1041,15 +1041,16 @@ const demoGrant = (access, { level = 'read' } = {}) => ({
 
 // A connector host on its own definitions, so an instance case never depends on which
 // modules happen to live under src/host/connectors.
-function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), extraDefinitions = {}, config = {}, grants = {} } = {}) {
-  const home = mkdtempSync(join(tmpdir(), 'dsb-connector-instances-'))
-  const statePath = join(home, 'state.json')
+function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), extraDefinitions = {}, config = {}, grants = {}, home, credentials } = {}) {
+  const dir = home ?? mkdtempSync(join(tmpdir(), 'dsb-connector-instances-'))
+  const statePath = join(dir, 'state.json')
   writeFileSync(statePath, JSON.stringify(state))
-  const credentials = fakeCredentials()
-  for (const [id, grant] of Object.entries(grants)) credentials.records.set(`ds-bot/connector-${id}`, { kind: 'grant', payload: grant })
+  const store = credentials ?? fakeCredentials()
+  for (const [id, grant] of Object.entries(grants)) store.records.set(`ds-bot/connector-${id}`, { kind: 'grant', payload: grant })
   const webServer = fakeWebServer()
-  const ctx = fakeContext({ services: { credentials, webServer } })
+  const ctx = fakeContext({ services: { credentials: store, webServer } })
   const audit = []
+  const warnings = []
   const registered = []
   const disposed = []
   const register = ctx.tools.register
@@ -1062,9 +1063,9 @@ function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), 
     ctx,
     state,
     config,
-    home,
+    home: dir,
     statePath,
-    warn: () => {},
+    warn: (template, ...args) => { warnings.push(String(template).replace(/%s/g, () => String(args.shift()))) },
     redactSecrets: text => String(text),
     readOnly: () => undefined,
     save: async () => { writeFileSync(statePath, JSON.stringify(state)) },
@@ -1077,7 +1078,7 @@ function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), 
   }
   const host = createConnectorHost(rt, { demo: definition, ...extraDefinitions })
   Object.assign(rt, host)
-  return { rt, ctx, home, statePath, credentials, webServer, audit, registered, disposed, host }
+  return { rt, ctx, home: dir, statePath, credentials: store, webServer, audit, warnings, registered, disposed, host }
 }
 
 const rowOf = (rt, id) => rt.connectorsView().find(row => row.id === id)
@@ -1293,4 +1294,164 @@ test('a new instance authorizes through its own callback and keeps its own grant
   assert.ok(ctx.registeredTools.get('demo_ping') === undefined)
   assert.ok(!JSON.stringify(rt.connectorsView()).includes('access-1'))
   assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes('access-1'))
+})
+
+test('the instance soft limit refuses one more create with a clear message', async (t) => {
+  const { ctx, rt, home, credentials, audit } = hostSetup({ definition: demoDefinition({ instances: { prefix: 'demo', min: 1, max: 8 } }) })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  for (let count = 2; count <= 8; count += 1) {
+    const rows = await rt.connectorEndpoint('connector-create-instance', { base: 'demo' })
+    assert.equal(rows.length, count)
+  }
+  assert.equal(rt.connectorsView().length, 8)
+  await assert.rejects(
+    rt.connectorEndpoint('connector-create-instance', { base: 'demo' }),
+    /Demo supports at most 8 instances \(8 already exist\); remove one before adding another/,
+  )
+  // The refused create changed nothing.
+  assert.equal(rt.connectorsView().length, 8)
+  assert.equal(credentials.records.size, 0)
+  // Every creation left one audit line with the id and label, and no credential.
+  const created = audit.filter(entry => entry.source === 'connector-created')
+  assert.equal(created.length, 7)
+  assert.match(created[0].text, /Demo instance demo-2 added as "Demo 2"/)
+})
+
+test('instance changes queue behind each other and stay on their own instance', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const state = {
+    connectors: {
+      demo: { level: 'read', settings: { projectId: 'proj-a' }, authorizedAt: 1 },
+      'demo-2': { level: 'read', settings: { projectId: 'proj-b' }, authorizedAt: 2 },
+    },
+  }
+  const { ctx, rt, home, credentials } = hostSetup({ state, grants: { demo: demoGrant('access-a'), 'demo-2': demoGrant('access-b') } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => (['demo', 'demo-2'].every(id => rowOf(rt, id)?.state === 'ready') ? true : undefined), 'both instances to mount')
+
+  // Two changes at once: each lands on its own instance, one at a time.
+  const [levelChanged, renamed] = await Promise.all([
+    rt.connectorEndpoint('connector-set-level', { id: 'demo', level: 'write' }),
+    rt.connectorEndpoint('connector-set-settings', { id: 'demo-2', values: { label: 'Staging', projectId: 'proj-b' } }),
+  ])
+  const changed = levelChanged.find(row => row.id === 'demo')
+  const renamedRow = renamed.find(row => row.id === 'demo-2')
+  assert.deepEqual([changed.level, changed.needsReauth], ['write', true])
+  assert.deepEqual([renamedRow.name, renamedRow.level], ['Staging', 'read'])
+  assert.deepEqual(rt.state.connectors.demo.settings, { projectId: 'proj-a' })
+  assert.deepEqual(rt.state.connectors['demo-2'].settings, { label: 'Staging', projectId: 'proj-b' })
+  // The level change needed a new authorization for its own instance and dropped only that
+  // grant; the rename kept the other instance's grant and remounted it.
+  assert.deepEqual([...credentials.records.keys()], ['ds-bot/connector-demo-2'])
+  assert.equal(rowOf(rt, 'demo-2').state, 'ready')
+
+  // A removal racing a settings change: the queue decides the order, and the loser hears a
+  // clean "No such connector" instead of resurrecting the instance.
+  const raced = await Promise.allSettled([
+    rt.connectorEndpoint('connector-delete-instance', { id: 'demo-2' }),
+    rt.connectorEndpoint('connector-set-settings', { id: 'demo-2', values: { label: 'Late' } }),
+  ])
+  assert.equal(raced[0].status, 'fulfilled')
+  assert.equal(raced[1].status, 'rejected')
+  assert.match(raced[1].reason.message, /No such connector/)
+  assert.deepEqual(rt.connectorsView().map(row => row.id), ['demo'])
+  assert.equal(rt.state.connectors['demo-2'], undefined)
+})
+
+test('a revoke that fails is only a warning and the removal still clears locally', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const state = {
+    connectors: {
+      demo: { level: 'read', settings: { projectId: 'proj-a' }, authorizedAt: 1 },
+      'demo-2': { level: 'read', settings: { projectId: 'proj-b' }, authorizedAt: 2 },
+    },
+  }
+  const { ctx, rt, home, credentials, warnings, audit } = hostSetup({ state, grants: { demo: demoGrant('access-a'), 'demo-2': demoGrant('access-b') } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => (['demo', 'demo-2'].every(id => rowOf(rt, id)?.state === 'ready') ? true : undefined), 'both instances to mount')
+
+  // The provider cannot be asked to revoke: the local removal completes all the same.
+  globalThis.fetch = async () => ({ status: 404, ok: false, headers: { get: () => null }, text: async () => '' })
+  const rows = await rt.connectorEndpoint('connector-delete-instance', { id: 'demo-2' }, { origin: 'https://dsh.test' })
+  assert.deepEqual(rows.map(row => row.id), ['demo'])
+  assert.ok(warnings.some(text => text.includes('demo-2') && /could not be revoked/.test(text)), JSON.stringify(warnings))
+  assert.equal(credentials.records.has('ds-bot/connector-demo-2'), false)
+  assert.equal(credentials.records.has('ds-bot/connector-demo'), true)
+  assert.equal(rt.state.connectors['demo-2'], undefined)
+  const deleted = audit.find(entry => entry.source === 'connector-deleted')
+  assert.match(deleted.text, /Demo instance demo-2 \("Demo 2"\) removed from https:\/\/dsh\.test/)
+  assert.ok(!JSON.stringify(audit).includes('access-b'))
+  assert.ok(!JSON.stringify(rt.connectorsView()).includes('access-b'))
+})
+
+test('after a restart every instance mounts from its own grant', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const state = {
+    connectors: {
+      demo: { level: 'read', settings: { projectId: 'proj-a' }, authorizedAt: 1 },
+      'demo-2': { level: 'read', settings: { projectId: 'proj-b' }, authorizedAt: 2 },
+    },
+  }
+  const first = hostSetup({ state, grants: { demo: demoGrant('access-a'), 'demo-2': demoGrant('access-b') } })
+  t.after(() => rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }))
+  await until(async () => (['demo', 'demo-2'].every(id => rowOf(first.rt, id)?.state === 'ready') ? true : undefined), 'both instances to mount')
+  await first.ctx.dispose()
+
+  // A second host over the same team file and credential store is a restart.
+  const second = hostSetup({ state: first.rt.state, home: first.home, credentials: first.credentials })
+  await until(async () => (['demo', 'demo-2'].every(id => rowOf(second.rt, id)?.state === 'ready') ? true : undefined), 'both instances after the restart')
+  await second.ctx.registeredTools.get('demo_ping').execute({})
+  await second.ctx.registeredTools.get('demo-2_ping').execute({})
+  const lastTokens = bench.calls.filter(call => call.method === 'tools/call').slice(-2).map(call => call.authorization)
+  assert.deepEqual(lastTokens, ['Bearer access-a', 'Bearer access-b'])
+
+  // Remove one instance, restart again: only the remaining instance comes back.
+  await second.rt.connectorEndpoint('connector-delete-instance', { id: 'demo-2' })
+  await second.ctx.dispose()
+  const third = hostSetup({ state: second.rt.state, home: first.home, credentials: first.credentials })
+  await until(async () => (rowOf(third.rt, 'demo')?.state === 'ready' ? true : undefined), 'the remaining instance after the second restart')
+  assert.deepEqual(third.rt.connectorsView().map(row => row.id), ['demo'])
+  assert.ok(!third.registered.some(name => name.startsWith('demo-2_')))
+  assert.equal(third.credentials.records.has('ds-bot/connector-demo-2'), false)
+  await third.ctx.dispose()
+})
+
+test('an approval outcome is audited with the instance id and never the arguments', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const danger = { name: 'danger', description: 'Demo danger', inputSchema: { type: 'object', properties: { sql: { type: 'string' } } } }
+  const bench = demoBench({ tools: [...DEMO_TOOL_LIST, danger] })
+  globalThis.fetch = bench.fetch
+  const definition = demoDefinition({ readTools: ['ping'], actionTools: ['danger'] })
+  const state = { connectors: { 'demo-2': { level: 'write', settings: { projectId: 'proj-b' }, authorizedAt: 1 } } }
+  const { ctx, rt, home, audit } = hostSetup({
+    state,
+    definition,
+    grants: { 'demo-2': demoGrant('access-b', { level: 'write' }) },
+    config: { connectorApprovalTimeoutMs: 40 },
+  })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => (rowOf(rt, 'demo-2')?.state === 'ready' ? true : undefined), 'the write instance to mount')
+
+  const tool = ctx.registeredTools.get('demo-2_danger')
+  assert.ok(tool !== undefined)
+  await assert.rejects(tool.execute({ sql: 'select secret_value from users' }, { agent: { id: 'm1' } }), /did not answer in time/)
+  const approval = audit.filter(entry => entry.source === 'connector-approval')
+  assert.ok(approval.length > 0)
+  const line = approval.at(-1).text
+  assert.match(line, /timed out/)
+  assert.match(line, /Demo 2 \(demo-2\)'s danger/)
+  assert.ok(!line.includes('select secret_value'))
+  assert.ok(!JSON.stringify(audit).includes('select secret_value'))
+  assert.ok(!JSON.stringify(audit).includes('access-b'))
+  assert.deepEqual(rt.state.questions, {})
 })
