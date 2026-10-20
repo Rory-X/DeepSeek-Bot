@@ -614,6 +614,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* What a connector says about itself: a quiet panel for a read-only grant, and a docs link. */
 .bt-connector-readonly{padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-accent) 6%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 22%,transparent);font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
 .bt-connector-docs{padding-left:48px;font-size:12px;line-height:16px}
+/* A notification connector keeps its chat id beside the connection, under the head. */
+.bt-connector-chat{display:flex;flex-direction:column;gap:6px;padding-left:48px;}
 /* A form with several credentials names each field above its masked box. */
 .bt-connector-field{display:flex;flex-direction:column;gap:4px}
 .bt-connector-field-name{font-size:12px;line-height:16px;color:var(--bt-ink-3)}

@@ -1,7 +1,7 @@
 import { createElement as h, useRef, useState } from 'react'
 import { useMorph } from './motion.js'
 import { MaskedInput } from './secret-card.js'
-import { t } from './i18n.js'
+import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
 
 export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true },
@@ -51,6 +51,13 @@ export const QQMailMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 
   h('rect', { x: 2.8, y: 4.8, width: 14.4, height: 10.4, rx: 2 }),
   h('path', { d: 'M3.4 15.2 8.4 10.6M16.6 15.2 11.6 10.6' }))
 
+// A mark for a connector that names a glyph this client does not draw: a plug, of our own
+// drawing, says "a service" without pretending to be any service's logo.
+export const GenericMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('path', { d: 'M7.6 3.4v3.2M12.4 3.4v3.2' }),
+  h('path', { d: 'M5.8 6.6h8.4v2.1a4.2 4.2 0 0 1-8.4 0z' }),
+  h('path', { d: 'M10 12.9v3.7' }))
+
 // Every mark the cards can name, by the `glyph` a connector declares. A host that does not
 // declare one yet falls back to the service id, so the older connectors keep their marks.
 const CARD_GLYPHS = {
@@ -78,13 +85,6 @@ const TOKEN_LABELS = {
   github: () => t('GitHub token'),
   vercel: () => t('Vercel token'),
 }
-// A connector that declares no consent of its own keeps the wording the OAuth services used
-// before cards carried it: the authorization page offers a read-only set and a full grant.
-const GENERIC_CONSENT = {
-  title: 'Choose the access level on the authorization page',
-  body: 'Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.',
-  acknowledge: "I'll choose the access level on the authorization page",
-}
 const TOKEN_CREATE = {
   github: () => t('Create a token on GitHub'),
   vercel: () => t('Create a token on Vercel'),
@@ -94,24 +94,33 @@ const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
 
 // The card data a connector declares in its view: an icon name, one line about it, where its
 // documentation is, what a read-only grant means, and the consent to show before a browser
-// leaves for its authorization page. Text arrives in English and goes through the interface
-// dictionary, so a service that changes its wording does not need a client change.
+// leaves for its authorization page. A module that also has Chinese puts the same keys under
+// `card.zh`, and the reader's language picks one; no service is named here.
+const wantsChinese = () => language().startsWith('zh')
 const cardText = (connector, key) => {
   const value = connector.card?.[key]
-  return typeof value === 'string' && value !== '' ? t(value) : null
+  if (typeof value !== 'string' || value === '') return null
+  const chinese = connector.card?.zh?.[key]
+  return wantsChinese() && typeof chinese === 'string' && chinese !== '' ? chinese : value
 }
 const cardAbout = connector => cardText(connector, 'about') ?? ABOUT[connector.id]?.()
+// A card shows a consent only when it declares one: the access-level wording and the gate
+// belong to the service that has them, never to a fallback.
 const cardConsent = (connector) => {
-  const declared = connector.card?.consent
-  const source = declared !== null && typeof declared === 'object' && typeof declared.title === 'string'
-    ? declared
-    : GENERIC_CONSENT
+  const consent = connector.card?.consent
+  if (consent === null || typeof consent !== 'object' || typeof consent.title !== 'string') return null
+  const chinese = wantsChinese() ? connector.card?.zh?.consent : undefined
+  const pick = (key, fallback) => {
+    const zh = chinese?.[key]
+    if (wantsChinese() && typeof zh === 'string' && zh !== '') return zh
+    return typeof fallback === 'string' ? fallback : null
+  }
   return {
-    title: t(source.title),
-    body: typeof source.body === 'string' ? t(source.body, { service: connector.name }) : '',
+    title: pick('title', consent.title),
+    body: pick('body', consent.body) ?? '',
     // Only a connector whose authorization page asks the reader to choose says so in the
     // card; without that line the consent is information, not a gate.
-    acknowledge: typeof source.acknowledge === 'string' ? t(source.acknowledge) : null,
+    acknowledge: pick('acknowledge', consent.acknowledge),
   }
 }
 
@@ -135,7 +144,14 @@ function statusText(connector) {
   // The host writes an OAuth failure as a sentence; it is shown as it came.
   if (connector.state === 'error' && connector.oauth === true) return connector.error ?? t('Could not connect')
   if (connector.state === 'error') return t('Could not connect: {error}', { error: connector.error ?? '' })
-  if (connector.state === 'ready') return connector.account ? t('Connected as {account}', { account: connector.account }) : t('Connected')
+  if (connector.state === 'ready') {
+    // A notification connector names the bot that writes, and its chat once one is known.
+    const account = connector.mode === 'notify' && connector.account ? `@${connector.account}` : connector.account
+    const who = account ? t('Connected as {account}', { account }) : t('Connected')
+    return connector.mode === 'notify' && typeof connector.chatId === 'string' && connector.chatId !== ''
+      ? `${who} · ${t('Chat found')}`
+      : who
+  }
   return cardAbout(connector) ?? (connector.oauth === true ? t('Not connected') : '')
 }
 
@@ -165,8 +181,14 @@ function ConnectorRow({ connector, actions }) {
       }))
     : [{ name: 'token', label: tokenFieldLabel, required: true }]
   const given = field => (values[field.name] ?? '').trim()
+  // A notification connector keeps one secret and points it at a chat: the card draws the
+  // secret's own fields plus the chat id, and tests the message path from the same row.
+  const notify = connector.mode === 'notify'
+  const [chatDraft, setChatDraft] = useState(null)
+  // `null` follows the view, so a chat id the host finds after a Test shows up in the field.
+  const chatValue = chatDraft ?? (typeof connector.chatId === 'string' ? connector.chatId : '')
   // A connector that declares a consent shows its own wording before the browser leaves;
-  // one that does not keeps the generic wording and its acknowledgement.
+  // one that declares none is a token or notification connector and shows none.
   const consent = oauth && connector.state === 'off' ? cardConsent(connector) : null
   const consentGate = consent !== null && consent.acknowledge !== null
   const [consentAck, setConsentAck] = useState(false)
@@ -225,9 +247,23 @@ function ConnectorRow({ connector, actions }) {
       const value = given(field)
       if (value !== '') filled[field.name] = value
     }
-    const done = () => { setValues({}); setForm(false) }
+    const done = () => { setValues({}); setChatDraft(null); setForm(false) }
+    const submit = () => declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token)
+    if (notify) {
+      const chatId = chatValue.trim()
+      // The chat id typed beside the secret is saved once the token is known to be good.
+      void run(async () => {
+        await submit()
+        if (chatId !== '') await actions.connectorSetChat(connector.id, chatId)
+      }, done)
+      return
+    }
     // A host that declares its fields takes them as `values`; an older one takes the token.
-    void run(declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token), done)
+    void run(submit(), done)
+  }
+  const saveChat = () => {
+    if (busy) return
+    void run(actions.connectorSetChat(connector.id, chatValue.trim()), () => setChatDraft(null))
   }
   const on = connector.state !== 'off'
   // `actions` is absent for a connector without write actions; a boolean says whether the
@@ -251,7 +287,7 @@ function ConnectorRow({ connector, actions }) {
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   // The card names its own glyph; a host that declares none keeps the mark its id had.
-  const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id]
+  const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark
   // What the connector says about itself: its docs, the words on its token field, and what a
   // read-only grant means.
   const readOnlyNote = cardText(connector, 'readOnlyNote')
@@ -262,7 +298,7 @@ function ConnectorRow({ connector, actions }) {
   const text = h('span', { className: 'bt-connector-text' },
     h('span', { className: 'bt-connector-name' }, connector.name),
     h('span', { className: 'bt-connector-status' }, statusText(connector)))
-  return h('div', { ref: row, className: 'bt-connector', 'data-state': connector.state, 'data-open': details || undefined },
+  return h('div', { ref: row, className: 'bt-connector', 'data-state': connector.state, 'data-open': details || undefined, 'data-notify': notify || undefined },
     h('div', { className: 'bt-connector-head' },
       hasOptions
         ? h('button', {
@@ -272,6 +308,10 @@ function ConnectorRow({ connector, actions }) {
         }, mark, text, h('span', { className: 'bt-connector-chevron', 'aria-hidden': true }, h(ChevronRightIcon)))
         : h('div', { className: 'bt-connector-main' }, mark, text),
       h('span', { className: 'bt-connector-actions' },
+        notify && connector.state === 'ready' && connector.canTest === true ? h('button', {
+          type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy,
+          onClick: (event) => { event.stopPropagation(); void run(actions.connectorTest(connector.id)) },
+        }, busy ? t('Testing…') : t('Test message')) : null,
         connector.state === 'error' && !oauth ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorRetry(connector.id)) } }, t('Try again')) : null,
         connector.state === 'error' && oauth ? h('button', {
           type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy,
@@ -287,6 +327,29 @@ function ConnectorRow({ connector, actions }) {
                 onClick: (event) => { event.stopPropagation(); void startAuthorization() },
               }, connector.state === 'error' ? t('Connect again') : t('Connect')))
               : form ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: (event) => { event.stopPropagation(); setForm(true) } }, t('Connect')))),
+    // A failed Test message keeps the connector ready and shows the host's sentence on the
+    // card, the place a mount failure would use; a found chat id lands in the field below.
+    notify && connector.state !== 'error' && connector.error !== undefined
+      ? h('div', { className: 'bt-connector-error', role: 'alert' }, connector.error)
+      : null,
+    // The chat the Bot writes to stays editable: empty clears it, and Test looks again.
+    notify && connector.state === 'ready' ? h('div', { className: 'bt-connector-chat' },
+      h('div', { className: 'bt-connector-form-row' },
+        h('label', { className: 'bt-q-field' }, h('input', {
+          className: 'bt-connector-input', value: chatValue, placeholder: t('Chat id'), 'aria-label': t('Chat id'),
+          autoComplete: 'off', spellCheck: false, inputMode: 'numeric',
+          onChange: (event) => setChatDraft(event.target.value),
+          onKeyDown: (event) => { if (event.key === 'Enter') saveChat() },
+        })),
+        h('button', {
+          type: 'button', className: 'bt-soft bt-soft-sm',
+          disabled: busy || chatValue.trim() === (typeof connector.chatId === 'string' ? connector.chatId : ''),
+          onClick: () => saveChat(),
+        }, t('Save'))),
+      typeof connector.chatId === 'string' && connector.chatId !== ''
+        ? null
+        : h('div', { className: 'bt-connector-hint' }, t('Send the bot a message first, then press Test.')))
+      : null,
     // What a read-only grant means, in the connector's own words: it says before connecting
     // what the Bots may do, and stays there once connected.
     readOnlyNote !== null ? h('div', { className: 'bt-connector-readonly' }, readOnlyNote) : null,
@@ -357,8 +420,16 @@ function ConnectorRow({ connector, actions }) {
             h('span', { className: 'bt-connector-field-name' }, field.label),
             h('div', { className: 'bt-q-field bt-secret-field' }, input))
       }),
+      notify ? h('label', { key: 'chat', className: 'bt-connector-field' },
+        h('span', { className: 'bt-connector-field-name' }, t('Chat id (optional)')),
+        h('div', { className: 'bt-q-field' }, h('input', {
+          className: 'bt-connector-input', value: chatValue, placeholder: t('Optional'), 'aria-label': t('Chat id'),
+          autoComplete: 'off', spellCheck: false, inputMode: 'numeric',
+          onChange: (event) => setChatDraft(event.target.value),
+          onKeyDown: (event) => { if (event.key === 'Enter') connect() },
+        }))) : null,
       h('div', { className: 'bt-connector-form-row' },
-        docsUrl ? h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, tokenCreate(connector.id)) : null,
+        docsUrl ? h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, connector.card?.docsUrl ? t('Documentation') : tokenCreate(connector.id)) : null,
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => { setForm(false); setValues({}); setError(null) } }, t('Cancel')),
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || !complete(), onClick: connect }, busy ? t('Connecting…') : t('Connect')))) : null,
     // Slack has no dynamic registration: its app id and secret are typed here first, with the
