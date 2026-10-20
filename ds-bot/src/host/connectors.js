@@ -19,7 +19,7 @@ import { buildCloudflareToolIndex, CLOUDFLARE_TOOLBOX_TOOLS, createCloudflareCal
 import { createApprovalDesk } from './connector-approval.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
 import { credentialFields, connectValues } from './connector-setup.js'
-import { externalConnectors, CONNECTOR_LEVELS } from './connectors/registry.js'
+import { externalConnectors, CONNECTOR_ID, CONNECTOR_LEVELS } from './connectors/registry.js'
 import { chatIdOf, createNotifyTool, NOTIFY_TEST_TEXT, parseChatId } from './notify.js'
 import { createOAuthFlow } from './oauth/flow.js'
 import { createRestTools } from './rest-tools.js'
@@ -187,27 +187,107 @@ export async function signIn(id, token, { api, fetch: request = fetch } = {}) {
 }
 
 export function install(rt) {
+  Object.assign(rt, createConnectorHost(rt))
+}
+
+// The connector host itself. `connectors` is the set of definitions to mount; the plugin
+// passes the built-ins and the modules the registry loaded, and a test may pass its own.
+export function createConnectorHost(rt, connectors = CONNECTORS) {
   const { ctx, state } = rt
   const options = {}
-  for (const [id, connector] of Object.entries(CONNECTORS)) {
-    if (rt.config[id] === false) continue
-    const setting = rt.config[id]
-    const override = setting !== null && typeof setting === 'object' ? setting : {}
-    options[id] = { ...connector, ...override, url: override.url ?? connector.mcpUrl, api: override.api ?? connector.api }
-    // A module that brings its own `configure` re-applies a grant the profile cannot widen:
-    // Neon's read-only master switch survives any `url` override.
-    if (typeof connector.configure === 'function') options[id] = { ...options[id], ...connector.configure(override) }
-    // `imap-read` was the name the first IMAP draft used; one IMAP mode serves Gmail and QQ.
-    if (options[id].mode === 'imap-read') options[id].mode = 'imap'
+
+  // A multi-instance module is one definition mounted under several ids: the first instance
+  // keeps the module id, later ones are `<id>-2`, `<id>-3`, and so on. Every instance has
+  // its own row, state key and grant (`ds-bot/connector-<id>`); nothing is shared with
+  // another instance and nothing falls back to one when its own grant is missing.
+  const definitionOf = base => connectors[base]
+  const instanceSuffix = (base, id) => {
+    if (id === base) return undefined
+    const match = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-([1-9][0-9]*)$`).exec(id)
+    return match === null ? undefined : Number(match[1])
   }
-  const ids = Object.keys(options)
+  // The instances that exist are the team's state keys for this base; a team that never
+  // created one still has the module's first instance, shown off and ready to connect. The
+  // first instance deleted while later ones remain is not recreated: the keys are the list.
+  const instanceIdsOf = (base) => {
+    const ids = Object.keys(state.connectors ?? {}).filter(id => id === base || instanceSuffix(base, id) !== undefined)
+    if (ids.length === 0) return [base]
+    const orderOf = id => (id === base ? -1 : instanceSuffix(base, id))
+    return ids.sort((left, right) => orderOf(left) - orderOf(right))
+  }
+  // What the card calls this instance: the user's label first, then the project name a mount
+  // learned, then the module's name and the instance number.
+  const instanceNameOf = (base, id) => {
+    const prior = state.connectors?.[id] ?? {}
+    const settings = prior.settings !== null && typeof prior.settings === 'object' ? prior.settings : {}
+    const label = [settings.label, prior.projectName]
+      .find(value => typeof value === 'string' && value.trim() !== '')
+    if (label !== undefined) return label.trim()
+    const definition = definitionOf(base) ?? {}
+    const suffix = instanceSuffix(base, id)
+    const name = typeof definition.displayName === 'string' ? definition.displayName : base
+    return suffix === undefined ? name : `${name} ${suffix}`
+  }
+  const instanceContextOf = (id) => {
+    const connector = options[id]
+    return connector?.baseId === undefined ? { base: id, id } : { base: connector.baseId, id }
+  }
+  // `rt.config.<id>` overrides or hides one instance; the module's own key still applies to
+  // every instance and an instance key wins over it.
+  const overrideOf = (base, id) => {
+    const moduleSetting = rt.config[base]
+    const moduleOverride = moduleSetting !== null && typeof moduleSetting === 'object' && !Array.isArray(moduleSetting) ? moduleSetting : {}
+    const ownSetting = id === base ? undefined : rt.config[id]
+    const ownOverride = ownSetting !== null && typeof ownSetting === 'object' && !Array.isArray(ownSetting) ? ownSetting : {}
+    return { ...moduleOverride, ...ownOverride }
+  }
+  const buildOption = (base, id) => {
+    const definition = definitionOf(base)
+    const multi = definition.instances !== undefined
+    const override = overrideOf(base, id)
+    const displayName = multi ? instanceNameOf(base, id) : definition.displayName
+    let option = {
+      ...definition,
+      ...(multi ? { id, baseId: base } : {}),
+      displayName,
+      ...override,
+      url: override.url ?? definition.mcpUrl,
+      api: override.api ?? definition.api,
+    }
+    if (typeof definition.configure === 'function') {
+      const configured = definition.configure(override, { id: multi ? id : base, base, displayName, multi })
+      if (configured !== null && typeof configured === 'object' && !Array.isArray(configured)) option = { ...option, ...configured }
+    }
+    // A module's authorize hook may need to know which instance it is authorizing for; a
+    // hook `configure` returned above already carries that and is left alone.
+    if (multi && option.authorize === definition.authorize && typeof definition.authorize === 'function') {
+      option.authorize = (input = {}) => definition.authorize({ ...input, instance: { base, id } })
+    }
+    // `imap-read` was the name the first IMAP draft used; one IMAP mode serves Gmail and QQ.
+    if (option.mode === 'imap-read') option.mode = 'imap'
+    return option
+  }
+
+  for (const base of Object.keys(connectors)) {
+    if (connectors[base].instances === undefined) {
+      if (rt.config[base] === false) continue
+      options[base] = buildOption(base, base)
+      continue
+    }
+    for (const id of instanceIdsOf(base)) {
+      if (rt.config[id] === false) continue
+      options[id] = buildOption(base, id)
+    }
+  }
+  const ids = () => Object.keys(options)
   // `token` is what the current mount was made with, so a changed secret mounts again.
   const mounts = new Map()
   // The mounted toolboxes, by their call tool's name, for the blocked-target gate.
   const toolboxes = new Map()
-  const statuses = new Map(ids.map(id => [id, { state: 'off' }]))
+  const statuses = new Map(ids().map(id => [id, { state: 'off' }]))
   let queue = Promise.resolve()
   let stopped = false
+
 
   // A blocked toolbox target is refused outright: no approval can make it runnable.
   // Everything else that changes something outside DS Bot asks through the plugin's own
@@ -289,19 +369,26 @@ export function install(rt) {
       ...(summary?.danger === true ? { danger: true } : {}),
     }
   }
-  const approvalOf = async (connector, tool, args, exec, client) => {
+  const approvalOf = async (id, tool, args, client) => {
+    const connector = options[id]
     let answer
     if (typeof connector.actionApproval === 'function') {
       try {
-        answer = await withTimeout(Promise.resolve(connector.actionApproval(tool, args ?? {}, { client })), 3_000)
+        // The instance's own saved settings travel with the call: a module builds its card
+        // from them, never from whatever instance happened to mount last.
+        answer = await withTimeout(Promise.resolve(connector.actionApproval(tool, args ?? {}, {
+          client,
+          settings: settingsOf(id),
+          instance: instanceContextOf(id),
+        })), 3_000)
       } catch {
         answer = undefined
       }
     }
     return summarise(answer, defaultApprovalLine(tool, args))
   }
-  const requireActionApproval = async (connector, tool, args, exec, client) => {
-    await requireApproval(connector, tool, exec, await approvalOf(connector, tool, args, exec, client))
+  const requireActionApproval = async (id, tool, args, exec, client) => {
+    await requireApproval(options[id], tool, exec, await approvalOf(id, tool, args, client))
   }
   const requireApproval = async (connector, tool, exec, summary) => {
     const readOnly = rt.readOnly()
@@ -335,7 +422,7 @@ export function install(rt) {
 
   // The OAuth connectors. The flow registers its callback route on DSH's web server when
   // the user first starts a connect, and keeps each attempt in memory for ten minutes.
-  const oauth = ids.some(id => options[id].mode === 'oauth-mcp')
+  const oauth = Object.values(connectors).some(connector => connector.mode === 'oauth-mcp')
     ? createOAuthFlow({
         ctx,
         connectorOf: id => options[id],
@@ -344,9 +431,12 @@ export function install(rt) {
         warn: (template, ...args) => rt.warn(template, ...args),
         redact: text => rt.redactSecrets(text),
         onConnecting: (id) => {
+          if (options[id] === undefined) return
           if (statuses.get(id)?.state !== 'ready') statuses.set(id, { state: 'connecting' })
         },
         onAuthorized: async (id, grant) => {
+          // The instance may have been removed while the browser was on the provider's page.
+          if (options[id] === undefined) return
           const level = grantLevelOf(id, grant) ?? levelOf(id)
           const prior = state.connectors?.[id] ?? {}
           state.connectors = { ...state.connectors, [id]: { ...prior, ...switchesOf(id), level, authorizedAt: Date.now() } }
@@ -355,9 +445,11 @@ export function install(rt) {
           await sync(id, true)
         },
         onFailed: (id, message) => {
+          if (options[id] === undefined) return
           statuses.set(id, { state: 'error', error: message })
         },
         onExpired: (id) => {
+          if (options[id] === undefined) return
           if (statuses.get(id)?.state === 'connecting') statuses.set(id, { state: 'off' })
         },
       })
@@ -434,7 +526,16 @@ export function install(rt) {
   const readinessFor = (connector, level, settings) => {
     if (typeof connector.readiness !== 'function') return undefined
     try {
-      const note = connector.readiness({ level, settings })
+  const readinessFor = (id, level, settings) => {
+    const connector = options[id]
+    if (typeof connector.readiness !== 'function') return undefined
+    try {
+      const note = connector.readiness({ level, settings, instance: instanceContextOf(id) })
+      return typeof note === 'string' && note !== '' ? note : undefined
+    } catch (error) {
+      return reason(error)
+    }
+  }
       return typeof note === 'string' && note !== '' ? note : undefined
     } catch (error) {
       return reason(error)
@@ -443,7 +544,7 @@ export function install(rt) {
   const levelNoteOf = (id) => {
     const connector = options[id]
     if (typeof connector.unavailable === 'string' && connector.unavailable !== '') return connector.unavailable
-    return readinessFor(connector, levelOf(id), settingsOf(id))
+    return readinessFor(id, levelOf(id), settingsOf(id))
   }
   // Every declared level and the reason it is not usable yet (nothing for the levels that
   // are). The client disables a level before the user switches into a dead end.
@@ -451,7 +552,7 @@ export function install(rt) {
     const connector = options[id]
     const notes = {}
     for (const level of levelsOf(connector)) {
-      const note = readinessFor(connector, level, settingsOf(id))
+      const note = readinessFor(id, level, settingsOf(id))
       if (note !== undefined) notes[level] = note
     }
     return notes
@@ -464,7 +565,7 @@ export function install(rt) {
     const level = levelOf(id)
     let declared
     if (typeof connector.toolsOf === 'function') {
-      declared = connector.toolsOf({ level, settings: settingsOf(id) })
+      declared = connector.toolsOf({ level, settings: settingsOf(id), instance: instanceContextOf(id) })
       if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) {
         throw new Error(`${connector.displayName}'s toolsOf must return { readTools, actionTools }`)
       }
@@ -567,6 +668,7 @@ export function install(rt) {
       redact: rt.redactSecrets,
       level: levelOf(id),
       settings: settingsOf(id),
+      instance: instanceContextOf(id),
       approve,
     })
     if (mounted === undefined || mounted === null) return { token: credentialKeyOf(connector), dispose: [] }
@@ -800,7 +902,7 @@ export function install(rt) {
       try {
         for (const tool of picked) {
           const approve = actionNames.has(tool.name)
-            ? (args, exec) => requireActionApproval(connector, tool.name, args, exec, client)
+            ? (args, exec) => requireActionApproval(id, tool.name, args, exec, client)
             : undefined
           dispose.push(ctx.tools.register(readOnlyTool(id, tool, { client, teamId, approve, defaults })))
         }
@@ -814,7 +916,7 @@ export function install(rt) {
               output,
               redact: rt.redactSecrets,
               accountId: currentAccountId,
-              approve: (name, args, exec) => requireActionApproval(connector, name, args, exec, client),
+              approve: (name, args, exec) => requireActionApproval(id, name, args, exec, client),
             })))
             toolboxes.set(CLOUDFLARE_TOOLBOX_TOOLS[1], { id, connector, blocked, kind: 'cloudflare' })
           } else {
@@ -825,7 +927,7 @@ export function install(rt) {
               output,
               redact: rt.redactSecrets,
               teamId,
-              approve: (name, args, exec) => requireActionApproval(connector, name, args, exec, client),
+              approve: (name, args, exec) => requireActionApproval(id, name, args, exec, client),
             })))
             const blocked = new Set(index.filter(entry => entry.class === 'blocked').map(entry => entry.name))
             toolboxes.set('vercel_call', { id, connector, blocked, kind: 'vercel' })
@@ -843,7 +945,9 @@ export function install(rt) {
   }
 
   async function reconcile(id, force) {
+    // A queued mount may outlive its instance: a deletion removes the option first.
     const connector = options[id]
+    if (connector === undefined) return
     const previous = mounts.get(id)?.token
     const oauthConnector = connector.mode === 'oauth-mcp'
     let token
@@ -987,11 +1091,16 @@ export function install(rt) {
     }
   }
 
-  // One change at a time; `force` connects again even when the token is the same.
-  const sync = (id, force = false) => {
-    queue = queue.then(() => reconcile(id, force)).catch(error => { rt.warn('ds-bot: connectors: %s', reason(error)) })
-    return queue
+  // Every change runs one at a time: a mount, an authorization, a new instance and a
+  // removal never interleave, so a deletion cannot race the mount it is tearing down.
+  const serialise = (work) => {
+    const result = queue.then(work)
+    queue = result.then(() => {}, () => {})
+    return result
   }
+  // `force` connects again even when the token is the same.
+  const sync = (id, force = false) => serialise(() => reconcile(id, force))
+    .catch(error => { rt.warn('ds-bot: connectors: %s', reason(error)) })
 
   // A token connector shows the account signIn read; an OAuth connector shows what its
   // own account tool answered after the mount.
@@ -1006,13 +1115,17 @@ export function install(rt) {
     return state.connectors?.[id]?.[connector.accountField] ?? null
   }
 
-  const connectorsView = () => ids.map(id => {
+  const connectorsView = () => ids().map(id => {
     const connector = options[id]
     const status = statuses.get(id) ?? { state: 'off' }
     const oauthConnector = connector.mode === 'oauth-mcp'
+    // One row per instance: the client groups rows by `instance.base`, keys them by
+    // `instance.id` and shows `instance.label` as the card name.
+    const instance = connector.baseId === undefined ? undefined : { base: connector.baseId, id, label: instanceNameOf(connector.baseId, id) }
     return {
       id,
-      name: connector.displayName,
+      name: instance === undefined ? connector.displayName : instance.label,
+      ...(instance === undefined ? {} : { instance }),
       state: status.state,
       ...(status.error !== undefined ? { error: status.error } : {}),
       // An OAuth connector has no account before it is connected; the client draws
@@ -1068,6 +1181,27 @@ export function install(rt) {
 
   const known = id => {
     if (!Object.hasOwn(options, id)) throw new Error('No such connector')
+  }
+
+  // The next instance id: numbers grow monotonically, and a deleted number is never handed
+  // out again, so a grant the provider did not revoke can never attach to a new instance.
+  // The high-water mark lives in the team file because a deleted instance's state key is
+  // gone; instance ids are valid connector ids, so the length is checked as well.
+  const allocateInstanceId = (base, existing) => {
+    const definition = definitionOf(base)
+    const used = new Set([...Object.keys(connectors), ...Object.keys(options), ...Object.keys(state.connectors ?? {}), ...existing])
+    const suffixes = existing.map(id => instanceSuffix(base, id)).filter(suffix => suffix !== undefined)
+    const stored = state.connectorInstances?.[base]?.next
+    let next = Math.max(
+      2,
+      suffixes.length === 0 ? 0 : Math.max(...suffixes) + 1,
+      Number.isInteger(stored) && stored > 1 ? stored : 2,
+    )
+    for (; ; next += 1) {
+      const id = `${base}-${next}`
+      if (!CONNECTOR_ID.test(id)) throw new Error(`${definition.displayName} cannot add another instance: the instance id would be too long`)
+      if (!used.has(id)) return { id, next: next + 1 }
+    }
   }
 
   const endpoints = {
@@ -1145,9 +1279,11 @@ export function install(rt) {
       // The requested level decides readiness, not the level stored before the switch: an
       // authorization for a level that still misses settings must not start.
       const note = (typeof connector.unavailable === 'string' && connector.unavailable !== '' ? connector.unavailable : undefined)
-        ?? readinessFor(connector, level, settingsOf(body.id))
+        ?? readinessFor(body.id, level, settingsOf(body.id))
       if (note !== undefined) throw new Error(note)
-      return await oauth.start(body.id, { origin: meta.origin, level, settings: settingsOf(body.id) })
+      // An authorization starts in the same queue as a mount or a removal: a browser that
+      // comes back after the user removed the instance cannot mount it again.
+      return await serialise(() => oauth.start(body.id, { origin: meta.origin, level, settings: settingsOf(body.id) }))
     },
     async 'connector-disconnect'(body, meta) {
       known(body.id)
@@ -1200,7 +1336,7 @@ export function install(rt) {
       if (readOnly !== undefined) throw new Error(`DS Bot is read-only: ${readOnly}`)
       // A level that is not ready yet must not take the current authorization away: refuse
       // before the disconnect and before the team file changes.
-      const note = readinessFor(connector, level, settingsOf(body.id))
+      const note = readinessFor(body.id, level, settingsOf(body.id))
       if (note !== undefined) throw new Error(note)
       const prior = state.connectors?.[body.id] ?? {}
       const authorized = connector.mode === 'oauth-mcp' && (prior.authorizedAt !== undefined || prior.account !== undefined)
@@ -1230,7 +1366,7 @@ export function install(rt) {
       const values = body.values !== null && typeof body.values === 'object' && !Array.isArray(body.values) ? body.values : {}
       let settings
       if (typeof connector.normalizeSettings === 'function') {
-        const normalized = connector.normalizeSettings({ ...values })
+        const normalized = connector.normalizeSettings({ ...values }, instanceContextOf(body.id))
         settings = normalized !== null && typeof normalized === 'object' && !Array.isArray(normalized) ? normalized : {}
       } else {
         settings = {}
@@ -1247,9 +1383,84 @@ export function install(rt) {
       } else {
         state.connectors = { ...state.connectors, [body.id]: { ...prior, settings } }
       }
+      // The card name follows the saved label: a rename is one settings field, not another
+      // endpoint, and the approval cards of this instance use the new name too.
+      if (connector.baseId !== undefined) connector.displayName = instanceNameOf(connector.baseId, body.id)
       await rt.save()
       await sync(body.id, true)
       return connectorsView()
+    },
+    // One more card for a multi-instance connector: the state key is written, the row shows
+    // off, and nothing is authorized — the user connects that instance when they choose.
+    async 'connector-create-instance'(body) {
+      const base = typeof body.base === 'string' ? body.base : ''
+      const definition = definitionOf(base)
+      if (definition === undefined) throw new Error('No such connector')
+      if (definition.instances === undefined) throw new Error(`${definition.displayName} does not support more than one instance`)
+      if (rt.config[base] === false) throw new Error(`${definition.displayName} is turned off in the profile`)
+      return await serialise(async () => {
+        const existing = instanceIdsOf(base)
+        if (existing.length >= definition.instances.max) {
+          throw new Error(`${definition.displayName} supports at most ${definition.instances.max} instances`)
+        }
+        const { id, next } = allocateInstanceId(base, existing)
+        if (rt.config[id] === false) throw new Error(`${id} is turned off in the profile`)
+        // The first instance is implied while it has no state key; once a second one is
+        // added, write it too, so a restart still lists both instead of dropping it. A base
+        // instance the user already removed is not brought back by adding another one.
+        const keepBase = existing.includes(base) && state.connectors?.[base] === undefined
+          ? { [base]: { level: 'read', settings: {} } }
+          : {}
+        state.connectors = { ...state.connectors, ...keepBase, [id]: { level: 'read', settings: {} } }
+        state.connectorInstances = { ...(state.connectorInstances ?? {}), [base]: { next } }
+        options[id] = buildOption(base, id)
+        statuses.set(id, { state: 'off' })
+        await rt.save()
+        rt.diagnostics?.record?.({
+          source: 'connector-create-instance',
+          text: `${definition.displayName} instance ${id} added as "${instanceNameOf(base, id)}"`,
+        })
+        return connectorsView()
+      })
+    },
+    // Remove one instance: its tools, its authorization and its state key go; every other
+    // instance keeps its own. The provider grant is revoked best effort — a failed revoke
+    // is a warning and does not leave the removal half done locally. The last instance stays.
+    async 'connector-delete-instance'(body, meta) {
+      const id = typeof body.id === 'string' ? body.id : ''
+      const connector = options[id]
+      if (connector === undefined) throw new Error('No such connector')
+      const base = connector.baseId
+      const definition = base === undefined ? undefined : definitionOf(base)
+      if (definition === undefined || definition.instances === undefined) throw new Error(`${connector.displayName} has a single instance and cannot be removed`)
+      return await serialise(async () => {
+        // Checked again inside the queue: a parallel removal may have taken one already.
+        if (options[id] === undefined) throw new Error('No such connector')
+        if (instanceIdsOf(base).length <= definition.instances.min) {
+          throw new Error(`${definition.displayName} keeps at least ${definition.instances.min} instance${definition.instances.min === 1 ? '' : 's'}`)
+        }
+        const label = instanceNameOf(base, id)
+        storeAttempts.delete(id)
+        await unmount(id)
+        if (connector.mode === 'oauth-mcp' && oauth !== undefined) {
+          try {
+            await oauth.disconnect(id)
+          } catch (error) {
+            rt.warn('ds-bot: could not clear the %s authorization of %s: %s', definition.displayName, id, reason(error))
+          }
+        }
+        if (state.connectors?.[id] !== undefined) delete state.connectors[id]
+        delete options[id]
+        statuses.delete(id)
+        mounts.delete(id)
+        await rt.save()
+        const origin = typeof meta?.origin === 'string' && meta.origin !== '' ? ` from ${meta.origin}` : ''
+        rt.diagnostics?.record?.({
+          source: 'connector-delete-instance',
+          text: `${definition.displayName} instance ${id} ("${label}") removed${origin}`,
+        })
+        return connectorsView()
+      })
     },
     async 'connector-retry'(body) {
       known(body.id)
@@ -1322,21 +1533,21 @@ export function install(rt) {
 
   ctx.effect(() => {
     stopped = false
-    void rt.loadSecrets().then(() => { for (const id of ids) void sync(id) })
+    void rt.loadSecrets().then(() => { for (const id of ids()) void sync(id) })
     return () => {
       stopped = true
       approval.dispose()
       oauth?.dispose()
-      for (const id of ids) void unmount(id)
+      for (const id of ids()) void unmount(id)
     }
   }, 'ds-bot: connectors')
 
-  Object.assign(rt, {
+  return {
     connectorsView,
     connectorEndpoint,
-    secretsChanged: () => { for (const id of ids) void sync(id) },
+    secretsChanged: () => { for (const id of ids()) void sync(id) },
     answerConnectorApproval: (sessionId, questionId, body) => approval.answer(sessionId, questionId, body),
     dismissConnectorApproval: (sessionId, questionId) => approval.dismiss(sessionId, questionId),
     cancelConnectorApprovals: (sessionId, outcome) => approval.cancel(sessionId, outcome),
-  })
+  }
 }
