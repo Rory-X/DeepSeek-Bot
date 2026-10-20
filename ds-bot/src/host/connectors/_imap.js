@@ -946,7 +946,9 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
     return result.catch(error => { throw new Error(describe(error)) })
   }
 
-  const allowed = (tool, line, danger) => approve({ tool, line, ...(danger === true ? { danger: true } : {}) })
+  // The approval names the call and hands over the calling session (`exec`), which is what
+  // the framework needs to aim its card at the Session that asked.
+  const allowed = (tool, line, exec, danger) => approve({ tool, line, ...(danger === true ? { danger: true } : {}), exec })
 
   const uidsParam = {
     type: 'array',
@@ -963,10 +965,10 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
       description: `Mark messages as read in a ${displayName} folder (write; the user is asked first).`,
       parameters: { type: 'object', properties: { folder: folderParam, uids: uidsParam }, required: ['uids'] },
       output,
-      execute: async (args) => {
+      execute: async (args, exec) => {
         const folder = folderName(args?.folder)
         const uids = uidList(args?.uids)
-        await allowed(`${id}_mark_read`, `Mark ${uids.length} message(s) in "${folder}" as read (UID ${uids.join(',')})`)
+        await allowed(`${id}_mark_read`, `Mark ${uids.length} message(s) in "${folder}" as read (UID ${uids.join(',')})`, exec)
         return run(async (imap) => {
           await imap.select(folder)
           await imap.storeFlags(uids, { add: ['\\Seen'] })
@@ -979,10 +981,10 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
       description: `Mark messages as unread in a ${displayName} folder (write; the user is asked first).`,
       parameters: { type: 'object', properties: { folder: folderParam, uids: uidsParam }, required: ['uids'] },
       output,
-      execute: async (args) => {
+      execute: async (args, exec) => {
         const folder = folderName(args?.folder)
         const uids = uidList(args?.uids)
-        await allowed(`${id}_mark_unread`, `Mark ${uids.length} message(s) in "${folder}" as unread (UID ${uids.join(',')})`)
+        await allowed(`${id}_mark_unread`, `Mark ${uids.length} message(s) in "${folder}" as unread (UID ${uids.join(',')})`, exec)
         return run(async (imap) => {
           await imap.select(folder)
           await imap.storeFlags(uids, { remove: ['\\Seen'] })
@@ -1003,11 +1005,11 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
         required: ['uids', 'to'],
       },
       output,
-      execute: async (args) => {
+      execute: async (args, exec) => {
         const folder = folderName(args?.folder)
         const uids = uidList(args?.uids)
         const target = requiredFolder(args?.to, 'to')
-        await allowed(`${id}_move_messages`, `Move ${uids.length} message(s) from "${folder}" to "${target}" (UID ${uids.join(',')})`)
+        await allowed(`${id}_move_messages`, `Move ${uids.length} message(s) from "${folder}" to "${target}" (UID ${uids.join(',')})`, exec)
         return run(async (imap) => {
           await imap.select(folder)
           await imap.move(uids, target)
@@ -1028,11 +1030,11 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
         required: ['uids'],
       },
       output,
-      execute: async (args) => {
+      execute: async (args, exec) => {
         const folder = folderName(args?.folder)
         const uids = uidList(args?.uids)
         if (args?.permanent === true) {
-          await allowed(`${id}_delete_messages`, `Permanently delete ${uids.length} message(s) in "${folder}" (UID ${uids.join(',')}); this cannot be undone`, true)
+          await allowed(`${id}_delete_messages`, `Permanently delete ${uids.length} message(s) in "${folder}" (UID ${uids.join(',')}); this cannot be undone`, exec, true)
           return run(async (imap) => {
             await imap.select(folder)
             if (!(await imap.capabilities()).has('UIDPLUS')) throw new Error('This mail server cannot permanently delete; it only moves messages to Trash.')
@@ -1041,7 +1043,7 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
             return `Permanently deleted ${uids.length} message(s) from "${folder}".`
           })
         }
-        await allowed(`${id}_delete_messages`, `Move ${uids.length} message(s) from "${folder}" to Trash (UID ${uids.join(',')})`)
+        await allowed(`${id}_delete_messages`, `Move ${uids.length} message(s) from "${folder}" to Trash (UID ${uids.join(',')})`, exec)
         return run(async (imap) => {
           const trash = await imap.folderMatching({ flag: '\\TRASH', names: /^(trash|deleted|已删除|垃圾桶)/i, label: 'Trash' })
           await imap.select(folder)
@@ -1064,7 +1066,7 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
         required: ['body'],
       },
       output,
-      execute: async (args) => {
+      execute: async (args, exec) => {
         const body = typeof args?.body === 'string' ? args.body : ''
         if (body.trim() === '') throw new Error('A draft needs a body.')
         if (Buffer.byteLength(body, 'utf8') > 100_000) throw new Error('A draft body must stay under 100 KB.')
@@ -1074,7 +1076,7 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
         if (/[\r\n]/.test(to)) throw new Error('A recipient cannot contain a line break.')
         const folder = args?.folder === undefined ? undefined : requiredFolder(args.folder, 'folder')
         const about = subject === '' ? '' : ` with subject ${JSON.stringify(subject.slice(0, 60))}`
-        await allowed(`${id}_save_draft`, `Save a draft${about}`)
+        await allowed(`${id}_save_draft`, `Save a draft${about}`, exec)
         return run(async (imap) => {
           const drafts = folder ?? await imap.folderMatching({ flag: '\\DRAFTS', names: /^(drafts?|草稿箱|草稿)/i, label: 'Drafts' })
           await imap.append(drafts, { flags: ['\\Draft'], date: imapDateTime(), raw: buildDraft({ from: mailbox, to, subject, body }) })
