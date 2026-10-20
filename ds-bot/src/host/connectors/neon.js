@@ -47,6 +47,10 @@ export const NEON_SETTINGS = [
   { name: 'roleName', label: 'SQL role' },
 ]
 
+// The MCP address every grant is built on. A profile override may move it (a self-hosted
+// Neon MCP or a test server); configure() keeps it here, with the grant parameters removed.
+let baseAddress = NEON_MCP_URL
+
 const PROJECT_ID = /^[a-z0-9-]{1,60}$/
 const ROLE_NAME = /^[A-Za-z_][A-Za-z0-9_$]{0,62}$/
 const PLAIN_ADDRESS = 'The Neon server address must be a plain https:// URL'
@@ -71,8 +75,16 @@ export function readOnlyNeonUrl(value) {
   return url.href
 }
 
+// The plain MCP address behind a configured one: a profile may keep the grant parameters
+// from an earlier run, and they are re-applied per level here.
+function baseOf(value) {
+  const url = plainAddress(value)
+  for (const name of ['readonly', 'category', 'projectId', 'roleName']) url.searchParams.delete(name)
+  return url.href
+}
+
 export function neonUrl({ projectId, roleName } = {}) {
-  const url = new URL(NEON_MCP_URL)
+  const url = new URL(baseAddress)
   url.searchParams.set('readonly', 'true')
   for (const category of NEON_READ_CATEGORIES) url.searchParams.append('category', category)
   // The grammars Neon accepts; anything else is dropped here, where the mistake is visible,
@@ -90,7 +102,7 @@ export function neonWriteUrl({ projectId, roleName } = {}) {
   const role = typeof roleName === 'string' ? roleName.trim() : ''
   if (!PROJECT_ID.test(id)) throw new Error('Full access needs a Neon project ID, for example spring-brook-12345678')
   if (!ROLE_NAME.test(role)) throw new Error('Full access needs a restricted Postgres role that exists on the branches you query')
-  const url = new URL(NEON_MCP_URL)
+  const url = new URL(baseAddress)
   for (const category of NEON_WRITE_CATEGORIES) url.searchParams.append('category', category)
   url.searchParams.set('projectId', id)
   url.searchParams.set('roleName', role)
@@ -187,21 +199,31 @@ export async function neonActionApproval(name, args, context = {}) {
   const branchId = typeof given.branch_id === 'string' ? given.branch_id : ''
   const branch = branchId === '' ? 'the default branch' : (await branchNameOf(context.client, branchId)) ?? branchId
   if (name === 'delete_branch') {
-    return { line: `Delete branch ${branch} on ${project}: all data on that branch is deleted and cannot be recovered.`, danger: true }
+    return {
+      line: `Delete branch ${branch} on ${project}: all data on that branch is deleted and cannot be recovered.`,
+      change: 'A whole branch and its data are removed.',
+      target: branch,
+      reversible: false,
+      danger: true,
+    }
   }
   if (name === 'create_branch') {
     const parent = typeof given.parent_id === 'string' && given.parent_id !== '' ? given.parent_id : 'the default branch'
-    return { line: `Create branch ${typeof given.name === 'string' && given.name !== '' ? given.name : '(generated name)'} on ${project}, from ${parent}.`, danger: false }
+    return {
+      line: `Create branch ${typeof given.name === 'string' && given.name !== '' ? given.name : '(generated name)'} on ${project}, from ${parent}.`,
+      target: project,
+      reversible: true,
+    }
   }
   if (name === 'create_snapshot') {
     const snapshot = typeof given.name === 'string' && given.name !== '' ? ` named ${given.name}` : ''
-    return { line: `Take a snapshot of ${branch} on ${project}${snapshot}.`, danger: false }
+    return { line: `Take a snapshot of ${branch} on ${project}${snapshot}.`, target: branch, reversible: true }
   }
   if (name === 'run_sql') {
     const role = typeof given.role_name === 'string' && given.role_name !== '' ? given.role_name : (typeof pinned.roleName === 'string' ? pinned.roleName : 'the pinned role')
-    return { line: `Run SQL as ${role} on ${branch} (${project}): ${sqlPreview(given.sql)}`, danger: false }
+    return { line: `Run SQL as ${role} on ${branch} (${project}): ${sqlPreview(given.sql)}`, target: branch, reversible: false }
   }
-  return { line: `Run ${String(name)} on ${project}.`, danger: false }
+  return { line: `Run ${String(name)} on ${project}.`, target: project }
 }
 
 // What the card shows for "connected as": the person a token names, else the organizations
@@ -258,6 +280,7 @@ export function configure(override = {}) {
   const configured = typeof override === 'object' && override !== null && typeof override.url === 'string' && override.url !== ''
     ? override.url
     : neon.mcpUrl
+  baseAddress = baseOf(configured)
   return {
     url: readOnlyNeonUrl(configured),
     mode: neon.mode,
