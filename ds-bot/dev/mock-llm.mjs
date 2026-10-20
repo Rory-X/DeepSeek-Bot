@@ -19,6 +19,7 @@
 //   建群 名: A, B · 群发[回报] 名: 消息 · 改群 名 公告|管理员|模式|加|踢: 值 · 删群 名
 //   看群 名 (read_group_chat) · 转告 名: 消息, also over several lines (message_bot) · 搜索：查询1 | 查询2 (web_search)
 //   进目录 路径 (working_directory with cd)
+//   归组 名: A, B (Main Bot organize_bots)
 //   插话 名: 消息 (message_bot when "now") · 排队 名: 消息 (message_bot when "queue") · 叫停 名: 原因 (stop_bot)
 //   In a message from a Bot: 转告 名: 消息 (hands it on with message_bot) · 慢慢做 N (answers after N seconds)
 //   长文 N / long N (N×1000 characters) · 长任务 N [K] (N steps of K×1000, default 4)
@@ -240,6 +241,7 @@ function decide(body) {
         return [text(picked ? `好，就从「${picked}」开始。` : '好的。'), text('我先把要点理一下，稍后给你一个方案。')]
       }
       case 'list_bots': return [text(`现在的班底：\n${resultText}`)]
+      case 'organize_bots': return [text(`分组结果：${resultText}`)]
       case 'create_group':
       case 'update_group':
       case 'delete_group':
@@ -398,6 +400,9 @@ function decide(body) {
   }
   // Group management in a Bot's own chat, in a fixed command form the tests use.
   let order
+  if ((order = /^归组\s+([^\n:：]+)[:：]\s*([^\n]+)/m.exec(userText)) && isMain && tools.has('organize_bots')) {
+    return [tool('organize_bots', { action: 'assign', folder: order[1].trim(), bots: order[2].split(/[,，]/).map(name => name.trim()).filter(Boolean) })]
+  }
   if ((order = /^建群\s*(\S+?)\s*[:：]\s*(.+)$/.exec(userText))) {
     return [text('我来建这个群。'), tool('create_group', { name: order[1], members: order[2].split(/[,，、\s]+/).filter(Boolean) })]
   }

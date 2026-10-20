@@ -117,10 +117,36 @@ test('folder names and membership survive a real store restart', async t => {
   rt.state.bots = fixture().state.bots
   rt.state.mainBotIds = ['chief']
   await rt.botFolderMutate('assign', { name: 'connector', botIds: five })
+  const folder = rt.botFoldersView()[0]
+  await rt.botFolderMutate('pin', { id: folder.id, version: folder.version, pinned: true })
   const before = rt.botFoldersView()
   await ctx.dispose()
   ctx = fakeContext()
   rt = createRuntime(ctx, { home })
   await rt.load()
   assert.deepEqual(rt.botFoldersView(), before)
+  assert.equal(rt.botFoldersView()[0].pinned, true)
+})
+
+test('pinning survives membership edits and rejects invalid or stale requests', async () => {
+  const rt = fixture()
+  const folder = await rt.botFolderMutate('assign', { name: 'connector', botIds: five })
+  await assert.rejects(rt.botFolderMutate('pin', { id: folder.id, pinned: 'yes' }), /whether/)
+  const pinned = await rt.botFolderMutate('pin', { id: folder.id, version: folder.version, pinned: true })
+  await assert.rejects(rt.botFolderMutate('pin', { id: folder.id, version: folder.version, pinned: false }), /changed/)
+  const edited = await rt.botFolderMutate('save', { id: folder.id, version: pinned.version, name: 'integrations', botIds: ['auth'] })
+  assert.equal(edited.pinned, true)
+  assert.equal((await rt.botFolderMutate('pin', { id: folder.id, version: edited.version, pinned: false })).pinned, false)
+})
+
+test('dissolving a populated folder retains every Bot and other folders', async () => {
+  const rt = fixture()
+  rt.state.bots.auth.pinned = true
+  const bots = structuredClone(rt.state.bots)
+  const folder = await rt.botFolderMutate('assign', { name: 'connector', botIds: five })
+  const other = await rt.botFolderMutate('assign', { name: 'design', botIds: ['design'] })
+  await assert.rejects(rt.botFolderMutate('dissolve', { id: folder.id, version: 999 }), /changed/)
+  await rt.botFolderMutate('dissolve', { id: folder.id, version: folder.version })
+  assert.deepEqual(rt.state.bots, bots)
+  assert.deepEqual(rt.botFoldersView(), [other])
 })

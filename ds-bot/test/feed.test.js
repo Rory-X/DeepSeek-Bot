@@ -137,6 +137,35 @@ test('a window that stops reading the feed is dropped', { timeout: 10_000 }, asy
   assert.equal(count > 1 && count < 1000, true)
 })
 
+test('roster-only subscribers see folder saves without chat messages or model streams', async t => {
+  const { ctx, call, stop, routes } = start()
+  t.after(stop)
+  await call('state')
+  const abort = new AbortController()
+  const scoped = reader(await routes['/api/bot/feed'].fetch(new Request('http://localhost/api/bot/feed?scope=roster', { signal: abort.signal })))
+  const full = reader(await routes['/api/bot/feed'].fetch(new Request('http://localhost/api/bot/feed', { signal: abort.signal })))
+  t.after(() => abort.abort())
+  assert.equal((await scoped()).event, 'hello')
+  assert.equal((await full()).event, 'hello')
+  ctx.listeners.get('session/event').at(-1)({ id: 'm1c' }, userMessage('chat stays on the full feed', 60))
+  assert.equal((await full()).event, 'message')
+  const stream = ctx.listeners.get('agent/assistant-stream')[0]
+  stream({ agent: { id: 'm1c' }, frame: { type: 'start', attemptId: 'visible', turn: 8 } })
+  assert.equal((await full()).event, 'stream')
+  const saved = await call('bot-folder-save', { name: 'connector', botIds: ['b2'] })
+  assert.equal(saved.ok, true)
+  assert.equal((await scoped()).event, 'revision')
+  assert.equal((await full()).event, 'revision')
+  const pinned = await call('bot-folder-pin', { id: saved.value.id, version: saved.value.version, pinned: true })
+  assert.equal(pinned.ok, true)
+  assert.equal((await scoped()).event, 'revision')
+  const dissolved = await call('bot-folder-dissolve', { id: pinned.value.id, version: pinned.value.version })
+  assert.equal(dissolved.ok, true)
+  assert.equal((await scoped()).event, 'revision')
+  assert.deepEqual((await call('state')).value.botFolders, [])
+  assert.ok((await call('state')).value.bots.some(bot => bot.id === 'b2'))
+})
+
 test('the chat endpoint pages a Bot\'s own chat from the newest part back', async (t) => {
   const record = (event, seq) => ({ event: { ...event, seq } })
   const { call, stop } = start({

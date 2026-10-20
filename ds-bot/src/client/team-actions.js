@@ -11,6 +11,8 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, tur
     closeBotFolders: () => { ui.set(state => ({ ...state, botFolders: null })) },
     saveBotFolder: payload => after(call('bot-folder-save', payload)),
     deleteBotFolder: payload => after(call('bot-folder-delete', payload)),
+    pinBotFolder: payload => after(call('bot-folder-pin', payload)),
+    dissolveBotFolder: payload => after(call('bot-folder-dissolve', payload)),
     ungroupBot: id => after(call('bot-folder-assign', { name: '', botIds: [id] })),
     openNewChat: (mode) => { ui.set(state => ({ ...state, newChat: mode, menu: null, palette: null })) },
     openPalette: (query = '') => { ui.set(state => ({ ...state, palette: { query, token: Date.now() }, newChat: null, menu: null })) },

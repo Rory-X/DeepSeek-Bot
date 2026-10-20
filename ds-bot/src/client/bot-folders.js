@@ -1,5 +1,5 @@
 import { createElement as h, useEffect, useId, useRef, useState } from 'react'
-import { ChevronRightIcon, DotsIcon, CloseIcon } from './icons.js'
+import { ChevronRightIcon, DotsIcon, CloseIcon, PinMarkIcon } from './icons.js'
 import { useEscape } from './overlay-hooks.js'
 import { hostText, t } from './i18n.js'
 
@@ -7,14 +7,15 @@ export function splitBotFolders(order, folders = []) {
   const assigned = new Set(folders.flatMap(folder => folder.botIds))
   return {
     loose: order.filter(entry => entry.kind !== 'bot' || !assigned.has(entry.item.id)),
-    folders: folders.map(folder => ({ ...folder, entries: order.filter(entry => entry.kind === 'bot' && folder.botIds.includes(entry.item.id)) })),
+    folders: [...folders].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))).map(folder => ({ ...folder, entries: order.filter(entry => entry.kind === 'bot' && folder.botIds.includes(entry.item.id)) })),
   }
 }
 
-export function BotFolderSection({ folder, roster, actions, renderRow }) {
+export function BotFolderSection({ folder, roster, actions, useUi, renderRow }) {
   const key = `ds-bot:folder:${roster.workspaceId ?? roster.mainBotId}:${folder.id}`
   const [closed, setClosed] = useState(false)
   const panelId = useId()
+  const menuOpen = useUi ? useUi(value => value.menu?.kind === 'bot-folder' && value.menu.id === folder.id) : false
   useEffect(() => {
     const read = () => { try { setClosed(localStorage.getItem(key) === 'closed') } catch {} }
     read()
@@ -31,8 +32,12 @@ export function BotFolderSection({ folder, roster, actions, renderRow }) {
     h('div', { className: 'bt-bot-folder-head' },
       h('button', { type: 'button', className: 'bt-bot-folder-toggle', 'aria-expanded': !closed, 'aria-controls': panelId, onClick: toggle, title: folder.name },
         h('span', { className: 'bt-bot-folder-name' }, folder.name),
+        folder.pinned ? h('span', { className: 'bt-bot-folder-pin', 'aria-hidden': true, title: t('Pinned') }, h(PinMarkIcon)) : null,
         h('span', { className: 'bt-bot-folder-chevron', 'data-open': !closed || undefined }, h(ChevronRightIcon))),
-      h('button', { type: 'button', className: 'bt-bot-folder-edit', 'aria-label': t('Edit folder {name}', { name: folder.name }), title: t('Edit folder {name}', { name: folder.name }), onClick: () => actions.openBotFolders({ folderId: folder.id }) }, h(DotsIcon))),
+      h('button', { type: 'button', className: 'bt-bot-folder-edit', 'aria-label': t('Folder {name} actions', { name: folder.name }), title: t('Folder {name} actions', { name: folder.name }), 'aria-haspopup': 'menu', 'aria-expanded': menuOpen, onClick: event => {
+        const rect = event.currentTarget.getBoundingClientRect()
+        actions.openMenu({ kind: 'bot-folder', id: folder.id, x: rect.right, y: rect.bottom, align: 'end' })
+      } }, h(DotsIcon))),
     h('div', { id: panelId, hidden: closed, className: 'bt-bot-folder-rows' },
       // Keep rows mounted so unread-clearing and active-chat tracking continue when folded.
       folder.entries.map(renderRow),
@@ -112,7 +117,9 @@ export function BotFoldersDialog({ start, roster, actions }) {
 export const BOT_FOLDERS_CSS = `
 .bt-bot-folder{margin-top:4px;min-width:0}
 .bt-bot-folder-head{display:flex;align-items:center;gap:var(--bt-row-gap,8px);padding:0 var(--bt-row-inset,8px) 0 calc(var(--bt-row-inset,8px) + 4px)}
-.bt-bot-folder-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:32px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--bt-ink-2);font:inherit;font-size:14px;font-weight:500;line-height:20px;text-align:left;cursor:pointer}
+.bt-bot-folder-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:32px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--bt-ink-2);font:inherit;font-size:13px;font-weight:500;line-height:20px;text-align:left;cursor:pointer}
+.bt-bot-folder-pin{display:flex;flex:none;color:var(--bt-ink-2)}
+.bt-bot-folder-pin svg{width:12px;height:12px}
 .bt-bot-folder-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-bot-folder-toggle:hover,.bt-bot-folder-edit:hover{color:var(--bt-ink)}
 .bt-bot-folder-empty:hover{background:var(--bt-hover);color:var(--bt-ink)}

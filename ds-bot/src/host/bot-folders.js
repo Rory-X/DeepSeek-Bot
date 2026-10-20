@@ -64,15 +64,20 @@ export function install(rt) {
           const keep = other.botIds.filter(id => !ids.includes(id))
           if (keep.length !== other.botIds.length) { other.botIds = keep; other.version += 1 }
         }
+      } else if (kind === 'pin') {
+        if (!folder) throw invalid('Choose a Bot folder.')
+        if (typeof body.pinned !== 'boolean') throw invalid('Choose whether the folder is pinned.')
+        folder.pinned = body.pinned
+        folder.version += 1
       } else if (kind === 'rename') {
         if (!folder) throw invalid('Choose a Bot folder.')
         const name = cleanName(body.name)
         nameAvailable(name, folder.id)
         folder.name = name
         folder.version += 1
-      } else if (kind === 'delete') {
+      } else if (kind === 'delete' || kind === 'dissolve') {
         if (!folder) throw invalid('Choose a Bot folder.')
-        if (folder.botIds.length) throw invalid('Move the Bots out before deleting this folder.')
+        if (kind === 'delete' && folder.botIds.length) throw invalid('Move the Bots out before deleting this folder.')
         delete folders[folder.id]
       } else throw invalid('Unknown Bot folder action.')
       rt.state.botFolders = folders
@@ -80,7 +85,7 @@ export function install(rt) {
         if (rt.state.botFolders === folders) rt.state.botFolders = before
         throw error
       }
-      return kind === 'delete' ? null : folder ?? null
+      return kind === 'delete' || kind === 'dissolve' ? null : folder ?? null
     })
     writing = operation.catch(() => {})
     return operation

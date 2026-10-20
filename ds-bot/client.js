@@ -193,6 +193,11 @@ var BOARD_ZH = {
 var NAMESPACE = "ds-bot";
 var ZH = {
   "Organize Bots": "管理 Bot 分组",
+  "Pin folder": "置顶分组",
+  "Unpin folder": "取消置顶",
+  "Manage folder": "管理分组",
+  "Dissolve folder": "解散分组",
+  "Folder {name} actions": "分组 {name} 的操作",
   "Bot folder": "Bot 分组",
   "New Bot folder": "新建 Bot 分组",
   "Folder name": "分组名称",
@@ -1385,6 +1390,102 @@ var call = async (endpoint, payload, signal) => {
   return result.value;
 };
 
+// src/client/roster-sync.js
+function queueRosterPull(read) {
+  let running = false;
+  let pending;
+  const batch = () => {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  };
+  const start = (request) => {
+    running = true;
+    void Promise.resolve().then(read).then(request.resolve, request.reject).finally(() => {
+      running = false;
+      const next = pending;
+      pending = void 0;
+      if (next) start(next);
+    });
+    return request.promise;
+  };
+  return () => {
+    if (!running) return start(batch());
+    pending ??= batch();
+    return pending.promise;
+  };
+}
+var RETRY_MS = [500, 1e3, 2e3, 5e3];
+function watchRosterChanges(onChange, { fetcher = globalThis.fetch, schedule = setTimeout, cancel = clearTimeout } = {}) {
+  let stopped = false;
+  let controller, reader, timer, finishWait;
+  const run = async () => {
+    let failures = 0;
+    while (!stopped) {
+      controller = new AbortController();
+      try {
+        const response = await fetcher("api/bot/feed?scope=roster", { credentials: "same-origin", signal: controller.signal, cache: "no-store" });
+        if (stopped) {
+          await response.body?.cancel();
+          return;
+        }
+        if (!response.ok || !response.body) throw new Error("Roster feed unavailable");
+        reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!stopped) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+          for (let end = buffer.indexOf("\n\n"); end >= 0; end = buffer.indexOf("\n\n")) {
+            const lines = buffer.slice(0, end).split("\n");
+            buffer = buffer.slice(end + 2);
+            const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
+            if (event !== "hello" && event !== "revision") continue;
+            let data;
+            try {
+              data = JSON.parse(lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n"));
+            } catch {
+              continue;
+            }
+            if (!Number.isSafeInteger(data?.revision)) continue;
+            failures = 0;
+            if (!stopped) onChange(data.revision);
+          }
+          if (buffer.length > 65536) throw new Error("Roster feed frame is too large");
+        }
+      } catch {
+      } finally {
+        if (reader) {
+          await reader.cancel().catch(() => {
+          });
+          reader.releaseLock();
+          reader = void 0;
+        }
+      }
+      if (stopped) return;
+      await new Promise((resolve) => {
+        finishWait = resolve;
+        timer = schedule(resolve, RETRY_MS[Math.min(failures++, RETRY_MS.length - 1)]);
+      });
+      timer = void 0;
+      finishWait = void 0;
+    }
+  };
+  void run();
+  return () => {
+    stopped = true;
+    controller?.abort();
+    void reader?.cancel().catch(() => {
+    });
+    cancel(timer);
+    finishWait?.();
+  };
+}
+
 // src/client/inks.js
 var INKS = {
   deepseek: ["#4D6BFE", "#6A84FF"],
@@ -1849,6 +1950,8 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     },
     saveBotFolder: (payload) => after(call2("bot-folder-save", payload)),
     deleteBotFolder: (payload) => after(call2("bot-folder-delete", payload)),
+    pinBotFolder: (payload) => after(call2("bot-folder-pin", payload)),
+    dissolveBotFolder: (payload) => after(call2("bot-folder-dissolve", payload)),
     ungroupBot: (id) => after(call2("bot-folder-assign", { name: "", botIds: [id] })),
     openNewChat: (mode) => {
       ui2.set((state) => ({ ...state, newChat: mode, menu: null, palette: null }));
@@ -8966,13 +9069,14 @@ function splitBotFolders(order, folders = []) {
   const assigned = new Set(folders.flatMap((folder) => folder.botIds));
   return {
     loose: order.filter((entry) => entry.kind !== "bot" || !assigned.has(entry.item.id)),
-    folders: folders.map((folder) => ({ ...folder, entries: order.filter((entry) => entry.kind === "bot" && folder.botIds.includes(entry.item.id)) }))
+    folders: [...folders].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))).map((folder) => ({ ...folder, entries: order.filter((entry) => entry.kind === "bot" && folder.botIds.includes(entry.item.id)) }))
   };
 }
-function BotFolderSection({ folder, roster, actions, renderRow }) {
+function BotFolderSection({ folder, roster, actions, useUi, renderRow }) {
   const key = `ds-bot:folder:${roster.workspaceId ?? roster.mainBotId}:${folder.id}`;
   const [closed, setClosed] = (0, import_react20.useState)(false);
   const panelId = (0, import_react20.useId)();
+  const menuOpen = useUi ? useUi((value) => value.menu?.kind === "bot-folder" && value.menu.id === folder.id) : false;
   (0, import_react20.useEffect)(() => {
     const read = () => {
       try {
@@ -9005,9 +9109,13 @@ function BotFolderSection({ folder, roster, actions, renderRow }) {
         "button",
         { type: "button", className: "bt-bot-folder-toggle", "aria-expanded": !closed, "aria-controls": panelId, onClick: toggle, title: folder.name },
         (0, import_react20.createElement)("span", { className: "bt-bot-folder-name" }, folder.name),
+        folder.pinned ? (0, import_react20.createElement)("span", { className: "bt-bot-folder-pin", "aria-hidden": true, title: t("Pinned") }, (0, import_react20.createElement)(PinMarkIcon)) : null,
         (0, import_react20.createElement)("span", { className: "bt-bot-folder-chevron", "data-open": !closed || void 0 }, (0, import_react20.createElement)(ChevronRightIcon))
       ),
-      (0, import_react20.createElement)("button", { type: "button", className: "bt-bot-folder-edit", "aria-label": t("Edit folder {name}", { name: folder.name }), title: t("Edit folder {name}", { name: folder.name }), onClick: () => actions.openBotFolders({ folderId: folder.id }) }, (0, import_react20.createElement)(DotsIcon))
+      (0, import_react20.createElement)("button", { type: "button", className: "bt-bot-folder-edit", "aria-label": t("Folder {name} actions", { name: folder.name }), title: t("Folder {name} actions", { name: folder.name }), "aria-haspopup": "menu", "aria-expanded": menuOpen, onClick: (event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        actions.openMenu({ kind: "bot-folder", id: folder.id, x: rect.right, y: rect.bottom, align: "end" });
+      } }, (0, import_react20.createElement)(DotsIcon))
     ),
     (0, import_react20.createElement)(
       "div",
@@ -9132,7 +9240,9 @@ function BotFoldersDialog({ start, roster, actions }) {
 var BOT_FOLDERS_CSS = `
 .bt-bot-folder{margin-top:4px;min-width:0}
 .bt-bot-folder-head{display:flex;align-items:center;gap:var(--bt-row-gap,8px);padding:0 var(--bt-row-inset,8px) 0 calc(var(--bt-row-inset,8px) + 4px)}
-.bt-bot-folder-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:32px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--bt-ink-2);font:inherit;font-size:14px;font-weight:500;line-height:20px;text-align:left;cursor:pointer}
+.bt-bot-folder-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:32px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--bt-ink-2);font:inherit;font-size:13px;font-weight:500;line-height:20px;text-align:left;cursor:pointer}
+.bt-bot-folder-pin{display:flex;flex:none;color:var(--bt-ink-2)}
+.bt-bot-folder-pin svg{width:12px;height:12px}
 .bt-bot-folder-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-bot-folder-toggle:hover,.bt-bot-folder-edit:hover{color:var(--bt-ink)}
 .bt-bot-folder-empty:hover{background:var(--bt-hover);color:var(--bt-ink)}
@@ -9528,8 +9638,8 @@ function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTim
     "div",
     { ref: listRef, className: "bt-list", role: "region", "aria-label": t("Bot list") },
     main ? (0, import_react21.createElement)(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true, time: void 0 }) : roster.ready ? null : (0, import_react21.createElement)("div", { className: "bt-hint" }, t("Setting up your Main Bot…")),
+    rowProps.wide ? sections.folders.map((folder) => (0, import_react21.createElement)(BotFolderSection, { key: folder.id, folder, roster, actions: rowProps.actions, useUi: rowProps.useUi, renderRow: row })) : null,
     rowProps.wide ? sections.loose.map(row) : order.map(row),
-    rowProps.wide ? sections.folders.map((folder) => (0, import_react21.createElement)(BotFolderSection, { key: folder.id, folder, roster, actions: rowProps.actions, renderRow: row })) : null,
     rowProps.wide ? (0, import_react21.createElement)("button", { type: "button", className: "bt-bot-folder-empty", onClick: () => rowProps.actions.openBotFolders() }, t("New Bot folder")) : null
   );
 }
@@ -14296,9 +14406,33 @@ function ContextMenu({ menu, roster, actions, leaving = false }) {
   (0, import_react37.useLayoutEffect)(() => {
     const box = ref.current?.getBoundingClientRect();
     if (!box) return;
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, window.innerHeight - box.height - 8)) });
+    setPlace({ left: Math.max(8, Math.min(menu.align === "end" ? menu.x - box.width : menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, window.innerHeight - box.height - 8)) });
   }, [menu.x, menu.y]);
   if (menu.kind === "agent" || menu.kind === "agent-session") return (0, import_react37.createElement)(AgentMenu, { menu, roster, actions, leaving });
+  if (menu.kind === "bot-folder") {
+    const folder = (roster.botFolders ?? []).find((item) => item.id === menu.id);
+    if (!folder) return null;
+    const entries2 = [
+      [folder.pinned ? t("Unpin folder") : t("Pin folder"), PinIcon, () => actions.pinBotFolder({ id: folder.id, version: folder.version, pinned: !folder.pinned }), false, Boolean(roster.readOnly)],
+      [t("Manage folder"), GearIcon, () => actions.openBotFolders({ folderId: folder.id })],
+      [t("Dissolve folder"), TrashIcon, () => actions.dissolveBotFolder({ id: folder.id, version: folder.version }), true, Boolean(roster.readOnly)]
+    ].filter(Boolean);
+    return (0, import_react37.createElement)(
+      "div",
+      { ref, className: "bt-menu", role: "menu", "aria-label": t("Folder {name} actions", { name: folder.name }), style: place, "data-leaving": leaving || void 0 },
+      entries2.map(([label, Icon, run, danger, disabled]) => (0, import_react37.createElement)("button", {
+        key: label,
+        type: "button",
+        role: "menuitem",
+        disabled,
+        className: danger ? "bt-danger" : void 0,
+        onClick: () => {
+          actions.closeMenu();
+          void Promise.resolve(run()).catch((error) => actions.reportError(error, "folder-menu"));
+        }
+      }, (0, import_react37.createElement)(Icon), label))
+    );
+  }
   const bot = roster.byId[menu.id];
   const room2 = roster.roomsById[menu.id];
   const entry = bot ?? room2;
@@ -16711,14 +16845,9 @@ function apply(ctx) {
     ui2.set((state) => JSON.stringify(state.unread) === JSON.stringify(unread) ? state : { ...state, unread });
   };
   const refreshed = /* @__PURE__ */ new Set();
-  let pulls = 0;
-  let applied = 0;
-  const pull = async () => {
-    const order = ++pulls;
+  const pull = queueRosterPull(async () => {
     const known = roster.getSnapshot();
     const value = await call("state", { since: known.revision, models: known.modelsKey ?? "", locale: language() });
-    if (order < applied) return;
-    applied = order;
     const nextActivity = JSON.stringify(value.activity ?? {});
     if (nextActivity !== activityKey) {
       activityKey = nextActivity;
@@ -16753,7 +16882,7 @@ function apply(ctx) {
       refreshed.add(id);
       void Promise.resolve(ctx.sessions.refreshProjections?.(id)).catch(quietly("refresh projections"));
     }
-  };
+  });
   ctx.effect(() => {
     let stopped = false;
     let running = false;
@@ -16774,10 +16903,14 @@ function apply(ctx) {
     const wake = () => {
       if (!document.hidden) void loop();
     };
+    const stopFeed = watchRosterChanges((revision) => {
+      if (!stopped && revision !== roster.getSnapshot().revision) void pull().catch(quietly("roster update"));
+    });
     document.addEventListener("visibilitychange", wake);
     void loop();
     return () => {
       stopped = true;
+      stopFeed();
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", wake);
     };

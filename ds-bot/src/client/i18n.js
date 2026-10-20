@@ -8,6 +8,11 @@ export const NAMESPACE = 'ds-bot'
 
 const ZH = {
   'Organize Bots': '管理 Bot 分组',
+  'Pin folder': '置顶分组',
+  'Unpin folder': '取消置顶',
+  'Manage folder': '管理分组',
+  'Dissolve folder': '解散分组',
+  'Folder {name} actions': '分组 {name} 的操作',
   'Bot folder': 'Bot 分组',
   'New Bot folder': '新建 Bot 分组',
   'Folder name': '分组名称',

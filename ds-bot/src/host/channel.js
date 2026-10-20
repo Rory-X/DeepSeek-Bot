@@ -160,6 +160,8 @@ export function install(rt) {
         case 'bot-folder-save':
         case 'bot-folder-assign':
         case 'bot-folder-delete':
+        case 'bot-folder-pin':
+        case 'bot-folder-dissolve':
           return ok(await rt.botFolderMutate(endpoint.slice('bot-folder-'.length), body))
         case 'set-prefs':
           await rt.load()
