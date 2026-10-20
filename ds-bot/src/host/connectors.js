@@ -20,7 +20,7 @@ import { buildCloudflareToolIndex, CLOUDFLARE_TOOLBOX_TOOLS, createCloudflareCal
 import { createApprovalDesk } from './connector-approval.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
 import { credentialFields, connectValues } from './connector-setup.js'
-import { externalConnectors } from './connectors/registry.js'
+import { externalConnectors, CONNECTOR_LEVELS } from './connectors/registry.js'
 import { chatIdOf, createNotifyTool, NOTIFY_TEST_TEXT, parseChatId } from './notify.js'
 import { createOAuthFlow } from './oauth/flow.js'
 import { createRestTools } from './rest-tools.js'
@@ -116,6 +116,8 @@ const BUILTIN_CONNECTORS = {
   vercel: {
     displayName: 'Vercel',
     mode: 'read-tools',
+    levels: ['read', 'write'],
+    defaultLevel: 'read',
     card: {
       glyph: 'vercel',
       about: 'Projects, deployments and runtime logs from a connected Vercel account.',
@@ -137,6 +139,8 @@ const BUILTIN_CONNECTORS = {
   cloudflare: {
     displayName: 'Cloudflare',
     mode: 'oauth-mcp',
+    levels: ['read', 'write'],
+    defaultLevel: 'read',
     card: {
       glyph: 'cloudflare',
       about: 'Zones, DNS records, analytics and Workers through Cloudflare\'s own MCP server.',
@@ -258,12 +262,15 @@ export function install(rt) {
     .filter(address => address !== undefined)
     .some(address => !/^https:\/\//i.test(String(address)))
   const insecureText = id => `${options[id].displayName} addresses must start with https://`
-  // The switches a connect or an account probe must carry over instead of dropping.
+  // What a connect or an account probe must carry over instead of dropping: the legacy
+  // switches, the chosen access level and the connector's plain settings.
   const switchesOf = (id) => {
     const prior = state.connectors?.[id] ?? {}
     return {
       ...(typeof prior.actions === 'boolean' ? { actions: prior.actions } : {}),
       ...(typeof prior.toolbox === 'boolean' ? { toolbox: prior.toolbox } : {}),
+      ...(prior.level === undefined ? {} : { level: prior.level }),
+      ...(prior.settings === undefined ? {} : { settings: prior.settings }),
     }
   }
 
@@ -280,8 +287,11 @@ export function install(rt) {
         onConnecting: (id) => {
           if (statuses.get(id)?.state !== 'ready') statuses.set(id, { state: 'connecting' })
         },
-        onAuthorized: async (id) => {
-          state.connectors = { ...state.connectors, [id]: { ...switchesOf(id), authorizedAt: Date.now() } }
+        onAuthorized: async (id, grant) => {
+          const level = grantLevelOf(id, grant) ?? levelOf(id)
+          const prior = state.connectors?.[id] ?? {}
+          state.connectors = { ...state.connectors, [id]: { ...prior, ...switchesOf(id), level, authorizedAt: Date.now() } }
+          if (state.connectors[id].needsReauth === true) delete state.connectors[id].needsReauth
           await rt.save()
           await sync(id, true)
         },
@@ -337,6 +347,51 @@ export function install(rt) {
   const configuredOf = (connector) => {
     const fields = credentialFields(connector)
     return fields.length > 0 && fields.every((field) => (field.required === false ? true : rt.secretValue(field.name) !== undefined))
+  }
+
+  // An access level is what the user let this connector do: read only, or read and write.
+  // The level is stored in the team file. An older file with the `actions` or `toolbox`
+  // switch on maps to write, so a connector that could already write never loses it; a
+  // module may name its own default, and a notification connector sends, so it defaults to
+  // write.
+  const levelsOf = connector => (Array.isArray(connector.levels) && connector.levels.length > 0
+    ? connector.levels
+    : ['read'])
+  const defaultLevelOf = connector => connector.defaultLevel ?? (connector.mode === 'notify' ? 'write' : 'read')
+  const legacyLevelOf = (id) => {
+    const prior = state.connectors?.[id] ?? {}
+    return prior.actions === true || prior.toolbox === true ? 'write' : undefined
+  }
+  const storedLevelOf = id => state.connectors?.[id]?.level
+  const levelOf = (id) => {
+    if (rt.readOnly() !== undefined) return 'read'
+    const stored = storedLevelOf(id)
+    if (stored !== undefined && CONNECTOR_LEVELS.includes(stored)) return stored
+    return legacyLevelOf(id) ?? defaultLevelOf(options[id])
+  }
+  const settingsOf = id => state.connectors?.[id]?.settings ?? {}
+  // A module may say it is not ready for a level or for the settings it has (a missing
+  // project id): the row stays off with that reason and no mount is attempted.
+  const levelNoteOf = (id) => {
+    const connector = options[id]
+    if (typeof connector.unavailable === 'string' && connector.unavailable !== '') return connector.unavailable
+    if (typeof connector.readiness !== 'function') return undefined
+    try {
+      const note = connector.readiness({ level: levelOf(id), settings: settingsOf(id) })
+      return typeof note === 'string' && note !== '' ? note : undefined
+    } catch (error) {
+      return reason(error)
+    }
+  }
+  // A grant saved before levels existed is classified by its scopes: a scope the read
+  // authorization never asked for means the grant can write. No scopes at all cannot be
+  // classified, and the card asks for a new authorization.
+  const grantLevelOf = (id, grant) => {
+    if (grant?.level === 'read' || grant?.level === 'write') return grant.level
+    const scopes = Array.isArray(grant?.scopes) ? grant.scopes : []
+    if (scopes.length === 0) return undefined
+    const read = new Set(Array.isArray(options[id].oauth?.scopes) ? options[id].oauth.scopes : [])
+    return scopes.some(scope => !read.has(scope)) ? 'write' : 'read'
   }
 
   // The credentials a service hands out are checked once, when they are saved. A module may
@@ -647,7 +702,23 @@ export function install(rt) {
     if (!stopped) {
       if (oauthConnector) {
         try {
-          token = (await oauth.token(id))?.tokens.access
+          const grant = await oauth.token(id)
+          token = grant?.tokens.access
+          // The grant carries the level the user authorized. A grant saved before levels
+          // existed is classified once here and stored, so the view and the mount agree.
+          if (grant !== undefined) {
+            const inferred = grantLevelOf(id, grant)
+            const level = inferred ?? levelOf(id)
+            const patch = {
+              ...(storedLevelOf(id) === level ? {} : { level }),
+              ...(inferred === undefined ? { needsReauth: true } : {}),
+              ...(inferred !== undefined && state.connectors?.[id]?.needsReauth === true ? { needsReauth: false } : {}),
+            }
+            if (Object.keys(patch).length > 0) {
+              state.connectors = { ...state.connectors, [id]: { ...(state.connectors?.[id] ?? {}), ...patch } }
+              await rt.save()
+            }
+          }
         } catch (error) {
           // A grant the provider no longer honors shows as Reconnect, with its reason,
           // and whatever was mounted with the dead grant goes away.
@@ -681,6 +752,14 @@ export function install(rt) {
     if (insecure(id)) {
       mounts.set(id, { token })
       statuses.set(id, { state: 'error', error: insecureText(id) })
+      return
+    }
+    // A connector that says it is not ready for the level or settings it has shows the
+    // reason on its row and is not mounted; that is a setup step, not a failure.
+    const note = levelNoteOf(id)
+    if (note !== undefined) {
+      mounts.set(id, { token })
+      statuses.set(id, { state: 'off' })
       return
     }
     statuses.set(id, { state: 'connecting' })
@@ -787,6 +866,20 @@ export function install(rt) {
       // Connect from `oauth` and shows `account` once the server named it.
       account: accountOf(id),
       ...(oauthConnector ? { oauth: true } : {}),
+      // The access level the user chose; every write tool is gated by it.
+      level: levelOf(id),
+      levels: levelsOf(connector),
+      ...(Array.isArray(connector.settings) && connector.settings.length > 0
+        ? {
+            settings: connector.settings.map(field => ({
+              name: field.name,
+              ...(typeof field.label === 'string' && field.label !== '' ? { label: field.label } : {}),
+              ...(settingsOf(id)[field.name] === undefined ? {} : { value: settingsOf(id)[field.name] }),
+            })),
+          }
+        : {}),
+      ...(levelNoteOf(id) === undefined ? {} : { levelNote: levelNoteOf(id) }),
+      ...(state.connectors?.[id]?.needsReauth === true ? { needsReauth: true } : {}),
       ...((connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom')
         ? { mode: connector.mode, inputs: credentialFields(connector) }
         : {}),
@@ -825,6 +918,7 @@ export function install(rt) {
       if (insecure(body.id)) throw new Error(insecureText(body.id))
       if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom' || connector.mode === 'notify') {
         await rt.loadSecrets()
+        const prior = state.connectors?.[body.id]
         // A single-token card may still post `token`; the module's declared credential
         // takes that value under its own name.
         const fields = credentialFields(connector)
@@ -838,7 +932,8 @@ export function install(rt) {
             await rt.secretEndpoint('secret-set', { name, value, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
           }
         } catch (error) {
-          delete state.connectors[body.id]
+          if (prior === undefined) delete state.connectors[body.id]
+          else state.connectors = { ...state.connectors, [body.id]: prior }
           throw error
         }
         // The chat the bot already hears from is filled in now. A token without a chat
@@ -856,6 +951,7 @@ export function install(rt) {
       }
       if (token === '') throw new Error('Paste a token first')
       await rt.loadSecrets()
+      const prior = state.connectors?.[body.id]
       const kept = rt.secretValue(connector.tokenSecret) !== undefined
       const account = await signIn(body.id, token, { api: connector.api })
       // The account is written before the secret, so the mount the secret change starts
@@ -864,7 +960,8 @@ export function install(rt) {
       try {
         await rt.secretEndpoint('secret-set', { name: connector.tokenSecret, value: token, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
       } catch (error) {
-        delete state.connectors[body.id]
+        if (prior === undefined) delete state.connectors[body.id]
+        else state.connectors = { ...state.connectors, [body.id]: prior }
         throw error
       }
       await rt.save()
@@ -873,22 +970,39 @@ export function install(rt) {
     },
     // The browser half of an OAuth connect: DS Bot answers with the provider's authorize
     // address, the client opens it, and the provider sends the browser back to the
-    // callback route the flow registered.
+    // callback route the flow registered. The level picks the authorization the module
+    // asks for (Neon: a read-only MCP URL or a full one) and is stored with the grant.
     async 'connector-oauth-start'(body, meta) {
       known(body.id)
       const connector = options[body.id]
       if (connector.mode !== 'oauth-mcp' || oauth === undefined) throw new Error(`${connector.displayName} connects with a token, not OAuth`)
-      return await oauth.start(body.id, { origin: meta.origin })
+      const levels = levelsOf(connector)
+      const level = body.level ?? storedLevelOf(body.id) ?? defaultLevelOf(connector)
+      if (!levels.includes(level)) throw new Error(`${connector.displayName} has no ${String(level)} access level`)
+      const readOnly = rt.readOnly()
+      if (readOnly !== undefined && level === 'write') throw new Error(`DS Bot is read-only: ${readOnly}`)
+      const note = levelNoteOf(body.id)
+      if (note !== undefined) throw new Error(note)
+      return await oauth.start(body.id, { origin: meta.origin, level, settings: settingsOf(body.id) })
     },
     async 'connector-disconnect'(body) {
       known(body.id)
       const connector = options[body.id]
+      // The settings and the chosen level describe the connector, not the grant: a
+      // reconnect should not ask for the project id and role again.
+      const kept = (id) => {
+        const prior = state.connectors?.[id] ?? {}
+        return {
+          ...(prior.settings === undefined ? {} : { settings: prior.settings }),
+          ...(prior.level === undefined ? {} : { level: prior.level }),
+        }
+      }
       if (connector.mode === 'oauth-mcp') {
         await oauth.disconnect(body.id)
-        if (state.connectors?.[body.id] !== undefined) {
-          delete state.connectors[body.id]
-          await rt.save()
-        }
+        const remaining = kept(body.id)
+        if (Object.keys(remaining).length > 0) state.connectors = { ...state.connectors, [body.id]: remaining }
+        else if (state.connectors?.[body.id] !== undefined) delete state.connectors[body.id]
+        await rt.save()
         await sync(body.id, true)
         return connectorsView()
       }
@@ -897,11 +1011,70 @@ export function install(rt) {
       for (const name of names) {
         if (rt.secretValue(name) !== undefined) await rt.secretEndpoint('secret-delete', { name })
       }
-      if (state.connectors?.[body.id] !== undefined) {
-        delete state.connectors[body.id]
-        await rt.save()
-      }
+      const remaining = kept(body.id)
+      if (Object.keys(remaining).length > 0) state.connectors = { ...state.connectors, [body.id]: remaining }
+      else if (state.connectors?.[body.id] !== undefined) delete state.connectors[body.id]
+      await rt.save()
       await sync(body.id)
+      return connectorsView()
+    },
+    // The access level the user chose. An authorized OAuth connector has to authorize
+    // again, because the level is fixed by the grant; a connector with a saved secret just
+    // remounts, since the level only decides which tools are registered.
+    async 'connector-set-level'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      const level = typeof body.level === 'string' ? body.level : ''
+      if (!levelsOf(connector).includes(level)) throw new Error(`${connector.displayName} has no ${level === '' ? 'such' : level} access level`)
+      const readOnly = rt.readOnly()
+      if (readOnly !== undefined) throw new Error(`DS Bot is read-only: ${readOnly}`)
+      const prior = state.connectors?.[body.id] ?? {}
+      const authorized = connector.mode === 'oauth-mcp' && (prior.authorizedAt !== undefined || prior.account !== undefined)
+      if (authorized) {
+        await oauth.disconnect(body.id)
+        state.connectors = {
+          ...state.connectors,
+          [body.id]: {
+            ...(prior.settings === undefined ? {} : { settings: prior.settings }),
+            level,
+            needsReauth: true,
+          },
+        }
+      } else {
+        state.connectors = { ...state.connectors, [body.id]: { ...prior, level } }
+      }
+      await rt.save()
+      await sync(body.id, true)
+      return connectorsView()
+    },
+    // Plain configuration a connector needs (a project id, a role). It is not a secret, so
+    // it lives in the team file; a module may normalize and refuse the values.
+    async 'connector-set-settings'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (!Array.isArray(connector.settings) || connector.settings.length === 0) throw new Error(`${connector.displayName} has no settings`)
+      const values = body.values !== null && typeof body.values === 'object' && !Array.isArray(body.values) ? body.values : {}
+      let settings
+      if (typeof connector.normalizeSettings === 'function') {
+        const normalized = connector.normalizeSettings({ ...values })
+        settings = normalized !== null && typeof normalized === 'object' && !Array.isArray(normalized) ? normalized : {}
+      } else {
+        settings = {}
+        for (const field of connector.settings) {
+          if (typeof values[field.name] === 'string') settings[field.name] = values[field.name].trim()
+        }
+      }
+      const prior = state.connectors?.[body.id] ?? {}
+      const authorized = connector.mode === 'oauth-mcp' && typeof connector.authorize === 'function'
+        && (prior.authorizedAt !== undefined || prior.account !== undefined)
+      if (authorized) {
+        await oauth.disconnect(body.id)
+        state.connectors = { ...state.connectors, [body.id]: { ...prior, settings, needsReauth: true } }
+      } else {
+        state.connectors = { ...state.connectors, [body.id]: { ...prior, settings } }
+      }
+      await rt.save()
+      await sync(body.id, true)
       return connectorsView()
     },
     async 'connector-retry'(body) {

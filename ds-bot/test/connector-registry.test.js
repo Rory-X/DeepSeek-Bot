@@ -58,6 +58,12 @@ test('a broken connector module fails at load with the file name', async () => {
     [`export default { id: 'nodisplay', mode: 'notify' }\n`, /needs a displayName/],
     [`export default { id: 'nomode', displayName: 'No mode' }\n`, /needs a mode/],
     [`export default { id: 'unknown', displayName: 'Unknown', mode: 'proxy' }\n`, /needs a mode/],
+    [`export default { id: 'notlevels', displayName: 'L', mode: 'rest-tools', levels: 'read' }\n`, /levels must be a non-empty list/],
+    [`export default { id: 'badlevel', displayName: 'L', mode: 'rest-tools', levels: ['admin'] }\n`, /levels must be a non-empty list/],
+    [`export default { id: 'dupelevel', displayName: 'L', mode: 'rest-tools', levels: ['read', 'read'] }\n`, /levels must be a non-empty list/],
+    [`export default { id: 'baddefault', displayName: 'L', mode: 'rest-tools', levels: ['read'], defaultLevel: 'write' }\n`, /defaultLevel/],
+    [`export default { id: 'badhook', displayName: 'L', mode: 'rest-tools', authorize: 'nope' }\n`, /needs authorize to be a function/],
+    [`export default { id: 'badsettings', displayName: 'L', mode: 'rest-tools', settings: [{ label: 'x' }] }\n`, /settings must list fields with a name/],
     [`export default 42\n`, /must export a connector object/],
     [`export default { id: 'boom', displayName: 'Boom', mode: 'notify', api: foo }\n`, /did not load/],
   ]

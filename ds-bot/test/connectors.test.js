@@ -13,9 +13,9 @@ const fresh = () => `tok_${randomBytes(16).toString('hex')}`
 const answer = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
 const off = id => ({ id, state: 'off', account: null })
 const OFF = {
-  github: { id: 'github', name: 'GitHub', ...off('github'), card: { glyph: 'github', about: "Issues, pull requests and repository context through GitHub's own MCP server.", docsUrl: 'https://docs.github.com', readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.' } },
-  vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } },
-  cloudflare: { id: 'cloudflare', name: 'Cloudflare', ...off('cloudflare'), oauth: true, toolbox: false, toolboxCall: 'cloudflare_call', card: { glyph: 'cloudflare', about: "Zones, DNS records, analytics and Workers through Cloudflare's own MCP server.", docsUrl: 'https://developers.cloudflare.com/agents/model-context-protocol/', readOnlyNote: 'The named tools only read. Full access can change your account; every write still asks for your approval first.', consent: { title: 'Choose the access level on the authorization page', body: 'Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your Cloudflare account; every write still asks for your approval first.', acknowledge: "I'll choose the access level on the authorization page" } } },
+  github: { id: 'github', name: 'GitHub', ...off('github'), level: 'read', levels: ['read'], card: { glyph: 'github', about: "Issues, pull requests and repository context through GitHub's own MCP server.", docsUrl: 'https://docs.github.com', readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.' } },
+  vercel: { id: 'vercel', name: 'Vercel', ...off('vercel'), level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } },
+  cloudflare: { id: 'cloudflare', name: 'Cloudflare', ...off('cloudflare'), level: 'read', levels: ['read', 'write'], oauth: true, toolbox: false, toolboxCall: 'cloudflare_call', card: { glyph: 'cloudflare', about: "Zones, DNS records, analytics and Workers through Cloudflare's own MCP server.", docsUrl: 'https://developers.cloudflare.com/agents/model-context-protocol/', readOnlyNote: 'The named tools only read. Full access can change your account; every write still asks for your approval first.', consent: { title: 'Choose the access level on the authorization page', body: 'Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your Cloudflare account; every write still asks for your approval first.', acknowledge: "I'll choose the access level on the authorization page" } } },
 }
 // The built-ins these tests are about. A connector module added under src/host/connectors
 // hands the view one more row, and every line adds one; these assertions are about the
@@ -201,7 +201,7 @@ test('connecting GitHub saves the token, kept out of every Bot shell, and mounts
 
   const connected = await call(ctx, 'connector-connect', { id: 'github', token: ` ${token} ` })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(builtins(connected.value), [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo', card: { glyph: 'github', about: "Issues, pull requests and repository context through GitHub's own MCP server.", docsUrl: 'https://docs.github.com', readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.' } }, OFF.vercel, OFF.cloudflare])
+  assert.deepEqual(builtins(connected.value), [{ id: 'github', name: 'GitHub', state: 'ready', account: 'octo', level: 'read', levels: ['read'], card: { glyph: 'github', about: "Issues, pull requests and repository context through GitHub's own MCP server.", docsUrl: 'https://docs.github.com', readOnlyNote: 'Only the issue, pull-request and repository tools are mounted.' } }, OFF.vercel, OFF.cloudflare])
   assert.equal(mounts.length, 1)
   assert.deepEqual(mounts[0].config, githubMount(token))
   const state = await call(ctx, 'state', {})
@@ -268,7 +268,7 @@ test('connecting Vercel mounts only its read tools, and the default team answers
 
   const connected = await call(ctx, 'connector-connect', { id: 'vercel', token })
   assert.equal(connected.ok, true, JSON.stringify(connected))
-  assert.deepEqual(builtins(connected.value), [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } }, OFF.cloudflare])
+  assert.deepEqual(builtins(connected.value), [OFF.github, { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } }, OFF.cloudflare])
   // The write tool is never registered, and Vercel is not mounted through DSH's client.
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(mounts.length, 0)
@@ -298,7 +298,7 @@ test('a saved Vercel token connects on its own and fills the account and team', 
     const view = (await call(ctx, 'state', {})).value.connectors
     return view[1]?.state === 'ready' ? view : undefined
   }, 'Vercel to connect from its saved token')
-  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } })
+  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: 'acme', level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } })
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   // The account and its default team are kept in the team file, without the token.
   const savedText = readFileSync(join(home, 'state.json'), 'utf8')
@@ -323,7 +323,7 @@ test('a failed account check does not stop the saved-token mount', async (t) => 
     const view = (await call(ctx, 'state', {})).value.connectors
     return view[1]?.state === 'ready' ? view : undefined
   }, 'Vercel to mount without an account')
-  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: null, actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } })
+  assert.deepEqual(connectors[1], { id: 'vercel', name: 'Vercel', state: 'ready', account: null, level: 'read', levels: ['read', 'write'], actions: false, toolbox: false, toolboxCall: 'vercel_call', card: { glyph: 'vercel', about: 'Projects, deployments and runtime logs from a connected Vercel account.', docsUrl: 'https://vercel.com/docs/mcp', readOnlyNote: 'Read tools run directly; the four deployment actions are off by default and each asks for approval.' } })
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.equal(JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors?.vercel, undefined)
 })
@@ -484,6 +484,7 @@ test('a saved actions switch survives a restart', async (t) => {
     return item?.state === 'ready' && item.actions === true ? item : undefined
   }, 'Vercel with actions to connect')
   assert.equal(ready.actions, true)
+  assert.equal(ready.level, 'write')
   assert.deepEqual([...registered].sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
 })
 
@@ -1040,4 +1041,80 @@ test('the Cloudflare toolbox runs reads directly, asks for each write and never 
   assert.equal(passed, 0)
   await assert.rejects(tool.execute({ tool: 'post_user_tokens' }, { agent: { id: 'm1' } }), /does not run it/)
   assert.equal(await approvalCard(ctx), undefined)
+})
+
+test('the access level is stored, shown and kept across a disconnect', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = vercelBench()
+  globalThis.fetch = bench.fetch
+  const { ctx, home } = setup({ secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const ready = await until(async () => {
+    const item = (await call(ctx, 'state', {})).value.connectors[1]
+    return item?.state === 'ready' ? item : undefined
+  }, 'Vercel to connect')
+  assert.equal(ready.level, 'read')
+
+  const raised = (await call(ctx, 'connector-set-level', { id: 'vercel', level: 'write' })).value
+  assert.equal(raised[1].level, 'write')
+  assert.equal((await call(ctx, 'state', {})).value.secrets.length, 1)
+
+  const refused = await call(ctx, 'connector-set-level', { id: 'vercel', level: 'admin' })
+  assert.equal(refused.ok, false)
+  assert.match(refused.error.message, /no admin access level/)
+
+  const gone = (await call(ctx, 'connector-disconnect', { id: 'vercel' })).value
+  assert.equal(gone[1].state, 'off')
+  assert.equal(gone[1].level, 'write')
+  assert.deepEqual((await call(ctx, 'state', {})).value.secrets, [])
+})
+
+test('only a connector that declares settings takes them', async (t) => {
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const result = await call(ctx, 'connector-set-settings', { id: 'github', values: { projectId: 'p1' } })
+  assert.equal(result.ok, false)
+  assert.match(result.error.message, /no settings/)
+})
+
+test('an OAuth grant records the chosen level, and a level change asks for a new authorization', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const oauth = fakeOAuthServer({ resource: CLOUDFLARE_ADDRESS, issuer: 'https://mcp.cloudflare.test', declaredResource: 'https://mcp.cloudflare.test/mcp' })
+  globalThis.fetch = async (url, init = {}) => {
+    const address = String(url)
+    if (address !== CLOUDFLARE_ADDRESS || init.headers?.authorization === undefined) return oauth.fetch(url, init)
+    const body = JSON.parse(init.body)
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Fake', version: '1' } })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') {
+      return mcpAnswer(body.id, { tools: CLOUDFLARE_READ.map(name => ({ name, description: `Cloudflare ${name}`, inputSchema: { type: 'object', properties: {} } })) })
+    }
+    if (body.method === 'tools/call') return mcpAnswer(body.id, { content: [{ type: 'text', text: 'called' }] })
+    throw new Error(`unexpected method ${body.method}`)
+  }
+  const credentials = fakeCredentials()
+  const webServer = fakeWebServer()
+  const { ctx, home } = setup({ cloudflare: { url: CLOUDFLARE_ADDRESS }, services: { credentials, webServer } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const started = await call(ctx, 'connector-oauth-start', { id: 'cloudflare', level: 'write' }, { origin: 'https://dsh.test' })
+  assert.equal(started.ok, true, JSON.stringify(started))
+  const authorizeUrl = new URL(started.value.authorizeUrl)
+  const { res, done } = fakeResponse()
+  webServer.routes[0].handler({ method: 'GET', url: `/oauth/ds-bot/cloudflare?code=auth-code&state=${encodeURIComponent(authorizeUrl.searchParams.get('state'))}` }, res)
+  assert.equal((await done).statusCode, 200)
+  await until(async () => (credentials.records.has('ds-bot/connector-cloudflare') ? true : undefined), 'the grant')
+
+  const saved = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors.cloudflare
+  assert.equal(saved.level, 'write')
+  const ready = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'cloudflare')
+  assert.equal(ready.level, 'write')
+
+  const changed = (await call(ctx, 'connector-set-level', { id: 'cloudflare', level: 'read' })).value.find(connector => connector.id === 'cloudflare')
+  assert.equal(changed.level, 'read')
+  assert.equal(changed.needsReauth, true)
+  assert.equal(changed.state, 'off')
+  assert.equal(credentials.records.has('ds-bot/connector-cloudflare'), false)
 })

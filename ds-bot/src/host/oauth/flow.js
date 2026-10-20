@@ -119,23 +119,33 @@ export function createOAuthFlow({
     }), 'ds-bot: oauth callback')
   }
 
-  async function start(id, { origin: callerOrigin } = {}) {
+  // `level` is the access level the user chose; a module that brings `authorize` answers
+  // with the URL and scopes for it (Neon's readonly MCP URL or its full one), and without
+  // the hook the connector's fixed url/scopes apply. The level is stored with the grant.
+  async function start(id, { origin: callerOrigin, level, settings } = {}) {
     if (disposed) throw new OAuthError('DS Bot is stopping', 'available')
     const connector = connectorOfId(id)
     const webServer = webServerOf()
     const redirectUri = `${redirectOrigin({ callerOrigin, configured: origin, webServer })}${OAUTH_PREFIX}/${id}`
     const store = credentialStore()
+    const grant = typeof connector.authorize === 'function'
+      ? await connector.authorize({ level, settings: settings ?? {} })
+      : undefined
+    const address = typeof grant?.url === 'string' && grant.url !== '' ? grant.url : connector.url
+    if (!/^https:\/\//i.test(String(address))) throw new OAuthError('The authorization address must start with https://', 'available')
     // A saved grant already has a client registered for this callback address; reuse it
     // so a reconnect does not register another dynamic client.
     const saved = await store.read(id)
-    const { resource, scopes, authorizationServer } = await discovery.discover(connector.url)
+    const { resource, scopes, authorizationServer } = await discovery.discover(address)
     const client = saved !== undefined && saved.resource === resource && saved.client?.redirectUri === redirectUri
       ? saved.client
       : await registerClient({ metadata: authorizationServer, redirectUri, request })
     const { verifier, challenge } = pkce()
     const state = randomBytes(32).toString('base64url')
     const expiresAt = now() + ttlMs
-    const scopeNames = Array.isArray(connector.oauth?.scopes) ? connector.oauth.scopes : scopes
+    const scopeNames = Array.isArray(grant?.scopes)
+      ? grant.scopes
+      : Array.isArray(connector.oauth?.scopes) ? connector.oauth.scopes : scopes
     const authorizeUrl = authorizationUrl({
       metadata: authorizationServer,
       clientId: client.id,
@@ -152,7 +162,7 @@ export function createOAuthFlow({
       notify(onExpired, id)
     }, ttlMs)
     timer.unref?.()
-    pending.set(id, { state, verifier, redirectUri, client, resource, scopes: scopeNames, authorizationServer, expiresAt, timer })
+    pending.set(id, { state, verifier, redirectUri, client, resource, scopes: scopeNames, level, authorizationServer, expiresAt, timer })
     ensureRoute(webServer)
     await notify(onConnecting, id)
     return { authorizeUrl, expiresAt }
@@ -248,6 +258,7 @@ export function createOAuthFlow({
         client: attempt.client,
         tokens,
         scopes: attempt.scopes,
+        ...(attempt.level === undefined ? {} : { level: attempt.level }),
         authorizedAt: now(),
       }
       // The store read happens after the exchange on purpose: a failed exchange stores
