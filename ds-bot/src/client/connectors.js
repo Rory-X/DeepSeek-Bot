@@ -105,13 +105,17 @@ const cardText = (connector, key) => {
 const cardAbout = connector => cardText(connector, 'about') ?? ABOUT[connector.id]?.()
 // A level or a capability is drawn as the module declares it: its own order and words.
 // Only the shape we need is filled in; nothing is inferred beyond the declared `write`.
+const LEVEL_TITLES = { read: () => t('Read-only'), write: () => t('Can write') }
+const levelTitle = (id, declared) => (typeof declared === 'string' && declared !== ''
+  ? declared
+  : LEVEL_TITLES[id] !== undefined ? LEVEL_TITLES[id]() : id)
 const levelItem = entry => (typeof entry === 'string'
-  ? { id: entry, title: entry, description: null }
+  ? { id: entry, title: levelTitle(entry), description: null, write: entry === 'write' }
   : {
       id: typeof entry?.id === 'string' ? entry.id : String(entry?.id ?? ''),
-      title: typeof entry?.title === 'string' ? entry.title : typeof entry?.name === 'string' ? entry.name : String(entry?.id ?? ''),
+      title: levelTitle(typeof entry?.id === 'string' ? entry.id : String(entry?.id ?? ''), entry?.title ?? entry?.name),
       description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
-      write: entry?.write === true || entry?.danger === true,
+      write: entry?.write === true || entry?.danger === true || entry?.id === 'write',
     })
 const capabilityItem = (entry, index) => ({
   key: typeof entry?.key === 'string' ? entry.key : `capability-${index}`,
@@ -250,6 +254,10 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const currentLevel = typeof connector.level === 'string' ? connector.level : null
   const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter(entry => entry !== null && typeof entry === 'object') : []
   const permissions = typeof connector.permissions?.summary === 'string' && connector.permissions.summary !== '' ? connector.permissions.summary : null
+  // The host says why a connector is not ready at its level, and when a level change needs
+  // the reader to authorize again.
+  const levelNote = typeof connector.levelNote === 'string' && connector.levelNote !== '' ? connector.levelNote : null
+  const needsReauth = connector.needsReauth === true
   // A host whose profile forbids changes says why; every declared write then shows as
   // unavailable instead of disappearing.
   const writesLocked = typeof readOnly === 'string' && readOnly !== ''
@@ -319,6 +327,8 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         ? null
         : h('div', { className: 'bt-connector-hint' }, t('Send the bot a message first, then press Test.')))
       : null,
+    levelNote !== null ? h('div', { className: 'bt-connector-hint' }, levelNote) : null,
+    needsReauth ? h('div', { className: 'bt-connector-hint' }, t('Authorize again to use this access level.')) : null,
     oauth && docsUrl !== undefined ? h('div', { className: 'bt-connector-docs' },
       h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation'))) : null,
     hasOptions && details
