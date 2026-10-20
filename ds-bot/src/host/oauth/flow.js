@@ -351,12 +351,15 @@ export function createOAuthFlow({
     if (grant === undefined) return
     try {
       const { authorizationServer } = await discovery.discover(connectorOf(id).url)
-      await revoke({
+      const revoked = await revoke({
         metadata: authorizationServer,
         client: grant.client,
         token: typeof grant.tokens.refresh === 'string' ? grant.tokens.refresh : grant.tokens.access,
         request,
       })
+      // revoke() answers false for a request the endpoint refused; the grant is cleared
+      // locally either way, but the console should still say the token may stay alive.
+      if (revoked !== true) warn?.('ds-bot: oauth: the %s grant could not be revoked: the revocation endpoint did not accept it', id)
     } catch (error) {
       warn?.('ds-bot: oauth: the %s grant could not be revoked: %s', id, messageOf(error, redact))
     }

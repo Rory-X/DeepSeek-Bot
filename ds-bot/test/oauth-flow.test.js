@@ -353,3 +353,38 @@ test('two starts leave only the newest state valid, and dispose forgets an attem
   flow.dispose()
   assert.equal((await callback(webServer, `${OAUTH_PREFIX}/notion?${codeAndState(second.authorizeUrl)}`)).statusCode, 410)
 })
+
+
+test('a revocation endpoint that refuses the token leaves a warning and still clears the grant', async () => {
+  const credentials = fakeCredentials()
+  const webServer = fakeWebServer()
+  const server = fakeOAuthServer()
+  const warnings = []
+  const ctx = fakeContext({ services: { credentials, webServer } })
+  // The authorization and token calls go to the fake server; the revocation call (the one
+  // with a token and no grant_type) answers HTTP 500.
+  const request = async (url, init = {}) => {
+    const body = new URLSearchParams(String(init.body ?? ''))
+    if (String(url) === `${server.issuer}/token` && body.get('token') !== null && body.get('grant_type') === null) {
+      return { status: 500, ok: false, headers: { get: () => 'application/json' }, text: async () => '{}' }
+    }
+    return server.fetch(url, init)
+  }
+  const flow = createOAuthFlow({
+    ctx,
+    connectorOf: () => CONNECTORS.notion,
+    request,
+    warn: (template, ...args) => warnings.push(String(template).replace(/%s/g, () => String(args.shift()))),
+    redact: text => text,
+  })
+  const started = await flow.start('notion', { origin: 'https://dsh.test' })
+  const response = await callback(webServer, `${OAUTH_PREFIX}/notion?${codeAndState(started.authorizeUrl)}`)
+  assert.equal(response.statusCode, 200)
+  assert.ok(credentials.records.has('ds-bot/connector-notion'))
+
+  await flow.disconnect('notion')
+  assert.equal(credentials.records.has('ds-bot/connector-notion'), false)
+  assert.ok(warnings.some(text => /could not be revoked/.test(text)), JSON.stringify(warnings))
+  assert.ok(!warnings.join('\n').includes('access-1'))
+  assert.ok(!warnings.join('\n').includes('refresh-1'))
+})
