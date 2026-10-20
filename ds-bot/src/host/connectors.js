@@ -524,6 +524,16 @@ export function install(rt) {
     const mount = connector.mountTools ?? connector.mount
     if (typeof mount !== 'function') throw new Error(`${connector.displayName} has no tools to mount`)
     const secrets = secretMapOf(connector)
+    // A module that mounts its own tools is told the level it may offer and gets the
+    // framework's approval entry, so a write helper asks on the same card as a built-in
+    // action: the module names the call, the framework redacts it and addresses the card
+    // to the Session running the tool. A read level simply never offers a write helper.
+    const approve = async ({ tool, line, danger, change, reversible, target, exec } = {}) => {
+      await requireApproval(connector, tool, exec, summarise(
+        { line, danger, change, reversible, target },
+        defaultApprovalLine(tool, undefined),
+      ))
+    }
     const mounted = mount({
       ctx,
       rt,
@@ -533,6 +543,9 @@ export function install(rt) {
       state: state.connectors?.[id],
       output,
       redact: rt.redactSecrets,
+      level: levelOf(id),
+      settings: settingsOf(id),
+      approve,
     })
     if (mounted === undefined || mounted === null) return { token: credentialKeyOf(connector), dispose: [] }
     // A module may hand back already-built tools or its own disposers.
