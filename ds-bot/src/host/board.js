@@ -5,6 +5,7 @@ import { basename } from 'node:path'
 import { own } from './store.js'
 import { workflowChange } from './board-workflow.js'
 import { normalizeQueue, queueView } from './board-jobs.js'
+import { stageProgress } from '../shared/board-stages.js'
 
 export const emptyBoard = () => ({ version: 1, nextNumber: 1, nextJobSequence: 1, cards: {} })
 const invalid = message => Object.assign(new Error(message), { code: 'bot/invalid' })
@@ -80,7 +81,7 @@ export function install(rt) {
       projects: projects().map(project => ({
         ...project, pending: cards.filter(card => card.projectId === project.id && boardColumn(card) === 'needs-you').length,
       })),
-      cards: cards.map(card => ({ ...card, column: boardColumn(card) })),
+      cards: cards.map(card => ({ ...card, column: boardColumn(card), stageProgress: stageProgress(card) })),
       queue: queueView(current(), new Set([...(rt.live ?? [])].filter(([, entry]) => entry.turn !== undefined).map(([id]) => rt.selfOf(id)))),
     }
   }

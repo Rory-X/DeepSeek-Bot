@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { own } from './store.js'
 import { appendJob, controlRequirement } from './board-jobs.js'
+import { BOARD_STAGES, EXECUTION_STAGES, executionComplete, stageSkipped } from '../shared/board-stages.js'
 
 const fail = message => { throw Object.assign(new Error(message), { code: 'bot/invalid' }) }
 const text = (value, name, max = 12000) => {
@@ -38,6 +39,10 @@ export function workflowChange(board, command, input, { actor = 'user', bots, pr
       if (step.status !== 'queued' || step.phase !== card.stage || !step.dependsOn.every(id => card.steps.find(other => other.id === id)?.status === 'done')) continue
       if (card.deliveries?.some(job => job.stepId === step.id && job.planVersion === card.planVersion && ['pending', 'sending', 'sent', 'running'].includes(job.status))) continue
       dispatch(step.assigneeId, 'Execute your assigned step', step.id)
+    }
+    if (executionComplete(card)) {
+      card.summary = 'Preparing delivery and verification evidence'
+      dispatch(card.leadId, 'Review the evidence and submit for user acceptance')
     }
   }
   const control = ['board-pause', 'board-resume', 'board-cancel'].includes(command)
@@ -91,7 +96,19 @@ export function workflowChange(board, command, input, { actor = 'user', bots, pr
       active(card); leadOnly(card, actor); noOpen(card)
       if (!['clarification', 'design'].includes(card.stage)) fail('Implementation needs a new reviewed revision before replacing its plan')
       const summary = text(input.summary, 'the proposed plan')
-      if (!Array.isArray(input.steps) || input.steps.length < 2 || input.steps.length > 30) fail('Plan 2 to 30 implementation and validation steps')
+      if (!Array.isArray(input.steps) || input.steps.length > 30) fail('Plan up to 30 steps and explain any skipped stages')
+      if (input.stages !== undefined && (!Array.isArray(input.stages) || input.stages.length > 5)) fail('Provide up to five stage outcomes')
+      // A new plan must opt into skips again; old execution outcomes never carry over.
+      const outcomes = Object.fromEntries(['confirmation', 'clarification'].filter(stage => card.stageOutcomes?.[stage]).map(stage => [stage, card.stageOutcomes[stage]]))
+      const seenStages = new Set()
+      for (const outcome of input.stages ?? []) {
+        if (!outcome || !BOARD_STAGES.includes(outcome.stage) || seenStages.has(outcome.stage)) fail('Choose each development stage at most once')
+        if (!['completed', 'skipped'].includes(outcome.status)) fail('Stage outcomes must be completed or skipped')
+        if (outcome.status === 'completed' && EXECUTION_STAGES.includes(outcome.stage)) fail('Execution stages complete through their steps and evidence, not a plan declaration')
+        seenStages.add(outcome.stage)
+        outcomes[outcome.stage] = { status: outcome.status, reason: text(outcome.reason, 'the stage outcome reason or completion evidence', 2000), actor, at: now }
+      }
+      card.stageOutcomes = outcomes
       const ids = new Set()
       const steps = input.steps.map(step => {
         const id = text(step.id, 'a unique step id', 80)
@@ -116,11 +133,15 @@ export function workflowChange(board, command, input, { actor = 'user', bots, pr
       steps.forEach(step => visit(step.id))
       const implementers = new Set(steps.filter(step => step.phase === 'implementation').map(step => step.assigneeId))
       const reviewers = steps.filter(step => step.phase === 'validation')
-      if (!implementers.size || !reviewers.length) fail('The plan needs implementation and validation')
-      if (card.collaboratorIds.length && !reviewers.some(step => !implementers.has(step.assigneeId))) fail('Assign independent validation to a Bot that does not implement this requirement')
+      for (const phase of EXECUTION_STAGES) {
+        const count = steps.filter(step => step.phase === phase).length
+        if (stageSkipped(card, phase) && count) fail('A skipped stage cannot contain execution steps')
+        if (!stageSkipped(card, phase) && !count) fail('The plan needs implementation and validation, or an explicit skip reason for each omitted stage')
+      }
+      if (implementers.size && reviewers.length && card.collaboratorIds.length && !reviewers.some(step => !implementers.has(step.assigneeId))) fail('Assign independent validation to a Bot that does not implement this requirement')
       card.planVersion = (card.planVersion ?? 0) + 1
       card.plan = summary; card.steps = steps; card.stage = 'design'; card.summary = 'Waiting for plan approval'
-      card.decisions.push(openDecision(card, 'design', 'Approve this implementation plan?', summary))
+      card.decisions.push(openDecision(card, 'design', stageSkipped(card, 'design') ? 'Approve this execution scope?' : 'Approve this implementation plan?', summary, { stageOutcomes: structuredClone(card.stageOutcomes) }))
       activity = 'Plan submitted for approval'
       break
     }
@@ -145,16 +166,12 @@ export function workflowChange(board, command, input, { actor = 'user', bots, pr
       activity = input.status === 'done' ? 'Step completed' : input.status === 'blocked' ? 'Step blocked' : 'Step progress updated'
       if (input.status === 'done') {
         scheduleSteps()
-        if (card.steps.every(step => step.status === 'done')) {
-          card.summary = 'Preparing delivery and verification evidence'
-          dispatch(card.leadId, 'Review the evidence and submit for user acceptance')
-        }
       } else if (input.status === 'blocked') dispatch(card.leadId, 'Resolve the blocked step or ask the user')
       break
     }
     case 'board-submit': {
       active(card); leadOnly(card, actor); noOpen(card)
-      if (card.stage !== 'validation' || !card.steps.length || card.steps.some(step => step.status !== 'done')) fail('Complete implementation and validation before submitting')
+      if (card.stage !== 'validation' || card.planVersion === undefined || card.approvedPlan !== card.planVersion || !executionComplete(card)) fail('Complete implementation and validation before submitting, or explicitly skip in the approved plan')
       const criteria = criteriaOf(card)
       if (!Array.isArray(input.evidence) || input.evidence.length !== criteria.length) fail('Provide evidence for every acceptance criterion, in order')
       card.evidence = input.evidence.map((entry, index) => {
@@ -166,7 +183,7 @@ export function workflowChange(board, command, input, { actor = 'user', bots, pr
       card.artifacts = input.artifacts.map(entry => ({ id: randomUUID(), title: text(entry.title, 'a deliverable title', 240), summary: text(entry.summary, 'a deliverable summary', 4000), reference: text(entry.reference, 'a deliverable reference', 2000) }))
       card.summary = text(input.summary, 'a delivery summary', 4000)
       card.deliveryPlanVersion = card.planVersion
-      card.submissions = [...(card.submissions ?? []), { id: randomUUID(), at: now, planVersion: card.planVersion, summary: card.summary, artifacts: card.artifacts, evidence: card.evidence }].slice(-20)
+      card.submissions = [...(card.submissions ?? []), { id: randomUUID(), at: now, planVersion: card.planVersion, summary: card.summary, artifacts: card.artifacts, evidence: card.evidence, stageOutcomes: structuredClone(card.stageOutcomes) }].slice(-20)
       card.decisions.push(openDecision(card, 'acceptance', 'Accept this delivery?', card.summary))
       activity = 'Delivery submitted for acceptance'
       break
@@ -192,15 +209,20 @@ export function workflowChange(board, command, input, { actor = 'user', bots, pr
       decision.status = 'answered'; decision.choice = input.choice; decision.answeredAt = now
       if (decision.kind === 'design' && input.choice === 'approve') {
         if (card.decisions.some(item => item.status === 'open')) fail('Answer the remaining questions before approving the plan')
-        card.approvedPlan = card.planVersion; card.approvedAt = now; card.stage = 'implementation'; card.summary = 'Approved and queued for implementation'
+        card.approvedPlan = card.planVersion; card.approvedAt = now; card.stage = 'implementation'; card.summary = 'Approved and queued for execution'
         scheduleSteps(); activity = 'Plan approved'
       } else if (decision.kind === 'acceptance' && input.choice === 'approve') {
-        if (card.steps.some(step => step.status !== 'done') || card.evidence?.some(entry => entry.result !== 'passed')) fail('The delivery changed. Review it again.')
+        if (!executionComplete(card) || card.approvedPlan !== card.planVersion || card.evidence?.some(entry => entry.result !== 'passed')) fail('The delivery changed. Review it again.')
         card.status = 'done'; card.completedAt = now; card.summary = 'Accepted by the user'; activity = 'Delivery accepted'
       } else {
-        if (decision.kind === 'design') card.stage = 'design'
+        if (decision.kind === 'design') {
+          card.stage = 'design'
+          if (card.stageOutcomes) for (const stage of ['design', ...EXECUTION_STAGES]) delete card.stageOutcomes[stage]
+        }
         if (decision.kind === 'acceptance') {
           card.stage = 'design'; delete card.approvedPlan
+          // Keep prior outcomes in the submission, not on the revised work ahead.
+          if (card.stageOutcomes) for (const stage of ['design', ...EXECUTION_STAGES]) delete card.stageOutcomes[stage]
           card.summary = 'Changes requested; preparing a revised plan'
         }
         dispatch(card.leadId, 'Read the user decision and continue within the approved scope')

@@ -45,7 +45,7 @@ export function ExecutionSteps({ card, roster }) {
       h('ol', { className: 'bt-board-step-list' }, steps.map((step, index) => h('li', { key: step.id },
         h('div', { className: 'bt-board-item-heading' }, h('span', { className: 'bt-board-step-number' }, index + 1), h('strong', null, step.title), h(Status, { value: step.status })),
         h('div', { className: 'bt-board-step-owner' }, h(BotAvatar, { bot: roster.byId[step.assigneeId], size: 22, live: false }),
-          h('span', null, roster.byId[step.assigneeId]?.name ?? t('Unassigned')), step.stage ? h('span', null, '· ', t(step.stage === 'validation' ? 'Validation' : 'Implementation')) : null),
+          h('span', null, roster.byId[step.assigneeId]?.name ?? t('Unassigned')), step.phase ? h('span', null, '· ', t(step.phase === 'validation' ? 'Validation' : 'Implementation')) : null),
         step.summary ? h(BoardText, { text: step.summary }) : null,
         step.scope || step.evidence ? h(BoardDisclosure, { title: t('Scope and evidence'), className: 'bt-board-inline-disclosure' },
           step.scope ? h('div', null, h('h4', null, t('Work scope')), h(BoardText, { text: step.scope, compact: false })) : null,

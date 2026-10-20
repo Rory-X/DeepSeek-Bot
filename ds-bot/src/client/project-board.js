@@ -9,17 +9,14 @@ import { CheckIcon, CloseIcon, FolderIcon, PlusIcon, SearchIcon, KanbanIcon, Pap
 import { relativeShort } from './text.js'
 import { BoardText, ExecutionSteps, VerificationEvidence, Deliverables, CurrentBackgroundTasks, RequirementContext, RequirementHistory } from './board-detail-content.js'
 import { BOARD_DETAIL_CSS } from './board-detail-styles.js'
+import { StageTracker, STAGE_TITLES, STAGE_TRACKER_CSS } from './board-stage-tracker.js'
 import { t } from './i18n.js'
 
 const COLUMNS = [
   ['backlog', 'Backlog'], ['in-progress', 'In progress'], ['needs-you', 'Needs you'], ['done', 'Done'],
 ]
-const STAGES = [
-  ['confirmation', 'Requirement confirmation'], ['clarification', 'Clarification'],
-  ['design', 'Solution design'], ['implementation', 'Implementation'], ['validation', 'Validation'],
-]
-const stageName = key => t(STAGES.find(([id]) => id === key)?.[1] ?? 'Requirement confirmation')
-const decisionName = kind => t(kind === 'acceptance' ? 'Final acceptance' : kind === 'design' ? 'Confirm the plan' : 'Your decision')
+const stageName = key => t(STAGE_TITLES[key] ?? 'Requirement confirmation')
+const decisionName = (kind, card) => t(kind === 'acceptance' ? 'Final acceptance' : kind === 'design' ? card?.stageOutcomes?.design?.status === 'skipped' ? 'Confirm execution scope' : 'Confirm the plan' : 'Your decision')
 const VIEW_KEY = 'ds-bot.project-board.view.v1'
 function readView() {
   try { return JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') ?? {} } catch { return {} }
@@ -166,11 +163,11 @@ function RequirementCard({ card, roster, onOpen }) {
   const steps = card.steps ?? []
   const done = steps.filter(step => step.status === 'done').length
   return h('button', { type: 'button', className: 'bt-board-card', onClick: onOpen, 'aria-label': card.title },
-    h('span', { className: 'bt-board-card-meta' }, h('span', { className: 'bt-board-stage' }, stageName(card.stage)), h('span', null, '#' + card.number)),
+    h('span', { className: 'bt-board-card-meta' }, h('span', { className: 'bt-board-stage' }, stageName(card.stage), card.stageOutcomes?.[card.stage]?.status === 'skipped' ? ' · ' + t('Skipped') : null), h('span', null, '#' + card.number)),
     h('span', { className: 'bt-board-card-title' }, card.title),
     ['paused', 'pausing', 'cancelling', 'cancelled'].includes(card.status) ? h('span', { className: 'bt-board-waiting' }, t({ paused: 'Paused', pausing: 'Pausing…', cancelling: 'Cancelling…', cancelled: 'Cancelled' }[card.status])) : null,
     card.summary ? h('span', { className: 'bt-board-card-summary' }, t(card.summary)) : null,
-    waiting ? h('span', { className: 'bt-board-waiting' }, h('span', { className: 'bt-board-dot' }), decisionName(waiting.kind)) : null,
+    waiting ? h('span', { className: 'bt-board-waiting' }, h('span', { className: 'bt-board-dot' }), decisionName(waiting.kind, card)) : null,
     card.blocker ? h('span', { className: 'bt-board-waiting' }, card.blocker) : null,
     card.deliveryError ? h('span', { className: 'bt-board-waiting' }, t('Task delivery needs attention')) : null,
     steps.length > 0 ? h('span', { className: 'bt-board-step-count' }, h(CheckIcon), t('{done} of {total} steps', { done, total: steps.length })) : null,
@@ -235,6 +232,7 @@ function DecisionForm({ card, decision, readOnly, onSaved }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const clarify = decision.kind === 'clarification'
+  const scopeOnly = decision.kind === 'design' && card.stageOutcomes?.design?.status === 'skipped'
   const submit = async choice => {
     setBusy(true); setError('')
     try {
@@ -243,7 +241,7 @@ function DecisionForm({ card, decision, readOnly, onSaved }) {
     } catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
   return h('section', { className: 'bt-board-decision' },
-    h('p', { className: 'bt-board-eyebrow' }, decisionName(decision.kind)),
+    h('p', { className: 'bt-board-eyebrow' }, decisionName(decision.kind, card)),
     h('h3', null, t(decision.question)), h(BoardText, { text: decision.recommendation }),
     decision.impact ? h('p', { className: 'bt-board-muted' }, decision.impact) : null,
     h('label', { className: 'bt-board-answer' }, t(clarify ? 'Your answer' : 'Feedback or requested changes'),
@@ -251,7 +249,7 @@ function DecisionForm({ card, decision, readOnly, onSaved }) {
     h('div', { className: 'bt-board-decision-actions' },
       !clarify ? h('button', { className: 'bt-soft bt-board-button', disabled: busy || readOnly || !answer.trim(), onClick: () => submit('reject') }, t('Request changes')) : null,
       h('button', { className: 'bt-soft bt-board-button bt-board-primary', disabled: busy || readOnly || (clarify && !answer.trim()), onClick: () => submit(clarify ? 'answer' : 'approve') },
-        t(clarify ? 'Send answer' : decision.kind === 'acceptance' ? 'Accept delivery' : 'Approve plan'))),
+        t(clarify ? 'Send answer' : decision.kind === 'acceptance' ? 'Accept delivery' : scopeOnly ? 'Approve execution scope' : 'Approve plan'))),
     error ? h('p', { className: 'bt-board-error', role: 'alert' }, error) : null)
 }
 
@@ -299,7 +297,6 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
     catch (failure) { setError(failure.message) } finally { setBusy(false) }
   }
   if (editing) return h(DraftDialog, { card, project, roster, onClose: () => setEditing(false), onSaved: async () => { await onSaved(); setEditing(false) } })
-  const stage = STAGES.findIndex(([id]) => id === card.stage)
   return h(Drawer, { title: t('Requirement') + ' #' + card.number, onClose,
     footer: h('div', { className: 'bt-board-detail-actions' },
       card.roomId ? h('button', { className: 'bt-soft bt-board-button', onClick: () => actions.openSession(card.roomId) }, t(card.collaboratorIds.length ? 'Open task group' : 'Open task conversation')) : null,
@@ -323,9 +320,7 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
       ? h('button', { className: 'bt-soft bt-board-button', disabled: busy || readOnly, onClick: () => start('board-retry') }, t('Retry task delivery')) : null,
     (card.backgroundJobs ?? []).some(job => job.status === 'unknown') ? h(BackgroundVerification, { card, onSaved, readOnly }) : null,
     (card.decisions ?? []).filter(item => item.status === 'open').map(item => h(DecisionForm, { key: item.id, card, decision: item, readOnly: readOnly || card.status !== 'active', onSaved })),
-    h('ol', { className: 'bt-board-stages', 'aria-label': t('Development stages') },
-      STAGES.map(([id, title], index) => h('li', { key: id, 'data-current': index === stage, 'data-complete': index < stage || card.status === 'done' },
-        h('span', { className: 'bt-board-stage-index' }, index < stage || card.status === 'done' ? h(CheckIcon) : index + 1), h('span', null, t(title))))),
+    h(StageTracker, { card }),
     (queue ?? []).some(entry => entry.cardId === card.id) ? h(Card, { title: t('Execution queue') }, h(QueueList, { entries: queue.filter(entry => entry.cardId === card.id), roster })) : null,
     h(CurrentBackgroundTasks, { card }),
     !(card.steps ?? []).length ? h(RequirementContext, { card }) : null,
@@ -413,4 +408,5 @@ export const BOARD_CSS = [
   '.bt-board-drawer-veil{position:absolute;inset:0;z-index:2;background:var(--bt-hover);display:flex;justify-content:flex-end}.bt-board-drawer{display:flex;flex-direction:column;width:min(540px,100%);height:100%;background:var(--bt-main);border-left:1px solid var(--bt-line-2);box-shadow:-12px 0 32px var(--bt-line);min-width:0}.bt-board-drawer-header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--bt-line);font-size:12px;color:var(--bt-ink-2)}.bt-board-drawer-body{flex:1;overflow:auto;padding:24px}.bt-board-drawer-foot{padding:14px 24px;border-top:1px solid var(--bt-line);display:flex;justify-content:flex-end}.bt-board-eyebrow{font-size:11px;color:var(--bt-ink-3);margin:0 0 10px}.bt-board-detail-title{font-size:23px;line-height:1.4;margin:0 0 16px;font-weight:600}.bt-board-prose{margin:0;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7}.bt-board-muted{color:var(--bt-ink-2);font-size:12px}.bt-board-stages{display:flex;list-style:none;padding:0;margin:26px 0;gap:4px}.bt-board-stages li{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px;font-size:10px;line-height:1.4;text-align:center;color:var(--bt-ink-3)}.bt-board-stage-index{width:25px;height:25px;border:1px solid var(--bt-line-2);border-radius:50%;display:flex;align-items:center;justify-content:center}.bt-board-stages li[data-current=true]{color:var(--bt-accent);font-weight:600}.bt-board-stages li[data-current=true] .bt-board-stage-index{border-color:var(--bt-accent);background:var(--bt-tag-bg)}.bt-board-stages li[data-complete=true] .bt-board-stage-index{color:var(--bt-green)}.bt-board-stage-index svg{width:14px}.bt-board-decision{padding:18px;border:1px solid var(--bt-star);border-radius:12px;background:var(--bt-card);margin:0 0 24px}.bt-board-decision .bt-board-eyebrow{color:var(--bt-star)}.bt-board-decision h3{font-size:15px;margin:0 0 8px}.bt-board-decision p{font-size:12px}.bt-board-steps,.bt-board-activity{list-style:none;padding:0;margin:0}.bt-board-steps li{padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--bt-line);font-size:13px}.bt-board-steps small,.bt-board-artifact small{display:block;color:var(--bt-ink-3);font-size:11px;margin-top:3px}.bt-board-step-state{width:20px;display:flex;justify-content:center;color:var(--bt-green)}.bt-board-artifact{display:flex;align-items:center;gap:10px;padding:14px;font-size:13px}.bt-board-artifact strong{font-weight:500}.bt-board-activity li{display:flex;justify-content:space-between;gap:16px;padding:12px 14px;font-size:12px;border-bottom:1px solid var(--bt-line)}.bt-board-activity small{color:var(--bt-ink-3);white-space:nowrap}.bt-board input[type=checkbox]{accent-color:var(--bt-accent)}.bt-board-form .bt-input{flex:0 0 auto;width:100%;box-sizing:border-box;margin:0;text-align:left}.bt-board-form .bt-select{flex:0 0 auto;height:38px}.bt-board-form .bt-board-error{margin:8px 0}.bt-board-drawer .bt-set-section h3{font-size:12px;font-weight:500;color:var(--bt-ink-2)}',
   '@media(max-width:899px){.bt-board{left:0!important}.bt-board-header{padding:16px;gap:8px}.bt-board h1{font-size:17px}.bt-board-heading{gap:6px}.bt-board-heading>svg{display:none}.bt-board-header-actions{gap:6px}.bt-board-header-actions .bt-board-button{font-size:12px;padding:0 12px}.bt-board-header-actions .bt-board-button>svg{display:none}.bt-board-toolbar{padding:10px 12px 4px;flex-wrap:wrap;gap:8px}.bt-board-project-bar{flex-basis:100%;width:100%}.bt-board-projects{flex:1}.bt-board-add-project{font-size:12px;padding:0 12px}.bt-board-project{padding:7px 10px;font-size:12px}.bt-board-search{width:100%;margin:0;font-size:12px}.bt-board-project-info{padding:6px 16px 12px;font-size:10px}.bt-board-columns{grid-template-columns:repeat(4,minmax(280px,82vw));padding:0 12px 16px;gap:12px;scroll-snap-type:x proximity}.bt-board-column{scroll-snap-align:start}.bt-board-drawer{width:100%;border:0}.bt-board-drawer-body{padding:20px}.bt-board-stages{margin:22px 0}.bt-board-drawer-header{padding:12px 18px}.bt-board-drawer-foot{padding-bottom:calc(14px + env(safe-area-inset-bottom))}}',
   BOARD_DETAIL_CSS,
+  STAGE_TRACKER_CSS,
 ].join('\n')

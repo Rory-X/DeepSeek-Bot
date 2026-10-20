@@ -1,7 +1,10 @@
 // Scripted test Bot: every board change runs through the normal registered tool.
 // Its tiny fixture uses DSH's scoped file tools; the bench runner also executes it.
 import { shellBoardReply } from './mock-board-shell.mjs'
+import { stageBoardReply } from './mock-board-stages.mjs'
 export function boardReply({ messages, tools, textOf, tool, text }) {
+  const stages = stageBoardReply({ messages, tools, textOf, tool, text })
+  if (stages) return stages
   const shell = shellBoardReply({ messages, tools, textOf, tool, text })
   if (shell) return shell
   if (!tools.has('read_project_board')) return

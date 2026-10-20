@@ -2,6 +2,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { output } from './tools.js'
 import { membersOf } from './board-workflow.js'
 import { installScheduler } from './board-scheduler.js'
+import { BOARD_STAGES } from '../shared/board-stages.js'
 
 export const BOARD_TOOLS = ['read_project_board', 'create_requirement', 'assign_requirement_bots', 'plan_requirement', 'update_requirement_step', 'resume_requirement_step', 'ask_requirement_user', 'submit_requirement', 'reconcile_requirement_work']
 const str = description => ({ type: 'string', required: true, description })
@@ -31,6 +32,7 @@ const jobPrompt = (card, job) => [
   'Collect background shell results using job_output and job_list before reporting completion. Keep processes managed by DSH; do not detach daemons with nohup, disown or an external supervisor. A pause stops processes, not their previous effects; continuation must inspect saved results.',
   'During requirement clarification, the coordinator reads list_bots and calls assign_requirement_bots with the collaborators needed and their responsibilities (an empty list for solo work). Select existing team Bots for this requirement; do not create or reconfigure global Bots. The task conversation membership updates automatically. Assignment does not dispatch workers; plan_requirement defines their steps and user approval starts execution.',
   'Clarify only decisions that change product scope, behavior or acceptance. Use ask_requirement_user for these; routine implementation choices are yours. Propose implementation and validation steps with explicit scopes using plan_requirement, then end your turn and wait for user approval. Do not implement before that approval.',
+  'In plan_requirement.stages, record completed preparatory stages with actual evidence, and mark any unnecessary development stage skipped with a specific reason. Do not invent work merely to fill all five stages. Omit execution steps for skipped implementation or validation stages. Skipping a stage never bypasses user start, plan authorization, final acceptance or evidence for the acceptance criteria. Unrecorded earlier stages will not display as completed.',
   'When dispatched to a step, do the work now. Use update_requirement_step with evidence when finished; report blockers honestly. Do not use message_bot or @mentions to dispatch duplicate work: the board dispatches the approved steps. The lead is recalled when all validation is done and submits artifacts and evidence for every criterion using submit_requirement.',
   'Never change global Bot settings or claim final acceptance. Merge, publish, production restart or scope expansion requires explicit authorization in the requirement. A returned delivery requires a revised plan. Do not restart work merely because the process reconnects.',
   `Brief: ${card.description}\nAcceptance criteria:\n${card.acceptance}`,
@@ -90,8 +92,11 @@ export function install(rt) {
     id, version, collaboratorIds: { type: 'array', required: true, items: { type: 'string' }, description: 'Complete collaborator ids from read_project_board.bots, up to 11; the coordinator is retained automatically' },
     summary: str('Why these Bots are needed and each responsibility; explain solo work if the list is empty'),
   }, (args, actor, exec) => mutate('board-assign', args, actor, exec))
-  register('plan_requirement', 'Lead only. Submit a concrete plan for user approval. Implementation remains blocked until approved. Multi-Bot plans require an independent reviewer.', {
+  register('plan_requirement', 'Lead only. Submit a concrete plan for user approval. Declare unnecessary stages skipped with reasons; only applicable execution stages need steps. Multi-Bot implementation plus validation requires an independent reviewer. Skips do not waive acceptance criteria or user authorization.', {
     id, version, summary: str('Solution, tradeoffs and implementation plan'),
+    stages: { type: 'array', description: 'Optional stage outcomes. Report completed confirmation/clarification/design with evidence, or skip any unnecessary stage with a reason. Execution stages complete only via their steps. Undeclared stages are not assumed complete.', items: { type: 'object', additionalProperties: false, properties: {
+      stage: { type: 'string', required: true, enum: BOARD_STAGES }, status: { type: 'string', required: true, enum: ['completed', 'skipped'] }, reason: str('Why this stage is unnecessary, or what proves the preparatory stage is completed'),
+    } } },
     steps: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
       id: str('Unique short step id'), title: str('Step title'), assigneeId: str('Assigned member Bot id'),
       phase: { type: 'string', required: true, enum: ['implementation', 'validation'] }, scope: str('Explicit files to change or scope to review'),

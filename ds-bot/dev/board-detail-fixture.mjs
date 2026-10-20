@@ -10,8 +10,8 @@ export function detailFixture(card, leadId, reviewerId) {
     staffing: { summary: 'Atlas 负责实现，Sage 独立验证；主控 Bot 汇总交付。' },
     plan: '1. 在指定目录生成验收文件。\n2. 由另一位 Bot 只读验证字段并提交证据。',
     steps: [
-      { id: 'build', title: '生成部署验收文件 receipt.json', status: 'done', assigneeId: leadId, stage: 'implementation', scope: path, summary: '已创建验收文件，字段与约定一致。' + '写入后回读核对内容与文件属性，保留原始证据。'.repeat(12), evidence: raw },
-      { id: 'verify', title: '独立验证内容并检查结果', status: 'done', assigneeId: reviewerId, stage: 'validation', scope: '只读检查交付文件', summary: '两项字段断言通过，退出码 0。', evidence: raw },
+      { id: 'build', title: '生成部署验收文件 receipt.json', status: 'done', assigneeId: leadId, phase: 'implementation', scope: path, summary: '已创建验收文件，字段与约定一致。' + '写入后回读核对内容与文件属性，保留原始证据。'.repeat(12), evidence: raw },
+      { id: 'verify', title: '独立验证内容并检查结果', status: 'done', assigneeId: reviewerId, phase: 'validation', scope: '只读检查交付文件', summary: '两项字段断言通过，退出码 0。', evidence: raw },
     ],
     evidence: [
       { criterion: '交付文件字段与验收约定一致', result: 'passed', detail: 'deployment 与 status 字段匹配；只读回查通过。', reference: path },
