@@ -48,7 +48,8 @@
 ## 证据（2026-10-20）
 
 - 单测：`node --test test/ima.test.js` → 14 tests / 14 pass / 0 fail；覆盖成功、401、超时、断网、业务码、半填凭据、非信封回包、写入端点缺席、body 只发映射字段，以及「声明 → 冻结底座适配器」的 9 个工具挂载、逐条请求与错误映射。
-- 全量（rebase 到底座 `094ea60`）：861 tests / 861 pass / 0 fail，约 215 s；`node scripts/build-client.mjs --check` 通过；`npm run lint` 0 error（15 条 warning 全是既有文件）。此前在 `100f603` 上出现的 7 个 connectors 列表断言失败，已由底座 `094ea60`（只比较内置行）修掉。
+- 底座上（`094ea60`）：861 tests / 861 pass / 0 fail，约 215 s；此时 14 条 ima 单测全跑，含「声明 → 适配器」集成断言。
+- 现网主线 `26c61ae`（Bot 文件夹版，不含连接器底座）：928 tests / 923 pass / 0 fail / 5 skipped，约 270 s；`build-client --check` 通过；`lint` 0 error（12 条 warning 全是既有文件）。跳过的 5 条里有 3 条是 ima 的适配器集成断言——主线还没有 `rest-tools.js`，声明本身仍是可加载的独立模块，等底座 rebase 到新主线后这些断言自动恢复执行。
 - 门槛：`node scripts/build-client.mjs --check` 通过；`npm run lint` 0 error（14 条 warning 全是既有客户端文件，不在本次改动内）。
 - 适配器集成（冻结点 `integ/connector-base-next` @ `100f603`）：9 个工具注册为 `ima_*`，逐条断言 host 只有 `ima.qq.com`、`POST`、两个 header + `ima-openapi-ctx`、body 只含映射字段（含 `query_info` 嵌套与 `target_content_format: 0` 常量）、`code=0` 解包、`20004/20002` 映射为工具错误。
 - 未做：真实 clientid/apikey 联调；UI 截图要等 `integ/connector-base` + 卡片渲染落地，计划两屏：连接器页 ima 卡片未连接态（390 / 1280 各一张）、连接后一次 `ima_search_kb_list` 空结果调用（不截真实笔记内容）。
