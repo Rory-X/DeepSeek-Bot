@@ -18,6 +18,7 @@ export const REST_ERROR_MAX = 2_000
 export const REST_BODY_MAX_BYTES = 8_192
 const TIMEOUT_MS = 20_000
 const METHODS = new Set(['GET', 'POST'])
+const LIST_MAX = 200
 const SCALAR = new Set(['string', 'number', 'boolean'])
 
 const safeName = (id, name) => `${id}_${String(name).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64)
@@ -74,8 +75,43 @@ function requestBody(connector, definition, args) {
   }
   for (const [field, mapping] of Object.entries(definition.body ?? {})) {
     if (mapping !== null && typeof mapping === 'object') {
-      if (!Object.hasOwn(mapping, 'const')) throw new Error(`${connector.displayName} REST tool "${definition.name}" body field "${field}" must name an argument or a constant.`)
-      setPath(field, mapping.const)
+      // A list of objects: `array` names the argument holding the array, and `items` maps
+      // each element's output field to a key in that element or to a constant. Only the
+      // declared fields survive, so a model cannot widen an element. Without `array` the
+      // same field map builds one element from the named arguments.
+      if (!Object.hasOwn(mapping, 'items')) {
+        if (Object.hasOwn(mapping, 'const')) {
+          setPath(field, mapping.const)
+          continue
+        }
+        throw new Error(`${connector.displayName} REST tool "${definition.name}" body field "${field}" must name an argument, a constant or an items list.`)
+      }
+      const elementFields = mapping.items
+      if (elementFields === null || typeof elementFields !== 'object' || Array.isArray(elementFields)) {
+        throw new Error(`${connector.displayName} REST tool "${definition.name}" body field "${field}" items must map element fields.`)
+      }
+      const source = typeof mapping.array === 'string' && mapping.array !== '' ? args?.[mapping.array] : undefined
+      const rows = source === undefined ? [args ?? {}] : source
+      if (!Array.isArray(rows)) throw new Error(`"${mapping.array}" must be a list.`)
+      if (rows.length > LIST_MAX) throw new Error(`"${mapping.array}" can carry at most ${LIST_MAX} entries.`)
+      const list = rows.map((row, index) => {
+        if (row === null || typeof row !== 'object' || Array.isArray(row)) throw new Error(`Entry ${index + 1} of "${mapping.array}" must be an object.`)
+        const element = {}
+        for (const [key, elementMapping] of Object.entries(elementFields)) {
+          if (elementMapping !== null && typeof elementMapping === 'object') {
+            if (!Object.hasOwn(elementMapping, 'const')) throw new Error(`${connector.displayName} REST tool "${definition.name}" item field "${key}" must name a field or a constant.`)
+            element[key] = elementMapping.const
+            continue
+          }
+          if (typeof elementMapping !== 'string' || elementMapping === '') throw new Error(`${connector.displayName} REST tool "${definition.name}" item field "${key}" must name a field or a constant.`)
+          const value = row[elementMapping]
+          if (value === undefined || value === null) continue
+          if (!isScalar(value)) throw new Error(`Entry ${index + 1} of "${mapping.array}" field "${elementMapping}" must be text, a number or a boolean.`)
+          element[key] = value
+        }
+        return element
+      })
+      setPath(field, list)
       continue
     }
     if (typeof mapping !== 'string' || mapping === '') throw new Error(`${connector.displayName} REST tool "${definition.name}" body field "${field}" must name an argument or a constant.`)
@@ -99,11 +135,15 @@ function validate(connector, definition) {
   const method = String(definition.method ?? 'GET').toUpperCase()
   if (!METHODS.has(method)) throw new Error(`${connector.displayName} REST tool "${definition.name}" must be GET or POST`)
   if (method === 'POST') {
-    if (definition.readOnly !== true) throw new Error(`${connector.displayName} REST tool "${definition.name}" POST must declare readOnly: true`)
+    if ((definition.readOnly === true) === (definition.write === true)) {
+      throw new Error(`${connector.displayName} REST tool "${definition.name}" POST must declare exactly one of readOnly: true or write: true`)
+    }
     const body = definition.body
     if (body === null || typeof body !== 'object' || Array.isArray(body)) {
       throw new Error(`${connector.displayName} REST tool "${definition.name}" POST needs an explicit body mapping (it may be empty)`)
     }
+  } else if (definition.readOnly === true || definition.write === true) {
+    throw new Error(`${connector.displayName} REST tool "${definition.name}" only marks a POST as readOnly or write`)
   }
   if (typeof definition.path !== 'string' || !definition.path.startsWith('/')) {
     throw new Error(`${connector.displayName} REST tool "${definition.name}" needs a path`)
@@ -138,16 +178,35 @@ function unwrap(connector, envelope, body) {
 // and a POST's `body` maps body fields to argument names or `{ const }`. `connector.api` is
 // the service origin, `connector.auth({ token, secrets })` supplies auth headers (the old
 // `restHeaders` name still works), and `secrets` is the named-credential map.
-export function createRestTools(id, connector, { token, secrets = {}, output, redact = text => String(text), fetch: request = fetch } = {}) {
-  return (connector.restTools ?? []).map((definition) => {
-    const method = validate(connector, definition)
+export function createRestTools(id, connector, { token, secrets = {}, output, redact = text => String(text), fetch: request = fetch, level = 'read', approve } = {}) {
+  const definitions = connector.restTools ?? []
+  // A write tool exists only at the write level; each call asks first. A read tool is built
+  // always, and the approval hook may run one of them to name what a write targets.
+  const wanted = definitions
+    .map(definition => ({ definition, method: validate(connector, definition) }))
+    .filter(entry => entry.definition.write === true ? level === 'write' : true)
+  const tools = []
+  const readByName = new Map()
+  const build = ({ definition, method }) => {
     const name = safeName(id, definition.name)
     return {
       name,
       description: String(definition.description ?? ''),
       parameters: definition.parameters ?? { type: 'object', properties: {} },
       output,
-      async execute(args) {
+      async execute(args, exec) {
+        if (definition.write === true) {
+          if (typeof approve !== 'function') throw new Error(`${connector.displayName} cannot run a write without an approval step.`)
+          const read = async (toolName, values) => {
+            const tool = readByName.get(toolName) ?? readByName.get(safeName(id, toolName))
+            if (tool === undefined) throw new Error(`No read tool named "${toolName}" for this connector's approval.`)
+            return await tool.execute(values ?? {}, {})
+          }
+          const summary = typeof definition.approval === 'function'
+            ? await definition.approval(args ?? {}, { read })
+            : undefined
+          await approve({ tool: name, args, summary, exec })
+        }
         let url
         let body
         try {
@@ -201,5 +260,11 @@ export function createRestTools(id, connector, { token, secrets = {}, output, re
         return cut(parsed === undefined ? text : JSON.stringify(parsed), redact, parsed !== undefined, limit)
       },
     }
-  })
+  }
+  for (const entry of wanted) {
+    const tool = build(entry)
+    tools.push(tool)
+    if (entry.definition.write !== true) readByName.set(safeName(id, entry.definition.name), tool)
+  }
+  return tools
 }

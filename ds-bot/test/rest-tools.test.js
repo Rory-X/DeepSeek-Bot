@@ -52,7 +52,7 @@ test('tools are built read-only and named by connector', () => {
   assert.equal(tool.name, 'example_get_project')
   assert.equal(tool.description, 'Read one project')
   assert.deepEqual(tool.parameters.required, ['projectId'])
-  assert.throws(() => createRestTools('example', { ...connector(), restTools: [{ name: 'deploy', method: 'POST', path: '/v1/deploy' }] }, { token: TOKEN, output }), /must declare readOnly: true/)
+  assert.throws(() => createRestTools('example', { ...connector(), restTools: [{ name: 'deploy', method: 'POST', path: '/v1/deploy' }] }, { token: TOKEN, output }), /must declare exactly one of readOnly: true or write: true/)
   assert.throws(() => createRestTools('example', { ...connector(), restTools: [{ name: 'deploy', method: 'POST', readOnly: true, path: '/v1/deploy' }] }, { token: TOKEN, output }), /needs an explicit body mapping/)
   assert.throws(() => createRestTools('example', { ...connector(), restTools: [{ name: 'deploy', method: 'PUT', path: '/v1/deploy' }] }, { token: TOKEN, output }), /must be GET or POST/)
   assert.throws(() => createRestTools('example', { ...connector(), restTools: [{ name: 'bad', method: 'GET', path: 'v1/x' }] }, { token: TOKEN, output }), /needs a path/)
@@ -278,4 +278,102 @@ test('a cut JSON answer says the JSON is incomplete', async () => {
   const text = await tool.execute({})
   assert.match(text, /no longer complete/)
   assert.match(text, /result cut: \d+ characters in all/)
+})
+
+
+const writer = (restTools) => ({
+  displayName: 'Writer',
+  api: 'https://writer.example.com',
+  restTools: [
+    {
+      name: 'get_env',
+      description: 'Read one environment value',
+      method: 'GET',
+      path: '/v1/env',
+      query: { name: 'name' },
+      parameters: { type: 'object', properties: { name: { type: 'string' } } },
+    },
+    ...restTools,
+  ],
+})
+
+const addNote = {
+  name: 'add_note',
+  description: 'Add a note with its reviews',
+  method: 'POST',
+  write: true,
+  path: '/v1/notes',
+  body: {
+    docId: 'docId',
+    title: 'title',
+    reviews: { array: 'reviews', items: { bookId: 'bookId', content: 'content', source: { const: 'bot' } } },
+  },
+  approval: async (args, { read }) => ({
+    line: `Add note to ${await read('get_env', { name: 'doc' })}`,
+    target: args.docId,
+  }),
+  parameters: { type: 'object', properties: { docId: { type: 'string' }, title: { type: 'string' }, reviews: { type: 'array' } } },
+}
+
+test('a write REST tool exists only at the write level', () => {
+  const readLevel = createRestTools('writer', writer([addNote]), { output, level: 'read' })
+  assert.deepEqual(readLevel.map(tool => tool.name), ['writer_get_env'])
+  const writeLevel = createRestTools('writer', writer([addNote]), { output, level: 'write', approve: async () => {} })
+  assert.deepEqual(writeLevel.map(tool => tool.name), ['writer_get_env', 'writer_add_note'])
+})
+
+test('a REST write asks first, sends only declared fields and may read a name for the card', async () => {
+  const calls = []
+  const fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method, body: init.body })
+    if (String(url).includes('/v1/env')) return answer(200, { env: 'doc-name' })
+    return answer(200, { ok: true })
+  }
+  let asked
+  const tools = createRestTools('writer', writer([addNote]), {
+    output,
+    level: 'write',
+    fetch,
+    approve: async (request) => { asked = request },
+  })
+  const tool = tools.find(entry => entry.name === 'writer_add_note')
+  const text = await tool.execute({
+    docId: 'd1',
+    title: 'T',
+    reviews: [{ bookId: 'b1', content: 'c1', secret: 'must not pass' }, { bookId: 'b2', content: 'c2' }],
+    ignored: 'must not pass',
+  }, { agent: { id: 'm1' } })
+  assert.equal(text, '{"ok":true}')
+  assert.equal(calls.length, 2)
+  assert.match(calls[0].url, /\/v1\/env\?name=doc$/)
+  assert.equal(calls[1].method, 'POST')
+  assert.deepEqual(JSON.parse(calls[1].body), {
+    docId: 'd1',
+    title: 'T',
+    reviews: [{ bookId: 'b1', content: 'c1', source: 'bot' }, { bookId: 'b2', content: 'c2', source: 'bot' }],
+  })
+  assert.equal(asked.tool, 'writer_add_note')
+  assert.equal(asked.exec.agent.id, 'm1')
+  assert.match(asked.summary.line, /Add note to \{"env":"doc-name"\}/)
+  assert.equal(asked.summary.target, 'd1')
+})
+
+test('a refused REST write sends no write request', async () => {
+  const requests = []
+  const tools = createRestTools('writer', writer([addNote]), {
+    output,
+    level: 'write',
+    fetch: async (url, init = {}) => { requests.push({ url: String(url), method: init.method ?? 'GET' }); return answer(200, { env: 'doc' }) },
+    approve: async () => { throw new Error('The user denied Writer\'s add_note; nothing was sent.') },
+  })
+  const tool = tools.find(entry => entry.name === 'writer_add_note')
+  await assert.rejects(tool.execute({ docId: 'd1', reviews: [] }, { agent: { id: 'm1' } }), /denied/)
+  // The card's read-only lookup may run; the write itself never reaches the service.
+  assert.equal(requests.filter(entry => entry.method !== 'GET').length, 0)
+})
+
+test('a write POST needs an explicit body and exactly one mode', () => {
+  assert.throws(() => createRestTools('writer', writer([{ name: 'deploy', method: 'POST', write: true, path: '/v1/deploy' }]), { output, level: 'write', approve: async () => {} }), /needs an explicit body mapping/)
+  assert.throws(() => createRestTools('writer', writer([{ name: 'both', method: 'POST', write: true, readOnly: true, path: '/v1/x', body: {} }]), { output, level: 'write', approve: async () => {} }), /exactly one of readOnly: true or write: true/)
+  assert.throws(() => createRestTools('writer', writer([{ name: 'getwrite', method: 'GET', write: true, path: '/v1/x' }]), { output, level: 'write' }), /only marks a POST/)
 })
