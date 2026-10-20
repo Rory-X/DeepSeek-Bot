@@ -262,8 +262,10 @@ Extend the shared core; the read tools keep EXAMINE and BODY.PEEK unchanged.
   `MOVE` is used when advertised, else COPY + STORE `\Deleted` for the move case.
 - `createImapWriteTools({ id, displayName, credential, account, host, port, approve })`
   registers `mark_read`, `mark_unread`, `move_messages`, `delete_messages` and
-  `save_draft` (APPEND to Drafts). Each execute calls `approve` first with a summary
-  naming the folder, the number of messages and the UIDs; nothing is sent when refused.
+  `save_draft` (APPEND to Drafts). Each execute calls
+  `approve({ tool, line, danger, exec })` first, with a summary naming the folder, the
+  number of messages and the UIDs; `exec` is the tool call's exec, so the framework can
+  address the card to the Session running it. Nothing is sent when refused.
 - Modules opt in with `imap: { write: true }`; the framework mounts these tools only at
   level `write` and only for a module that opted in.
 - Tests: a mocked IMAP server asserts the command list (no write command at read level,
@@ -280,9 +282,10 @@ A new shared module beside `_imap.js`, no new dependency:
   References for a reply, attachments kept on forward.
 - `createSmtpTools({ id, displayName, credential, account, smtp, approve })` registers
   `send_email`, `reply_email` and `forward_email`. **The From address must equal the
-  connected account**; To/Cc are capped (20 recipients); every execute calls `approve`
-  with a summary of recipients, subject, the first 80 characters of the body and the
-  attachment names.
+  connected account**; To/Cc are capped (20 recipients); every execute calls
+  `approve({ tool, line, danger, exec })` with a summary of recipients, subject, the first
+  80 characters of the body and the attachment names; `exec` addresses the card to the
+  running Session.
 - Modules opt in with `smtp: { host, port }`; the framework mounts the tools only at
   level `write` and only with the same app password / authorization code the IMAP side
   uses.
