@@ -115,6 +115,9 @@ export function install(rt) {
         case 'board-view':
           await rt.load()
           return ok(rt.boardView())
+        case 'board-project-add':
+          await rt.load()
+          return ok(await rt.boardAddProject(body))
         case 'board-background-resolve':
           await rt.load()
           return ok(await rt.boardResolveBackground(body))

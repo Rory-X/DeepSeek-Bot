@@ -161,6 +161,11 @@ var BOARD_ZH = {
   "Search Bots": "搜索 Bot",
   "No matching Bots": "没有匹配的 Bot",
   "Team assignment": "团队分工",
+  "Add project": "添加项目",
+  "Adding…": "添加中…",
+  "Choose an existing folder as the project workspace.": "选择已有文件夹，作为项目工作区。",
+  "Project name (optional)": "项目名称（可选）",
+  "Project folder": "项目文件夹",
   "Requirement team assigned": "主控 Bot 已分配团队",
   "After you start, this Bot assigns collaborators while clarifying the requirement.": "开始后，主控 Bot 会在需求澄清时分配协作 Bot。",
   "Start asks the coordinator to clarify the requirement, assign Bots and propose a plan. Implementation waits for your approval.": "开始后由主控 Bot 澄清需求、分配 Bot 并提交方案；你确认方案后才开始执行。",
@@ -6815,14 +6820,14 @@ var import_react13 = require("react");
 var import_react_dom4 = require("react-dom");
 var folderName = (path) => String(path).replace(/[\\/]+$/, "").split(/[\\/]/).pop() || String(path);
 var Tick = ({ on }) => (0, import_react13.createElement)("span", { className: "bt-model-tick", "aria-hidden": true }, on ? (0, import_react13.createElement)(CheckIcon) : null);
-function FolderMenu({ value, group = false, actions, run, onPick, wide = false }) {
+function FolderMenu({ value, group = false, actions, run, onPick, wide = false, placeholder, allowDefault = true }) {
   const { isOpen, shownPlace, leaving, button, menu, open, close } = useAnchoredMenu();
   const [info, setInfo] = (0, import_react13.useState)(null);
   const [view, setView] = (0, import_react13.useState)("list");
   const [draft, setDraft] = (0, import_react13.useState)("");
   const [listing, setListing] = (0, import_react13.useState)(null);
   const [problem, setProblem] = (0, import_react13.useState)("");
-  const fallback = group ? t("Each Bot's own folder") : t("Team workspace");
+  const fallback = placeholder ?? (group ? t("Each Bot's own folder") : t("Team workspace"));
   const toggle = () => {
     if (isOpen) {
       close();
@@ -6857,12 +6862,12 @@ function FolderMenu({ value, group = false, actions, run, onPick, wide = false }
   const listView = (0, import_react13.createElement)(
     "div",
     { key: "list", className: "bt-folder-view" },
-    (0, import_react13.createElement)(
+    allowDefault ? (0, import_react13.createElement)(
       "button",
       { type: "button", role: "menuitemradio", "aria-checked": !value, title: group ? void 0 : info?.team ?? void 0, onClick: () => choose("") },
       (0, import_react13.createElement)("span", { className: "bt-menu-label" }, fallback),
       (0, import_react13.createElement)(Tick, { on: !value })
-    ),
+    ) : null,
     folders.length > 0 ? (0, import_react13.createElement)("div", { className: "bt-model-group", role: "presentation" }, t("Folders")) : null,
     folders.map((folder) => (0, import_react13.createElement)(
       "button",
@@ -8371,14 +8376,18 @@ function BoardPage({ roster, actions }) {
   const [queries, setQueries] = (0, import_react19.useState)(() => readView().queries ?? {});
   const [selected, setSelected] = (0, import_react19.useState)(null);
   const [creating, setCreating] = (0, import_react19.useState)(false);
+  const [addingProject, setAddingProject] = (0, import_react19.useState)(false);
   const [queueOpen, setQueueOpen] = (0, import_react19.useState)(false);
   const [showCancelled, setShowCancelled] = (0, import_react19.useState)(() => readView().showCancelled === true);
   const [error, setError] = (0, import_react19.useState)("");
   const [left, setLeft] = (0, import_react19.useState)(0);
   const columns = (0, import_react19.useRef)(null);
+  const request = (0, import_react19.useRef)(0);
   const query = queries[projectId] ?? "";
   const refresh = (0, import_react19.useCallback)(async (signal) => {
+    const sequence = ++request.current;
     const next = await call("board-view", {}, signal);
+    if (sequence !== request.current) return;
     setData((previous) => previous && previous.revision > next.revision ? previous : next);
     setError("");
     setProjectId((id) => id || next.projects[0]?.id || "");
@@ -8430,13 +8439,13 @@ function BoardPage({ roster, actions }) {
   }, [projectId, Boolean(data)]);
   (0, import_react19.useEffect)(() => {
     const close = (event) => {
-      if (event.key !== "Escape" || event.defaultPrevented || selected || creating) return;
+      if (event.key !== "Escape" || event.defaultPrevented || selected || creating || addingProject || queueOpen) return;
       event.preventDefault();
       actions.closeBoard();
     };
     document.addEventListener("keydown", close);
     return () => document.removeEventListener("keydown", close);
-  }, [actions, selected, creating]);
+  }, [actions, selected, creating, addingProject, queueOpen]);
   const project = data?.projects.find((item) => item.id === projectId);
   const projectCards = (data?.cards ?? []).filter((card2) => card2.projectId === projectId && (showCancelled || card2.status !== "cancelled"));
   const cards = projectCards.filter((card2) => (card2.title + " #" + card2.number).toLocaleLowerCase().includes(query.toLocaleLowerCase()));
@@ -8451,32 +8460,37 @@ function BoardPage({ roster, actions }) {
       (0, import_react19.createElement)(
         "div",
         { className: "bt-board-header-actions" },
-        (0, import_react19.createElement)("button", { type: "button", className: "bt-board-button", onClick: actions.closeBoard }, t("Back to chats")),
-        (0, import_react19.createElement)("button", { type: "button", className: "bt-board-button", onClick: () => {
+        (0, import_react19.createElement)("button", { type: "button", className: "bt-round", title: t("Back to chats"), "aria-label": t("Back to chats"), onClick: actions.closeBoard }, (0, import_react19.createElement)(ChevronLeftIcon)),
+        (0, import_react19.createElement)("button", { type: "button", className: "bt-soft bt-board-button", onClick: () => {
           setSelected(null);
           setQueueOpen(true);
-        } }, t("Queue"), " ", data?.queue?.length ?? 0),
-        (0, import_react19.createElement)("button", { type: "button", className: "bt-board-button bt-board-primary", disabled: !project || Boolean(data?.readOnly), onClick: () => setCreating(true) }, (0, import_react19.createElement)(PlusIcon), t("New requirement"))
+        } }, (0, import_react19.createElement)(ClockIcon), t("Queue"), (0, import_react19.createElement)("span", { className: "bt-board-queue-count" }, data?.queue?.length ?? 0)),
+        (0, import_react19.createElement)("button", { type: "button", className: "bt-soft bt-board-button bt-board-primary", disabled: !project || Boolean(data?.readOnly), onClick: () => setCreating(true) }, (0, import_react19.createElement)(PlusIcon), t("New requirement"))
       )
     ),
     (0, import_react19.createElement)(
       "div",
       { className: "bt-board-toolbar" },
       (0, import_react19.createElement)(
-        "nav",
-        { className: "bt-board-projects", "aria-label": t("Projects") },
-        (data?.projects ?? []).map((item) => (0, import_react19.createElement)("button", {
-          key: item.id,
-          type: "button",
-          className: "bt-board-project",
-          "aria-pressed": item.id === projectId,
-          title: item.path,
-          onClick: () => {
-            setSelected(null);
-            setCreating(false);
-            setProjectId(item.id);
-          }
-        }, (0, import_react19.createElement)(FolderIcon), item.title, item.pending > 0 ? (0, import_react19.createElement)("span", { className: "bt-board-count" }, item.pending) : null))
+        "div",
+        { className: "bt-board-project-bar" },
+        (0, import_react19.createElement)(
+          "nav",
+          { className: "bt-board-projects", "aria-label": t("Projects") },
+          (data?.projects ?? []).map((item) => (0, import_react19.createElement)("button", {
+            key: item.id,
+            type: "button",
+            className: "bt-soft bt-board-project",
+            "aria-pressed": item.id === projectId,
+            title: item.path,
+            onClick: () => {
+              setSelected(null);
+              setCreating(false);
+              setProjectId(item.id);
+            }
+          }, (0, import_react19.createElement)(FolderIcon), (0, import_react19.createElement)("span", { className: "bt-board-project-name" }, item.title), item.pending > 0 ? (0, import_react19.createElement)("span", { className: "bt-board-count" }, item.pending) : null))
+        ),
+        (0, import_react19.createElement)("button", { type: "button", className: "bt-soft bt-board-button bt-board-add-project", disabled: !data || Boolean(data.readOnly), onClick: () => setAddingProject(true) }, (0, import_react19.createElement)(PlusIcon), t("Add project"))
       ),
       (0, import_react19.createElement)(
         "label",
@@ -8484,6 +8498,7 @@ function BoardPage({ roster, actions }) {
         (0, import_react19.createElement)(SearchIcon),
         (0, import_react19.createElement)("input", {
           type: "search",
+          className: "bt-input",
           value: query,
           placeholder: t("Search requirements"),
           "aria-label": t("Search requirements"),
@@ -8533,6 +8548,12 @@ function BoardPage({ roster, actions }) {
       await refresh();
       setCreating(false);
       setSelected(saved.id);
+    } }) : null,
+    addingProject ? (0, import_react19.createElement)(AddProjectDialog, { actions, onClose: () => setAddingProject(false), onAdded: async (project2) => {
+      await refresh();
+      setProjectId(project2.id);
+      setSelected(null);
+      setAddingProject(false);
     } }) : null
   );
 }
@@ -8585,6 +8606,7 @@ function Drawer({ title, onClose, children, footer }) {
     };
   }, []);
   const onKeyDown = (event) => {
+    if (event.defaultPrevented || !ref.current?.contains(event.target)) return;
     if (event.key === "Escape") {
       event.stopPropagation();
       event.preventDefault();
@@ -8612,6 +8634,57 @@ function Drawer({ title, onClose, children, footer }) {
       (0, import_react19.createElement)("header", { className: "bt-board-drawer-header" }, (0, import_react19.createElement)("span", null, title), (0, import_react19.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Close"), onClick: onClose }, (0, import_react19.createElement)(CloseIcon))),
       (0, import_react19.createElement)("div", { className: "bt-board-drawer-body" }, children),
       footer ? (0, import_react19.createElement)("footer", { className: "bt-board-drawer-foot" }, footer) : null
+    )
+  );
+}
+function AddProjectDialog({ actions, onClose, onAdded }) {
+  const [path, setPath] = (0, import_react19.useState)("");
+  const [title, setTitle] = (0, import_react19.useState)("");
+  const [busy, setBusy] = (0, import_react19.useState)(false);
+  const [error, setError] = (0, import_react19.useState)("");
+  const run = async (task) => {
+    try {
+      await task;
+    } catch (problem) {
+      setError(problem.message);
+    }
+  };
+  const choosePath = (value) => {
+    setPath(value);
+    setError("");
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy || !path.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onAdded(await call("board-project-add", { path, title }));
+    } catch (problem) {
+      setError(problem.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (0, import_react19.createElement)(
+    Drawer,
+    {
+      title: t("Add project"),
+      onClose,
+      footer: (0, import_react19.createElement)("button", { type: "submit", form: "bt-board-project-form", className: "bt-soft bt-board-button bt-board-primary", disabled: busy || !path.trim() }, busy ? t("Adding…") : t("Add project"))
+    },
+    (0, import_react19.createElement)("p", { className: "bt-board-muted" }, t("Choose an existing folder as the project workspace.")),
+    (0, import_react19.createElement)(
+      "form",
+      { id: "bt-board-project-form", className: "bt-board-form", onSubmit: submit },
+      (0, import_react19.createElement)(
+        Card,
+        null,
+        (0, import_react19.createElement)(Row, { label: t("Project name (optional)"), stack: true }, (0, import_react19.createElement)("input", { className: "bt-input", value: title, maxLength: 100, onChange: (event) => setTitle(event.target.value) })),
+        (0, import_react19.createElement)(Row, { label: t("Project folder"), stack: true }, (0, import_react19.createElement)("input", { className: "bt-input", value: path, required: true, maxLength: 4e3, placeholder: t("Full path of a folder"), onChange: (event) => choosePath(event.target.value) })),
+        (0, import_react19.createElement)("div", { className: "bt-board-folder-picker" }, (0, import_react19.createElement)(FolderMenu, { value: path, actions, run, onPick: choosePath, placeholder: t("Choose a folder…"), allowDefault: false, wide: true }))
+      ),
+      error ? (0, import_react19.createElement)("p", { className: "bt-board-error", role: "alert" }, error) : null
     )
   );
 }
@@ -8644,15 +8717,15 @@ function DecisionForm({ card, decision, readOnly, onSaved }) {
       "label",
       { className: "bt-board-answer" },
       t(clarify ? "Your answer" : "Feedback or requested changes"),
-      (0, import_react19.createElement)("textarea", { className: "bt-bs-input bt-bs-area", rows: 3, maxLength: 4e3, value: answer, disabled: busy || readOnly, onChange: (event) => setAnswer(event.target.value) })
+      (0, import_react19.createElement)("textarea", { className: "bt-input bt-input-area", rows: 3, maxLength: 4e3, value: answer, disabled: busy || readOnly, onChange: (event) => setAnswer(event.target.value) })
     ),
     (0, import_react19.createElement)(
       "div",
       { className: "bt-board-decision-actions" },
-      !clarify ? (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: busy || readOnly || !answer.trim(), onClick: () => submit("reject") }, t("Request changes")) : null,
+      !clarify ? (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", disabled: busy || readOnly || !answer.trim(), onClick: () => submit("reject") }, t("Request changes")) : null,
       (0, import_react19.createElement)(
         "button",
-        { className: "bt-board-button bt-board-primary", disabled: busy || readOnly || clarify && !answer.trim(), onClick: () => submit(clarify ? "answer" : "approve") },
+        { className: "bt-soft bt-board-button bt-board-primary", disabled: busy || readOnly || clarify && !answer.trim(), onClick: () => submit(clarify ? "answer" : "approve") },
         t(clarify ? "Send answer" : decision.kind === "acceptance" ? "Accept delivery" : "Approve plan")
       )
     ),
@@ -8700,8 +8773,8 @@ function BackgroundVerification({ card, onSaved, readOnly }) {
     { className: "bt-board-decision" },
     (0, import_react19.createElement)("h3", null, t("Verify background task shutdown")),
     (0, import_react19.createElement)("p", null, t("Check that the old processes stopped and inspect their saved effects. Record your evidence before allowing recovery. This does not stop an unknown process for you.")),
-    (0, import_react19.createElement)("label", { className: "bt-board-answer" }, t("Shutdown verification evidence"), (0, import_react19.createElement)("textarea", { className: "bt-bs-input bt-bs-area", value: evidence, maxLength: 4e3, rows: 3, disabled: readOnly || busy, onChange: (event) => setEvidence(event.target.value) })),
-    (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: readOnly || busy || evidence.trim().length < 10, onClick: submit }, t("Confirm stopped and continue")),
+    (0, import_react19.createElement)("label", { className: "bt-board-answer" }, t("Shutdown verification evidence"), (0, import_react19.createElement)("textarea", { className: "bt-input bt-input-area", value: evidence, maxLength: 4e3, rows: 3, disabled: readOnly || busy, onChange: (event) => setEvidence(event.target.value) })),
+    (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", disabled: readOnly || busy || evidence.trim().length < 10, onClick: submit }, t("Confirm stopped and continue")),
     error ? (0, import_react19.createElement)("p", { className: "bt-board-error", role: "alert" }, error) : null
   );
 }
@@ -8748,12 +8821,12 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
       footer: (0, import_react19.createElement)(
         "div",
         { className: "bt-board-detail-actions" },
-        card.roomId ? (0, import_react19.createElement)("button", { className: "bt-board-button", onClick: () => actions.openSession(card.roomId) }, t(card.collaboratorIds.length ? "Open task group" : "Open task conversation")) : null,
-        card.status === "active" ? (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: busy || readOnly, onClick: () => control("board-pause") }, t("Pause requirement")) : null,
-        card.status === "paused" ? (0, import_react19.createElement)("button", { className: "bt-board-button bt-board-primary", disabled: busy || readOnly, onClick: () => control("board-resume") }, t("Resume requirement")) : null,
-        ["backlog", "active", "paused"].includes(card.status) ? (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: busy || readOnly, onClick: () => setConfirmCancel(true) }, t("Cancel requirement")) : null,
-        card.status === "backlog" ? (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: readOnly || busy, onClick: () => setEditing(true) }, t("Edit draft")) : null,
-        card.status === "backlog" ? (0, import_react19.createElement)("button", { className: "bt-board-button bt-board-primary", disabled: readOnly || busy || !card.description.trim() || !card.acceptance.trim(), onClick: () => start() }, t(busy ? "Starting…" : "Start requirement")) : null
+        card.roomId ? (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", onClick: () => actions.openSession(card.roomId) }, t(card.collaboratorIds.length ? "Open task group" : "Open task conversation")) : null,
+        card.status === "active" ? (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", disabled: busy || readOnly, onClick: () => control("board-pause") }, t("Pause requirement")) : null,
+        card.status === "paused" ? (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button bt-board-primary", disabled: busy || readOnly, onClick: () => control("board-resume") }, t("Resume requirement")) : null,
+        ["backlog", "active", "paused"].includes(card.status) ? (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", disabled: busy || readOnly, onClick: () => setConfirmCancel(true) }, t("Cancel requirement")) : null,
+        card.status === "backlog" ? (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", disabled: readOnly || busy, onClick: () => setEditing(true) }, t("Edit draft")) : null,
+        card.status === "backlog" ? (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button bt-board-primary", disabled: readOnly || busy || !card.description.trim() || !card.acceptance.trim(), onClick: () => start() }, t(busy ? "Starting…" : "Start requirement")) : null
       )
     },
     (0, import_react19.createElement)("p", { className: "bt-board-eyebrow" }, project?.title, " · ", t(COLUMNS.find(([id]) => id === card.column)?.[1] ?? "Backlog")),
@@ -8768,8 +8841,8 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
       (0, import_react19.createElement)(
         "div",
         { className: "bt-board-decision-actions" },
-        (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: busy, onClick: () => setConfirmCancel(false) }, t("Keep requirement")),
-        (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: busy || readOnly, onClick: () => control("board-cancel") }, t("Confirm cancellation"))
+        (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", disabled: busy, onClick: () => setConfirmCancel(false) }, t("Keep requirement")),
+        (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", disabled: busy || readOnly, onClick: () => control("board-cancel") }, t("Confirm cancellation"))
       )
     ) : null,
     ["paused", "pausing", "cancelling", "cancelled"].includes(card.status) ? (0, import_react19.createElement)(
@@ -8779,7 +8852,7 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
     ) : null,
     card.status === "backlog" ? (0, import_react19.createElement)("p", { className: "bt-board-muted" }, t("Start asks the coordinator to clarify the requirement, assign Bots and propose a plan. Implementation waits for your approval.")) : null,
     card.deliveryError || error ? (0, import_react19.createElement)("p", { className: "bt-board-error", role: "alert" }, t(card.deliveryError || error)) : null,
-    card.deliveryError && card.deliveries?.some((job) => job.status === "failed") && !card.deliveries.some((job) => job.status === "failed" && job.mayHaveSent) ? (0, import_react19.createElement)("button", { className: "bt-board-button", disabled: busy || readOnly, onClick: () => start("board-retry") }, t("Retry task delivery")) : null,
+    card.deliveryError && card.deliveries?.some((job) => job.status === "failed") && !card.deliveries.some((job) => job.status === "failed" && job.mayHaveSent) ? (0, import_react19.createElement)("button", { className: "bt-soft bt-board-button", disabled: busy || readOnly, onClick: () => start("board-retry") }, t("Retry task delivery")) : null,
     (0, import_react19.createElement)(
       "ol",
       { className: "bt-board-stages", "aria-label": t("Development stages") },
@@ -8880,6 +8953,13 @@ function CoordinatorPicker({ value, roster, onChange }) {
     )
   );
   const keys = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      button.current?.focus();
+      return;
+    }
     const options = [...menu.current.querySelectorAll("[role=option]")];
     const index = options.indexOf(document.activeElement);
     if (event.key === "Enter" && event.target.tagName === "INPUT") {
@@ -8960,7 +9040,7 @@ function DraftDialog({ card, project, roster, onClose, onSaved }) {
     {
       title: card ? t("Edit draft") : t("New requirement"),
       onClose,
-      footer: (0, import_react19.createElement)("button", { type: "submit", form: "bt-board-draft", className: "bt-board-button bt-board-primary", disabled: busy || !draft.title.trim() || !draft.leadId }, busy ? t("Saving…") : t("Save draft"))
+      footer: (0, import_react19.createElement)("button", { type: "submit", form: "bt-board-draft", className: "bt-soft bt-board-button bt-board-primary", disabled: busy || !draft.title.trim() || !draft.leadId }, busy ? t("Saving…") : t("Save draft"))
     },
     (0, import_react19.createElement)("p", { className: "bt-board-eyebrow" }, project.title),
     (0, import_react19.createElement)(
@@ -8969,9 +9049,9 @@ function DraftDialog({ card, project, roster, onClose, onSaved }) {
       (0, import_react19.createElement)(
         Card,
         null,
-        (0, import_react19.createElement)(Row, { label: t("Requirement title"), stack: true }, (0, import_react19.createElement)("input", { className: "bt-bs-input", value: draft.title, required: true, maxLength: 180, onChange: (event) => change("title", event.target.value) })),
-        (0, import_react19.createElement)(Row, { label: t("Requirement brief"), stack: true }, (0, import_react19.createElement)("textarea", { className: "bt-bs-input bt-bs-area", rows: 4, maxLength: 12e3, value: draft.description, onChange: (event) => change("description", event.target.value) })),
-        (0, import_react19.createElement)(Row, { label: t("Acceptance criteria"), stack: true }, (0, import_react19.createElement)("textarea", { className: "bt-bs-input bt-bs-area", rows: 3, maxLength: 8e3, value: draft.acceptance, onChange: (event) => change("acceptance", event.target.value) }))
+        (0, import_react19.createElement)(Row, { label: t("Requirement title"), stack: true }, (0, import_react19.createElement)("input", { className: "bt-input", value: draft.title, required: true, maxLength: 180, onChange: (event) => change("title", event.target.value) })),
+        (0, import_react19.createElement)(Row, { label: t("Requirement brief"), stack: true }, (0, import_react19.createElement)("textarea", { className: "bt-input bt-input-area", rows: 4, maxLength: 12e3, value: draft.description, onChange: (event) => change("description", event.target.value) })),
+        (0, import_react19.createElement)(Row, { label: t("Acceptance criteria"), stack: true }, (0, import_react19.createElement)("textarea", { className: "bt-input bt-input-area", rows: 3, maxLength: 8e3, value: draft.acceptance, onChange: (event) => change("acceptance", event.target.value) }))
       ),
       (0, import_react19.createElement)(
         Card,
@@ -8986,14 +9066,14 @@ function DraftDialog({ card, project, roster, onClose, onSaved }) {
 }
 var BOARD_CSS = [
   ".bt-board-bot-picker{width:100%}.bt-board-bot-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:14px 16px;border:0;border-radius:12px;background:transparent;color:var(--bt-ink);text-align:left}.bt-board-bot-trigger:hover{background:var(--bt-hover)}.bt-board-bot-identity{display:flex;align-items:center;gap:12px;flex:1;min-width:0}.bt-board-bot-copy{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.bt-board-bot-copy strong{font-size:14px;font-weight:550}.bt-board-bot-role{font-size:12px;color:var(--bt-ink-2)}.bt-board-bot-copy small{font-size:11px;color:var(--bt-ink-3)}.bt-board-bot-copy>*{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bt-board-bot-menu{z-index:75}.bt-board-bot-menu [role=option]{gap:10px;padding:10px 8px}.bt-board-bot-menu [aria-selected=true]{background:var(--bt-active)}.bt-board-bot-menu .bt-mark svg{width:100%;height:100%;margin:0}.bt-board-bot-menu .bt-folder-input{flex:none;min-height:34px}.bt-board-bot-menu .bt-board-muted{padding:8px;margin:0}",
-  ".bt-board-cancel-filter{display:flex;gap:7px;align-items:center;padding:4px 24px 14px;font-size:12px;color:var(--bt-ink-2)}.bt-board-queue{list-style:none;margin:0;padding:0}.bt-board-queue li{padding:14px;border-bottom:1px solid var(--bt-line);font-size:12px}.bt-board-queue-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.bt-board-queue-top strong{font-weight:550}.bt-board-queue p{margin:8px 0;overflow-wrap:anywhere}.bt-board-queue small{color:var(--bt-ink-3)}.bt-board-queue-link{border:0;padding:8px 0 0;background:transparent;color:var(--bt-accent);text-align:left}.bt-board-control-state{padding:12px;border:1px solid var(--bt-line);border-radius:8px;background:var(--bt-card);font-size:12px;color:var(--bt-star)}@media(max-width:899px){.bt-board-header-actions{max-width:70%;flex-wrap:wrap;justify-content:flex-end}.bt-board-detail-actions .bt-board-button{font-size:11px;padding:8px}.bt-board-cancel-filter{padding-left:16px}}",
+  ".bt-board-cancel-filter{display:flex;gap:7px;align-items:center;padding:4px 24px 14px;font-size:12px;color:var(--bt-ink-2)}.bt-board-queue{list-style:none;margin:0;padding:0}.bt-board-queue li{padding:14px;border-bottom:1px solid var(--bt-line);font-size:12px}.bt-board-queue-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.bt-board-queue-top strong{font-weight:550}.bt-board-queue p{margin:8px 0;overflow-wrap:anywhere}.bt-board-queue small{color:var(--bt-ink-3)}.bt-board-queue-link{border:0;padding:8px 0 0;background:transparent;color:var(--bt-accent);text-align:left}.bt-board-control-state{padding:12px;border:1px solid var(--bt-line);border-radius:8px;background:var(--bt-card);font-size:12px;color:var(--bt-star)}@media(max-width:899px){.bt-board-header-actions{max-width:100%;flex-wrap:wrap;justify-content:flex-end}.bt-board-detail-actions .bt-board-button{font-size:11px;padding:8px}.bt-board-cancel-filter{padding-left:16px}}",
   ".bt-board-detail-actions,.bt-board-decision-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.bt-board-answer{display:block;font-size:12px;margin:16px 0}.bt-board-answer textarea{display:block;width:100%;resize:vertical;margin-top:7px}.bt-board-decision-text{white-space:pre-wrap}.bt-board-reference{display:block;overflow-wrap:anywhere;font-size:11px;color:var(--bt-accent);margin-top:6px}.bt-board-evidence{padding:14px 16px;border-bottom:1px solid var(--bt-line);font-size:12px;overflow-wrap:anywhere}.bt-board-evidence strong{font-weight:550}.bt-board-evidence svg{display:inline-block;width:14px;height:14px;color:var(--bt-green);vertical-align:middle;margin-right:6px}.bt-board-evidence p{white-space:pre-wrap;color:var(--bt-ink-2);line-height:1.6}.bt-board-decision .bt-board-error{margin:12px 0 0}",
   ".bt-board-entry{position:relative;flex:none}.bt-board-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--bt-tag-bg);color:var(--bt-star);font-size:12px;font-weight:600}.bt-board-entry .bt-board-count{position:absolute;top:-3px;right:-4px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;font-size:10px;line-height:14px;box-shadow:0 0 0 2px var(--bt-main)}",
-  '.bt-board{position:fixed;z-index:65;top:0;right:0;bottom:0;display:flex;flex-direction:column;background:var(--bt-main);color:var(--bt-ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;isolation:isolate}.bt-board *{box-sizing:border-box}.bt-board button,.bt-board input,.bt-board textarea,.bt-board select{font:inherit}.bt-board button{cursor:pointer}.bt-board button:disabled{cursor:default;opacity:.5}.bt-board :focus-visible{outline:2px solid var(--bt-accent);outline-offset:3px}.bt-board-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 24px 18px;border-bottom:1px solid var(--bt-line)}.bt-board-heading{display:flex;align-items:center;gap:10px}.bt-board-heading>svg{width:22px;height:22px;color:var(--bt-ink-2)}.bt-board h1{font-size:19px;font-weight:650;margin:0}.bt-board-header-actions{display:flex;gap:10px}.bt-board-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 14px;min-height:38px;border:1px solid var(--bt-line-2);border-radius:10px;background:var(--bt-card);color:var(--bt-ink);white-space:nowrap}.bt-board-primary{background:var(--bt-accent);color:var(--bt-accent-ink);border-color:var(--bt-accent)}',
-  ".bt-board-toolbar{display:flex;align-items:center;gap:20px;padding:16px 24px 8px}.bt-board-projects{display:flex;flex:1;gap:6px;min-width:0;overflow:auto;padding:3px}.bt-board-project{display:flex;align-items:center;gap:8px;flex:none;padding:8px 12px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--bt-ink-2);white-space:nowrap}.bt-board-project[aria-pressed=true]{background:var(--bt-card);color:var(--bt-ink);border-color:var(--bt-line-2)}.bt-board-search{display:flex;align-items:center;gap:8px;max-width:230px;color:var(--bt-ink-3);padding:8px 10px;border:1px solid var(--bt-line);border-radius:8px;background:var(--bt-card)}.bt-board-search input{border:0;outline:none;background:transparent;color:var(--bt-ink);width:100%;min-width:0}.bt-board-project-info{display:flex;justify-content:space-between;gap:16px;padding:2px 27px 16px;font-size:12px;color:var(--bt-ink-3)}.bt-board-project-info>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bt-board-project-info>span:last-child{flex:none}",
+  '.bt-board{position:fixed;z-index:50;top:0;right:0;bottom:0;display:flex;flex-direction:column;background:var(--bt-main);color:var(--bt-ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;isolation:isolate}.bt-board *{box-sizing:border-box}.bt-board button,.bt-board input,.bt-board textarea,.bt-board select{font-family:inherit}.bt-board button{cursor:pointer}.bt-board button:disabled{cursor:default;opacity:.5}.bt-board :focus-visible{outline:2px solid var(--bt-accent);outline-offset:3px}.bt-board-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 24px;border-bottom:1px solid var(--bt-line)}.bt-board-heading{display:flex;align-items:center;gap:10px}.bt-board-heading>svg{width:22px;height:22px;color:var(--bt-ink-2)}.bt-board h1{font-size:19px;font-weight:650;margin:0}.bt-board-header-actions{display:flex;align-items:center;gap:8px}.bt-board-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;font-size:13px}.bt-board-button>svg{width:16px;height:16px;flex:none}.bt-board-queue-count{font-size:11px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums}.bt-board-folder-picker{padding:8px 16px 14px}.bt-board-button.bt-board-primary{background:var(--bt-accent);color:var(--bt-accent-ink)}',
+  ".bt-board-toolbar{display:flex;align-items:center;gap:20px;padding:14px 24px 8px}.bt-board-project-bar{display:flex;align-items:center;gap:8px;flex:1;min-width:0}.bt-board-add-project{color:var(--bt-ink-2)}.bt-board-projects{display:flex;gap:6px;min-width:0;overflow:auto;padding:3px;scrollbar-width:thin}.bt-board-project{display:flex;align-items:center;gap:7px;max-width:220px;padding:0 12px;font-size:13px;background:transparent;color:var(--bt-ink-2)}.bt-board-project>svg{width:16px;height:16px;flex:none}.bt-board-project-name{overflow:hidden;text-overflow:ellipsis}.bt-board-project[aria-pressed=true]{background:var(--bt-active);color:var(--bt-ink)}.bt-board-search{position:relative;display:block;width:230px;flex:none;color:var(--bt-ink-3)}.bt-board-search>svg{position:absolute;left:10px;top:10px;width:16px;height:16px;pointer-events:none}.bt-board-search .bt-input{padding-left:34px;background:var(--bt-main);min-width:0}.bt-board-search .bt-input:focus-visible{outline:none;border-color:var(--bt-line-2)}.bt-board-project-info{display:flex;justify-content:space-between;gap:16px;padding:2px 27px 16px;font-size:12px;color:var(--bt-ink-3)}.bt-board-project-info>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bt-board-project-info>span:last-child{flex:none}",
   ".bt-board-columns{display:grid;grid-template-columns:repeat(4,minmax(240px,1fr));align-items:stretch;gap:14px;flex:1;min-height:0;overflow:auto;padding:0 24px 24px}.bt-board-column{display:flex;flex-direction:column;min-height:0;border:1px solid var(--bt-line);border-radius:16px;background:var(--bt-sidebar);--board-dot:var(--bt-ink-3)}.bt-board-column[data-column=in-progress]{--board-dot:var(--bt-accent)}.bt-board-column[data-column=needs-you]{--board-dot:var(--bt-star)}.bt-board-column[data-column=done]{--board-dot:var(--bt-green)}.bt-board-column-title{display:flex;align-items:center;gap:8px;padding:18px 16px 14px}.bt-board-column-title h2{font-size:14px;font-weight:600;margin:0}.bt-board-dot{display:inline-block;width:7px;height:7px;flex:none;border-radius:50%;background:var(--board-dot,var(--bt-ink-3))}.bt-board-column-count{margin-left:auto;color:var(--bt-ink-3);font-size:12px}.bt-board-column-cards{padding:0 10px 12px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:10px}.bt-board-card{display:flex;flex-direction:column;gap:12px;text-align:left;flex:none;width:100%;padding:16px 14px;border:1px solid var(--bt-line);border-radius:12px;background:var(--bt-card);color:var(--bt-ink)}.bt-board-card:hover{border-color:var(--bt-line-2);background:var(--bt-main)}.bt-board-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--bt-ink-3);font-size:11px}.bt-board-stage{color:var(--bt-ink-2)}.bt-board-card-title{font-size:15px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}.bt-board-card-summary{font-size:12px;color:var(--bt-ink-2);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.bt-board-waiting{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--bt-star);--board-dot:var(--bt-star)}.bt-board-step-count{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--bt-ink-3)}.bt-board-step-count svg{width:13px;height:13px}.bt-board-card-foot{display:flex;align-items:center;gap:8px;padding-top:3px}.bt-board-owners{display:flex;align-items:center;gap:3px;flex:none}.bt-board-owner-name{font-size:13px;margin-left:8px;color:var(--bt-ink-2)}.bt-board-time{color:var(--bt-ink-3);font-size:10px;white-space:nowrap}.bt-board-card-action{margin-left:auto;font-size:11px;padding:4px 8px;border-radius:6px;background:var(--bt-hover);color:var(--bt-ink-2)}.bt-board-action-review{color:var(--bt-accent);background:var(--bt-tag-bg)}.bt-board-attachment{display:flex;align-items:center;font-size:10px;color:var(--bt-ink-3)}.bt-board-attachment svg{width:13px}.bt-board-empty-column{margin:22px 8px;font-size:12px;text-align:center;color:var(--bt-ink-3)}.bt-board-empty{margin:auto;text-align:center;padding:40px;color:var(--bt-ink-2)}.bt-board-error{margin:10px 24px;color:var(--bt-danger);font-size:13px}",
-  ".bt-board-drawer-veil{position:absolute;inset:0;z-index:2;background:var(--bt-hover);display:flex;justify-content:flex-end}.bt-board-drawer{display:flex;flex-direction:column;width:min(540px,100%);height:100%;background:var(--bt-main);border-left:1px solid var(--bt-line-2);box-shadow:-12px 0 32px var(--bt-line);min-width:0}.bt-board-drawer-header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--bt-line);font-size:12px;color:var(--bt-ink-2)}.bt-board-drawer-body{flex:1;overflow:auto;padding:24px}.bt-board-drawer-foot{padding:14px 24px;border-top:1px solid var(--bt-line);display:flex;justify-content:flex-end}.bt-board-eyebrow{font-size:11px;color:var(--bt-ink-3);margin:0 0 10px}.bt-board-detail-title{font-size:23px;line-height:1.4;margin:0 0 16px;font-weight:600}.bt-board-prose{margin:0;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7}.bt-board-muted{color:var(--bt-ink-2);font-size:12px}.bt-board-stages{display:flex;list-style:none;padding:0;margin:26px 0;gap:4px}.bt-board-stages li{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px;font-size:10px;line-height:1.4;text-align:center;color:var(--bt-ink-3)}.bt-board-stage-index{width:25px;height:25px;border:1px solid var(--bt-line-2);border-radius:50%;display:flex;align-items:center;justify-content:center}.bt-board-stages li[data-current=true]{color:var(--bt-accent);font-weight:600}.bt-board-stages li[data-current=true] .bt-board-stage-index{border-color:var(--bt-accent);background:var(--bt-tag-bg)}.bt-board-stages li[data-complete=true] .bt-board-stage-index{color:var(--bt-green)}.bt-board-stage-index svg{width:14px}.bt-board-decision{padding:18px;border:1px solid var(--bt-star);border-radius:12px;background:var(--bt-card);margin:0 0 24px}.bt-board-decision .bt-board-eyebrow{color:var(--bt-star)}.bt-board-decision h3{font-size:15px;margin:0 0 8px}.bt-board-decision p{font-size:12px}.bt-board-steps,.bt-board-activity{list-style:none;padding:0;margin:0}.bt-board-steps li{padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--bt-line);font-size:13px}.bt-board-steps small,.bt-board-artifact small{display:block;color:var(--bt-ink-3);font-size:11px;margin-top:3px}.bt-board-step-state{width:20px;display:flex;justify-content:center;color:var(--bt-green)}.bt-board-artifact{display:flex;align-items:center;gap:10px;padding:14px;font-size:13px}.bt-board-artifact strong{font-weight:500}.bt-board-activity li{display:flex;justify-content:space-between;gap:16px;padding:12px 14px;font-size:12px;border-bottom:1px solid var(--bt-line)}.bt-board-activity small{color:var(--bt-ink-3);white-space:nowrap}.bt-board input[type=checkbox]{accent-color:var(--bt-accent)}.bt-board-form .bt-bs-input{flex:0 0 auto;width:100%;box-sizing:border-box;margin:0;text-align:left}.bt-board-form .bt-select{flex:0 0 auto;height:38px}.bt-board-form .bt-bs-area{resize:vertical;min-height:90px}.bt-board-form .bt-board-error{margin:8px 0}.bt-board-drawer .bt-set-section h3{font-size:12px;font-weight:500;color:var(--bt-ink-2)}",
-  "@media(max-width:899px){.bt-board{left:0!important}.bt-board-header{padding:16px;gap:8px}.bt-board h1{font-size:17px}.bt-board-heading{gap:6px}.bt-board-heading>svg{display:none}.bt-board-header-actions{gap:6px}.bt-board-header-actions .bt-board-button{font-size:11px;padding:8px;min-height:36px}.bt-board-toolbar{padding:10px 12px 4px;flex-wrap:wrap;gap:8px}.bt-board-projects{flex-basis:100%}.bt-board-project{padding:7px 10px;font-size:12px}.bt-board-search{max-width:none;width:100%;margin:0 3px;font-size:12px}.bt-board-project-info{padding:6px 16px 12px;font-size:10px}.bt-board-columns{grid-template-columns:repeat(4,minmax(280px,82vw));padding:0 12px 16px;gap:12px;scroll-snap-type:x proximity}.bt-board-column{scroll-snap-align:start}.bt-board-drawer{width:100%;border:0}.bt-board-drawer-body{padding:20px}.bt-board-stages{margin:22px 0}.bt-board-drawer-header{padding:12px 18px}.bt-board-drawer-foot{padding-bottom:calc(14px + env(safe-area-inset-bottom))}}"
+  ".bt-board-drawer-veil{position:absolute;inset:0;z-index:2;background:var(--bt-hover);display:flex;justify-content:flex-end}.bt-board-drawer{display:flex;flex-direction:column;width:min(540px,100%);height:100%;background:var(--bt-main);border-left:1px solid var(--bt-line-2);box-shadow:-12px 0 32px var(--bt-line);min-width:0}.bt-board-drawer-header{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--bt-line);font-size:12px;color:var(--bt-ink-2)}.bt-board-drawer-body{flex:1;overflow:auto;padding:24px}.bt-board-drawer-foot{padding:14px 24px;border-top:1px solid var(--bt-line);display:flex;justify-content:flex-end}.bt-board-eyebrow{font-size:11px;color:var(--bt-ink-3);margin:0 0 10px}.bt-board-detail-title{font-size:23px;line-height:1.4;margin:0 0 16px;font-weight:600}.bt-board-prose{margin:0;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7}.bt-board-muted{color:var(--bt-ink-2);font-size:12px}.bt-board-stages{display:flex;list-style:none;padding:0;margin:26px 0;gap:4px}.bt-board-stages li{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px;font-size:10px;line-height:1.4;text-align:center;color:var(--bt-ink-3)}.bt-board-stage-index{width:25px;height:25px;border:1px solid var(--bt-line-2);border-radius:50%;display:flex;align-items:center;justify-content:center}.bt-board-stages li[data-current=true]{color:var(--bt-accent);font-weight:600}.bt-board-stages li[data-current=true] .bt-board-stage-index{border-color:var(--bt-accent);background:var(--bt-tag-bg)}.bt-board-stages li[data-complete=true] .bt-board-stage-index{color:var(--bt-green)}.bt-board-stage-index svg{width:14px}.bt-board-decision{padding:18px;border:1px solid var(--bt-star);border-radius:12px;background:var(--bt-card);margin:0 0 24px}.bt-board-decision .bt-board-eyebrow{color:var(--bt-star)}.bt-board-decision h3{font-size:15px;margin:0 0 8px}.bt-board-decision p{font-size:12px}.bt-board-steps,.bt-board-activity{list-style:none;padding:0;margin:0}.bt-board-steps li{padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--bt-line);font-size:13px}.bt-board-steps small,.bt-board-artifact small{display:block;color:var(--bt-ink-3);font-size:11px;margin-top:3px}.bt-board-step-state{width:20px;display:flex;justify-content:center;color:var(--bt-green)}.bt-board-artifact{display:flex;align-items:center;gap:10px;padding:14px;font-size:13px}.bt-board-artifact strong{font-weight:500}.bt-board-activity li{display:flex;justify-content:space-between;gap:16px;padding:12px 14px;font-size:12px;border-bottom:1px solid var(--bt-line)}.bt-board-activity small{color:var(--bt-ink-3);white-space:nowrap}.bt-board input[type=checkbox]{accent-color:var(--bt-accent)}.bt-board-form .bt-input{flex:0 0 auto;width:100%;box-sizing:border-box;margin:0;text-align:left}.bt-board-form .bt-select{flex:0 0 auto;height:38px}.bt-board-form .bt-board-error{margin:8px 0}.bt-board-drawer .bt-set-section h3{font-size:12px;font-weight:500;color:var(--bt-ink-2)}",
+  "@media(max-width:899px){.bt-board{left:0!important}.bt-board-header{padding:16px;gap:8px}.bt-board h1{font-size:17px}.bt-board-heading{gap:6px}.bt-board-heading>svg{display:none}.bt-board-header-actions{gap:6px}.bt-board-header-actions .bt-board-button{font-size:12px;padding:0 12px}.bt-board-header-actions .bt-board-button>svg{display:none}.bt-board-toolbar{padding:10px 12px 4px;flex-wrap:wrap;gap:8px}.bt-board-project-bar{flex-basis:100%;width:100%}.bt-board-projects{flex:1}.bt-board-add-project{font-size:12px;padding:0 12px}.bt-board-project{padding:7px 10px;font-size:12px}.bt-board-search{width:100%;margin:0;font-size:12px}.bt-board-project-info{padding:6px 16px 12px;font-size:10px}.bt-board-columns{grid-template-columns:repeat(4,minmax(280px,82vw));padding:0 12px 16px;gap:12px;scroll-snap-type:x proximity}.bt-board-column{scroll-snap-align:start}.bt-board-drawer{width:100%;border:0}.bt-board-drawer-body{padding:20px}.bt-board-stages{margin:22px 0}.bt-board-drawer-header{padding:12px 18px}.bt-board-drawer-foot{padding-bottom:calc(14px + env(safe-area-inset-bottom))}}"
 ].join("\n");
 
 // src/client/sidebar.js

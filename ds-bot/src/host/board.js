@@ -132,5 +132,13 @@ export function install(rt) {
       rt.drainBoard?.()
       return card
     })
-  Object.assign(rt, { boardView: view, boardPending: pending, boardMutate: mutate, boardWrite: write })
+  const addProject = body => write(async () => {
+    const input = field(body.path, 'project folder', 4000, true)
+    const title = field(body.title ?? '', 'project name', 100)
+    const path = await rt.cleanWorkDir(input) ?? await rt.real(rt.teamFolder())
+    const registry = rt.ctx.workspaceRegistry
+    const project = await registry.resolveByPath(path) ?? await registry.create(path, title || basename(path) || path)
+    return { id: project.id, path: project.path, title: project.title || basename(project.path) || project.path }
+  })
+  Object.assign(rt, { boardView: view, boardPending: pending, boardMutate: mutate, boardWrite: write, boardAddProject: addProject })
 }

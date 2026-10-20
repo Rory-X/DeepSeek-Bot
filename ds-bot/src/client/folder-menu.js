@@ -12,14 +12,14 @@ const Tick = ({ on }) => h('span', { className: 'bt-model-tick', 'aria-hidden': 
 // Where a Bot, or every member of a group, works. `value` is the saved folder; without
 // one a Bot works in the team workspace and a group member in its own folder. `onPick`
 // gets the chosen path, or '' for that default.
-export function FolderMenu({ value, group = false, actions, run, onPick, wide = false }) {
+export function FolderMenu({ value, group = false, actions, run, onPick, wide = false, placeholder, allowDefault = true }) {
   const { isOpen, shownPlace, leaving, button, menu, open, close } = useAnchoredMenu()
   const [info, setInfo] = useState(null)
   const [view, setView] = useState('list')
   const [draft, setDraft] = useState('')
   const [listing, setListing] = useState(null)
   const [problem, setProblem] = useState('')
-  const fallback = group ? t("Each Bot's own folder") : t('Team workspace')
+  const fallback = placeholder ?? (group ? t("Each Bot's own folder") : t('Team workspace'))
   const toggle = () => {
     if (isOpen) { close(); return }
     setView('list')
@@ -48,8 +48,8 @@ export function FolderMenu({ value, group = false, actions, run, onPick, wide = 
   const known = info?.folders ?? []
   const folders = value && !known.some(folder => folder.path === value) ? [{ path: value, title: folderName(value) }, ...known] : known
   const listView = h('div', { key: 'list', className: 'bt-folder-view' },
-    h('button', { type: 'button', role: 'menuitemradio', 'aria-checked': !value, title: group ? undefined : info?.team ?? undefined, onClick: () => choose('') },
-      h('span', { className: 'bt-menu-label' }, fallback), h(Tick, { on: !value })),
+    allowDefault ? h('button', { type: 'button', role: 'menuitemradio', 'aria-checked': !value, title: group ? undefined : info?.team ?? undefined, onClick: () => choose('') },
+      h('span', { className: 'bt-menu-label' }, fallback), h(Tick, { on: !value })) : null,
     folders.length > 0 ? h('div', { className: 'bt-model-group', role: 'presentation' }, t('Folders')) : null,
     folders.map(folder => h('button', { key: folder.path, type: 'button', role: 'menuitemradio', 'aria-checked': folder.path === value, title: folder.path, onClick: () => choose(folder.path) },
       h('span', { className: 'bt-folder-copy' }, h('span', { className: 'bt-menu-label' }, folder.title), h('span', { className: 'bt-folder-path' }, folder.path)),

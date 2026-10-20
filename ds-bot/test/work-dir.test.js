@@ -136,6 +136,36 @@ const until = async (check) => {
 }
 const textOf = message => message.content.map(block => block.text ?? '').join('\n')
 
+test('the board registers an existing project once without moving Bots or starting Sessions', async t => {
+  const f = await start(); t.after(f.stop)
+  const before = f.state(), sessions = f.created.length
+  const [first, retry] = await Promise.all([
+    f.call('board-project-add', { path: f.project, title: 'Project' }),
+    f.call('board-project-add', { path: join(f.project, '.'), title: 'Another name' }),
+  ])
+  assert.equal(first.ok, true); assert.equal(retry.ok, true)
+  assert.equal(first.value.id, retry.value.id)
+  assert.equal(first.value.path, f.project)
+  const view = await f.call('board-view')
+  assert.equal(view.value.projects.filter(item => item.path === f.project).length, 1)
+  assert.deepEqual(f.state().bots, before.bots)
+  assert.deepEqual(f.state().rooms, before.rooms)
+  assert.equal(f.created.length, sessions)
+  for (const path of ['', 'relative/path', join(f.root, 'missing'), f.home, f.dsh]) {
+    const result = await f.call('board-project-add', { path })
+    assert.equal(result.ok, false, path)
+  }
+  const existing = await f.call('board-project-add', { path: f.team })
+  assert.equal(existing.value.id, 'w1')
+})
+
+test('a reading host cannot register board projects', async t => {
+  const f = await start({ locked: true }); t.after(f.stop)
+  const result = await f.call('board-project-add', { path: f.project })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'bot/read-only')
+})
+
 test('a requirement task refuses to move to the team folder when its project disappears', async t => {
   const saved = structuredClone(TEAM)
   saved.rooms.r1.boardCardId = 'requirement'
