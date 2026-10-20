@@ -51,7 +51,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   const unread = useSessionStatus(map => map.get(part)?.completionUnread === true || map.get(part)?.pendingInteraction !== undefined) || (marked && !active)
   useMarkedUnread(id, active, marked, actions)
   const main = isMainOf(roster, id)
-  const tile = roster.mainBotId === id
+  const tile = isMainOf(roster, id)
   const approval = useApproval(useWork, entry => entry.botId === id)
   const alert = roster.questions?.[part] !== undefined || approval
   const doing = useActivity(map => map[id])
@@ -82,7 +82,8 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
     },
     h(BotAvatar, { bot, size: 60, state, main: true }),
     h('span', { className: 'bt-tile-name' }, bot.name),
-    bot.role ? h('span', { className: 'bt-chip' }, bot.role) : null))
+    bot.role ? h('span', { className: 'bt-chip' }, bot.role) : null,
+    unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true }) : null))
   }
   return h('button', {
     type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
@@ -270,14 +271,15 @@ export function TeamSidebar(props) {
       return Math.max(seen, stamps[id] ?? 0, item.createdAt ?? 0)
     }
     const entries = [
-      ...roster.bots.filter(bot => bot.id !== roster.mainBotId).map(bot => ({ kind: 'bot', item: bot, at: activity(bot, currentPart(bot)) })),
+      ...roster.bots.filter(bot => !isMainOf(roster, bot.id)).map(bot => ({ kind: 'bot', item: bot, at: activity(bot, currentPart(bot)) })),
       ...roster.rooms.map(room => ({ kind: 'room', item: room, at: activity(room, room.id) })),
       // The Agent sorts by its most recent Session, falling back to when it was added.
       ...(roster.agents ?? []).map(agent => ({ kind: 'agent', item: agent, at: Math.max(0, ...agent.sessions.map(id => stamps[id] ?? 0)) || agent.createdAt })),
     ]
     return entries.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at)
   }, [roster, updated])
-  const main = roster.byId[roster.mainBotId]
+  const mains = useMemo(() => (roster.mainBotIds ?? []).map(id => roster.byId[id]).filter(Boolean), [roster])
+  const main = mains[0]
   // On a phone the list is a page of its own: the sidebar hands over to it instead of
   // showing the rail, so only one copy of the list is ever mounted. It is mounted at the
   // list level only: over the conversation it would still take the taps meant for the back
@@ -300,7 +302,7 @@ export function TeamSidebar(props) {
   const moving = props.useNavMotion(value => value !== 'idle')
   if (onPhone && (atList || moving)) {
     return createPortal(h(MobileNavList, {
-      roster, actions, listRef, main, order, markedUnread, typeToSearch,
+      roster, actions, listRef, mains, main, order, markedUnread, typeToSearch,
       // The page is the full-width list: its rows carry names, previews and the unread dot.
       rowProps: { ...rowProps, wide: true }, useUpdate: props.useUpdate,
     }), document.body)
@@ -317,20 +319,113 @@ export function TeamSidebar(props) {
           h(UpdateButton, { useUpdate: props.useUpdate, actions }),
           h('button', { type: 'button', className: 'bt-round', 'aria-label': t('New…'), title: t('New…'), onClick: () => actions.openNewChat('new') }, h(PlusIcon))),
     wide && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
-    h(BotList, { listRef, main, order, roster, markedUnread, rowProps }))
+    h(BotList, { listRef, mains, order, roster, markedUnread, rowProps }))
 }
 
 // The Bot and group list. The sidebar and the phone's list page both render it, so the
 // two views cannot disagree about order, marks or rows.
-function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTime }) {
+function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTime }) {
   const stamp = entry => (showTime ? relativeShort(entry.at) : undefined)
+  const tops = (mains ?? []).map(bot => h(BotRow, { key: bot.id, ...rowProps, bot, marked: markedUnread[bot.id] === true, time: undefined }))
   return h('div', { ref: listRef, className: 'bt-list', role: 'region', 'aria-label': t('Bot list') },
-    main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true, time: undefined }) : roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…')),
+    mains === undefined || mains.length === 0
+      ? roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…'))
+      : rowProps.wide
+        ? mains.length === 1 ? tops[0] : h(MainStrip, { count: mains.length }, tops)
+        : tops,
     order.map(entry => (entry.kind === 'bot'
       ? h(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
       : entry.kind === 'room'
         ? h(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
         : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))))
+}
+
+// A row of Main Bots that runs past the sidebar: the wheel pans it, a mouse drags it,
+// touch swipes it natively, and the edge that still holds more fades.
+function useHorizontalScroll(ref, setEdges) {
+  useEffect(() => {
+    const row = ref.current
+    if (row === null) return undefined
+    const read = () => {
+      const max = row.scrollWidth - row.clientWidth
+      const left = row.scrollLeft > 1
+      const right = max - row.scrollLeft > 1
+      setEdges(current => (current.left === left && current.right === right ? current : { left, right }))
+    }
+    let drag = null
+    let swallowClick = false
+    const refuseClick = (event) => {
+      if (!swallowClick) return
+      swallowClick = false
+      event.stopPropagation()
+      event.preventDefault()
+    }
+    const onDown = (event) => {
+      if (event.pointerType !== 'mouse' || event.button !== 0) return
+      drag = { x: event.clientX, left: row.scrollLeft, moved: false }
+      row.dataset.dragging = ''
+      row.setPointerCapture?.(event.pointerId)
+    }
+    const onMove = (event) => {
+      if (drag === null) return
+      const dx = event.clientX - drag.x
+      if (Math.abs(dx) > 4) drag.moved = true
+      if (drag.moved) row.scrollLeft = drag.left - dx
+    }
+    const onUp = () => {
+      if (drag === null) return
+      const moved = drag.moved
+      drag = null
+      delete row.dataset.dragging
+      // The press that ended a drag must not open the Bot it ended on.
+      if (moved) {
+        swallowClick = true
+        setTimeout(() => { swallowClick = false }, 300)
+      }
+    }
+    const onWheel = (event) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+      const max = row.scrollWidth - row.clientWidth
+      if (max <= 0) return
+      // One notch often runs past a short row; clamp to the edge, and hand the wheel back
+      // to the page once the row is already there.
+      const atStart = row.scrollLeft <= 0
+      const atEnd = row.scrollLeft >= max - 1
+      if ((event.deltaY < 0 && atStart) || (event.deltaY > 0 && atEnd)) return
+      event.preventDefault()
+      row.scrollLeft = Math.max(0, Math.min(max, row.scrollLeft + event.deltaY))
+    }
+    row.addEventListener('pointerdown', onDown)
+    row.addEventListener('pointermove', onMove)
+    row.addEventListener('pointerup', onUp)
+    row.addEventListener('pointercancel', onUp)
+    row.addEventListener('click', refuseClick, true)
+    row.addEventListener('wheel', onWheel, { passive: false })
+    row.addEventListener('scroll', read, { passive: true })
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(read) : null
+    observer?.observe(row)
+    read()
+    return () => {
+      row.removeEventListener('pointerdown', onDown)
+      row.removeEventListener('pointermove', onMove)
+      row.removeEventListener('pointerup', onUp)
+      row.removeEventListener('pointercancel', onUp)
+      row.removeEventListener('click', refuseClick, true)
+      row.removeEventListener('wheel', onWheel)
+      row.removeEventListener('scroll', read)
+      observer?.disconnect()
+    }
+  }, [ref, setEdges])
+}
+
+function MainStrip({ count, children }) {
+  const row = useRef(null)
+  const [edges, setEdges] = useState({ left: false, right: false })
+  useHorizontalScroll(row, setEdges)
+  return h('div', { className: 'bt-mains-wrap' },
+    h('div', { ref: row, className: 'bt-mains', 'data-count': count, role: 'group', 'aria-label': t('Main Bots') }, children),
+    edges.left ? h('span', { className: 'bt-mains-fade bt-mains-fade-left', 'aria-hidden': true }) : null,
+    edges.right ? h('span', { className: 'bt-mains-fade bt-mains-fade-right', 'aria-hidden': true }) : null)
 }
 
 // The Main Bot's card is the list's first item, and on a phone it stands in for the whole
@@ -387,7 +482,7 @@ function ChiefBar({ main, actions }) {
 // than its top, so the position is kept here, outside the page that comes and goes.
 let listScrollTop = 0
 
-function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+function MobileNavList({ roster, actions, listRef, mains, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, 'down')
   const chiefOut = useChiefBar(listRef)
   // Restored before the first paint, so the list is never shown at its top first.
@@ -419,7 +514,7 @@ function MobileNavList({ roster, actions, listRef, main, order, markedUnread, ro
     h('div', { className: 'bt-nav-body' },
       // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
       chiefOut ? h(ChiefBar, { main, actions }) : null,
-      h(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true })),
+      h(BotList, { listRef, mains, order, roster, markedUnread, rowProps, showTime: true })),
     menu.menu)
 }
 

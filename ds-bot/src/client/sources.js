@@ -24,6 +24,10 @@ export const isMainOf = (roster, id) => id !== undefined && (roster.mainBotIds ?
 // and `sessionId` its current one. Every part id finds the Bot; Session state
 // (running, unread, turns) is read from the current part, team state from the Bot id.
 export function indexRoster(value) {
+  // The view carries every Main Bot; an older one may only name the first.
+  const mainBotIds = Array.isArray(value.mainBotIds) && value.mainBotIds.length > 0
+    ? value.mainBotIds
+    : value.mainBotId ? [value.mainBotId] : []
   const byId = {}
   for (const bot of value.bots) {
     for (const id of [...(bot.parts ?? []), bot.sessionId ?? bot.id, bot.id]) byId[id] = bot
@@ -37,7 +41,7 @@ export function indexRoster(value) {
     agentsById[agent.id] = agent
     for (const sessionId of agent.sessions ?? []) agentOf[sessionId] = agent.id
   }
-  return { ...value, agents: value.agents ?? [], byId, roomsById, agentsById, agentOf, ready: true }
+  return { ...value, mainBotIds, mainBotId: mainBotIds[0] ?? null, agents: value.agents ?? [], byId, roomsById, agentsById, agentOf, ready: true }
 }
 
 // Whether a main-view Session id belongs to the team's DSH Agent: the conversation

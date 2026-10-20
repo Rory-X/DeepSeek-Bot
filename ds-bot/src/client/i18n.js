@@ -7,6 +7,7 @@ export const NAMESPACE = 'ds-bot'
 const ZH = {
   // Shared
   'Main Bot': '主 Bot',
+  'Main Bots': '主 Bot',
   Working: '工作中',
   'Waiting for your answer': '等你回答',
   'Waiting for {names}': '等 {names} 交回',
