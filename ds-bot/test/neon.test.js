@@ -401,3 +401,15 @@ test('a configured address is the base every level builds its grant on', () => {
   // Put the real address back for the tests after this one.
   configure({})
 })
+
+test('the approval line names the pinned role the mount runs with', async () => {
+  // The card is built from the call's arguments alone, so the settings that came with the
+  // mount are kept and used when the call itself carries no role.
+  neonToolsOf({ level: 'write', settings: { projectId: 'spring-brook-12345678', roleName: 'app_reader' } })
+  const run = await neonActionApproval('run_sql', { sql: 'select 1', branch_id: 'br-main' })
+  assert.match(run.line, /app_reader/)
+  assert.match(run.line, /spring-brook-12345678/)
+  neonToolsOf({ level: 'read' })
+  const later = await neonActionApproval('run_sql', { sql: 'select 1' })
+  assert.match(later.line, /the pinned role/)
+})
