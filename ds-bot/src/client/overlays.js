@@ -6,6 +6,7 @@ import { ExchangeDialog } from './exchange.js'
 import { VoiceMode } from './voice.js'
 import { SettingsDialog } from './settings.js'
 import { ContextMenu } from './context-menu.js'
+import { BotFoldersDialog } from './bot-folders.js'
 import { PANEL_LINGER_MS, BotPanel } from './browser-pane.js'
 import { MemoryDialog } from './memory-panel.js'
 import { useLinger, SPRING_SHAPE } from './motion.js'
@@ -86,6 +87,7 @@ export function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useA
   const [memory, memoryLeaving] = useLinger(ui.memory && roster.byId[ui.memory] ? ui.memory : null, DIALOG_EXIT_MS)
   const [menu, menuLeaving] = useLinger(ui.menu, MENU_EXIT_MS)
   return h(Fragment, null,
+    ui.botFolders ? createPortal(h(BotFoldersDialog, { key: `${ui.botFolders.folderId ?? ''}:${ui.botFolders.botId ?? ''}`, start: ui.botFolders, roster, actions }), document.body) : null,
     pane ? createPortal(h(BotPanel, { pane, leaving: open === null, roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages }), document.body) : null,
     ui.newChat ? createPortal(h(NewChat, { key: ui.newChat, mode: ui.newChat, roster, actions }), document.body) : null,
     ui.palette ? createPortal(h(CommandPalette, { key: ui.palette.token, start: ui.palette.query, token: ui.palette.token, roster, actions, useSessions }), document.body) : null,

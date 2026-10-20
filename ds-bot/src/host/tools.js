@@ -57,7 +57,8 @@ export function install(rt) {
       const self = rt.selfOf(exec.agent?.id)
       const lines = Object.values(state.bots).map(bot => {
         const model = bot.appliedModel ?? bot.model
-        const tags = [bot.role, model ? `model ${model}` : '', bot.workDir ? `works in ${bot.workDir}` : '', rt.isMain(bot.id) ? 'Main Bot' : '', bot.id === self ? 'you' : ''].filter(Boolean).join(', ')
+        const folder = (rt.botFoldersView?.() ?? []).find(item => item.botIds.includes(bot.id))
+        const tags = [bot.role, folder ? `sidebar folder ${folder.name}` : '', model ? `model ${model}` : '', bot.workDir ? `works in ${bot.workDir}` : '', rt.isMain(bot.id) ? 'Main Bot' : '', bot.id === self ? 'you' : ''].filter(Boolean).join(', ')
         const job = bot.instructions ? ` — ${bot.instructions.split('\n')[0].slice(0, 120)}` : ''
         const now = bot.id === self ? '' : `\n  now: ${rt.statusOf(bot.id)}`
         return `- ${bot.name}${tags ? ` (${tags})` : ''}${job}${now}`

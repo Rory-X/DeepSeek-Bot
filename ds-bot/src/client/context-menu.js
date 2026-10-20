@@ -17,9 +17,23 @@ export function ContextMenu({ menu, roster, actions, leaving = false }) {
   useLayoutEffect(() => {
     const box = ref.current?.getBoundingClientRect()
     if (!box) return
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, window.innerHeight - box.height - 8)) })
+    setPlace({ left: Math.max(8, Math.min(menu.align === 'end' ? menu.x - box.width : menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, window.innerHeight - box.height - 8)) })
   }, [menu.x, menu.y])
   if (menu.kind === 'agent' || menu.kind === 'agent-session') return h(AgentMenu, { menu, roster, actions, leaving })
+  if (menu.kind === 'bot-folder') {
+    const folder = (roster.botFolders ?? []).find(item => item.id === menu.id)
+    if (!folder) return null
+    const entries = [
+      [folder.pinned ? t('Unpin folder') : t('Pin folder'), PinIcon, () => actions.pinBotFolder({ id: folder.id, version: folder.version, pinned: !folder.pinned }), false, Boolean(roster.readOnly)],
+      [t('Manage folder'), GearIcon, () => actions.openBotFolders({ folderId: folder.id })],
+      [t('Dissolve folder'), TrashIcon, () => actions.dissolveBotFolder({ id: folder.id, version: folder.version }), true, Boolean(roster.readOnly)],
+    ].filter(Boolean)
+    return h('div', { ref, className: 'bt-menu', role: 'menu', 'aria-label': t('Folder {name} actions', { name: folder.name }), style: place, 'data-leaving': leaving || undefined },
+      entries.map(([label, Icon, run, danger, disabled]) => h('button', {
+        key: label, type: 'button', role: 'menuitem', disabled, className: danger ? 'bt-danger' : undefined,
+        onClick: () => { actions.closeMenu(); void Promise.resolve(run()).catch(error => actions.reportError(error, 'folder-menu')) },
+      }, h(Icon), label)))
+  }
   const bot = roster.byId[menu.id]
   const room = roster.roomsById[menu.id]
   const entry = bot ?? room
@@ -35,6 +49,8 @@ export function ContextMenu({ menu, roster, actions, leaving = false }) {
     [
       bot ? [t('Rename Bot'), PencilIcon, () => actions.renameBot(bot.id)] : null,
       bot ? [t('Edit Bot'), GearIcon, () => actions.openSettings('bots', bot.id)] : null,
+      bot && !isTile ? [t('Move to folder…'), GearIcon, () => actions.openBotFolders({ botId: bot.id })] : null,
+      bot && (roster.botFolders ?? []).some(folder => folder.botIds.includes(bot.id)) ? [t('Remove from folder'), HideIcon, () => actions.ungroupBot(bot.id)] : null,
       room ? [t('Group settings'), GearIcon, () => actions.openSettings('groups', room.id)] : null,
       room ? [t('Rename group'), PencilIcon, () => actions.renameBot(room.id)] : null,
       bot ? [t('Duplicate'), DuplicateIcon, async () => { const copy = await actions.duplicateBot(bot.id); actions.openSession(copy.id) }] : null,

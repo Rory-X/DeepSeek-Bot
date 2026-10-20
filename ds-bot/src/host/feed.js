@@ -20,16 +20,19 @@ export function install(rt) {
   const encoder = new TextEncoder()
   /** @type {Set<ReadableStreamDefaultController<Uint8Array>>} */
   const clients = new Set()
+  const rosterClients = new Set()
   const send = (controller, chunk) => {
     if ((controller.desiredSize ?? 0) < -MAX_QUEUED) {
       leave(controller)
       return
     }
-    try { controller.enqueue(chunk) } catch { clients.delete(controller) }
+    try { controller.enqueue(chunk) } catch { clients.delete(controller); rosterClients.delete(controller) }
   }
   const publish = (event, data) => {
     const chunk = encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-    for (const controller of clients) send(controller, chunk)
+    for (const controller of clients) {
+      if (!rosterClients.has(controller) || event === 'revision') send(controller, chunk)
+    }
   }
 
   rt.stateSaved = () => {
@@ -38,7 +41,7 @@ export function install(rt) {
 
   let liveTimer
   const live = () => {
-    if (clients.size === 0 || liveTimer !== undefined) return
+    if (clients.size === rosterClients.size || liveTimer !== undefined) return
     liveTimer = setTimeout(() => {
       liveTimer = undefined
       publish('live', {})
@@ -49,7 +52,7 @@ export function install(rt) {
   })
 
   ctx.on('session/event', (session, event) => {
-    if (clients.size === 0) return
+    if (clients.size === rosterClients.size) return
     const botId = rt.chatOwners.get(session.id)
     if (botId === undefined) return
     for (const item of rt.displayItems(session.id, [event])) publish('message', { botId, sessionId: session.id, item })
@@ -63,7 +66,7 @@ export function install(rt) {
   ctx.on('agent/assistant-stream', ({ agent, frame }) => {
     if (frame.type === 'start') {
       const botId = rt.chatOwners.get(agent.id)
-      if (clients.size === 0 || botId === undefined || (state.exchangeTurns[agent.id] ?? []).includes(frame.turn)) return
+      if (clients.size === rosterClients.size || botId === undefined || (state.exchangeTurns[agent.id] ?? []).includes(frame.turn)) return
       writing.set(frame.attemptId, { botId, sessionId: agent.id })
       publish('stream', { botId, sessionId: agent.id, attemptId: frame.attemptId, phase: 'start' })
       return
@@ -79,7 +82,8 @@ export function install(rt) {
 
   const leave = (controller) => {
     clients.delete(controller)
-    if (clients.size === 0) writing.clear()
+    rosterClients.delete(controller)
+    if (clients.size === rosterClients.size) writing.clear()
     try { controller.close() } catch { /* already closed or errored */ }
   }
 
@@ -89,10 +93,12 @@ export function install(rt) {
     requestBody: 'buffered',
     fetch: async (request) => {
       let controller
+      const rosterOnly = new URL(request.url).searchParams.get('scope') === 'roster'
       const body = new ReadableStream({
         start(own) {
           controller = own
           clients.add(own)
+          if (rosterOnly) rosterClients.add(own)
           send(own, encoder.encode(`event: hello\ndata: ${JSON.stringify({ revision: state.revision })}\n\n`))
         },
         cancel() { leave(controller) },

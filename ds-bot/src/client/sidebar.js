@@ -14,6 +14,7 @@ import { hostText, t } from './i18n.js'
 import { showsDshRow } from './dsh-offer.js'
 import { useRowMenu } from './hold.js'
 import { BoardEntry } from './project-board.js'
+import { BotFolderSection, splitBotFolders, BOT_FOLDERS_CSS } from './bot-folders.js'
 
 // -------------------------------------------------------------------------
 // Sidebar
@@ -327,13 +328,17 @@ export function TeamSidebar(props) {
 // two views cannot disagree about order, marks or rows.
 function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTime }) {
   const stamp = entry => (showTime ? relativeShort(entry.at) : undefined)
+  const sections = splitBotFolders(order, roster.botFolders)
+  const row = entry => (entry.kind === 'bot'
+    ? h(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
+    : entry.kind === 'room'
+      ? h(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
+      : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))
   return h('div', { ref: listRef, className: 'bt-list', role: 'region', 'aria-label': t('Bot list') },
     main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true, time: undefined }) : roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…')),
-    order.map(entry => (entry.kind === 'bot'
-      ? h(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
-      : entry.kind === 'room'
-        ? h(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) })
-        : h(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true }))))
+    rowProps.wide ? sections.folders.map(folder => h(BotFolderSection, { key: folder.id, folder, roster, actions: rowProps.actions, useUi: rowProps.useUi, renderRow: row })) : null,
+    rowProps.wide ? sections.loose.map(row) : order.map(row),
+    rowProps.wide ? h('button', { type: 'button', className: 'bt-bot-folder-empty', onClick: () => rowProps.actions.openBotFolders() }, t('New Bot folder')) : null)
 }
 
 // The Main Bot's card is the list's first item, and on a phone it stands in for the whole
@@ -758,6 +763,7 @@ export function BrandName() {
 // and Connect plugins; FooterAccount only shows when the seat went to no one. The
 // shell's footer classes are CSS-module names, so they match on their stems.
 export const SIDEBAR_CSS = `
+${BOT_FOLDERS_CSS}
 .bt-side-top .bt-brand{cursor:default;padding-left:6px}
 .bt-side-top .bt-brand:hover{background:none}
 .bt-brand .bt-mark{flex:none}

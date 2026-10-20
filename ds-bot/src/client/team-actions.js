@@ -7,6 +7,13 @@ import { noteClientError } from './diagnostics.js'
 // is done; `partFor` maps a Bot id, or any part of its chat, to its current part.
 export function teamActions({ call, after, partFor, roster, ui, live, cards, turnClock }) {
   return {
+    openBotFolders: (start = {}) => { ui.set(state => ({ ...state, botFolders: start, menu: null, newChat: null, palette: null })) },
+    closeBotFolders: () => { ui.set(state => ({ ...state, botFolders: null })) },
+    saveBotFolder: payload => after(call('bot-folder-save', payload)),
+    deleteBotFolder: payload => after(call('bot-folder-delete', payload)),
+    pinBotFolder: payload => after(call('bot-folder-pin', payload)),
+    dissolveBotFolder: payload => after(call('bot-folder-dissolve', payload)),
+    ungroupBot: id => after(call('bot-folder-assign', { name: '', botIds: [id] })),
     openNewChat: (mode) => { ui.set(state => ({ ...state, newChat: mode, menu: null, palette: null })) },
     openPalette: (query = '') => { ui.set(state => ({ ...state, palette: { query, token: Date.now() }, newChat: null, menu: null })) },
     // The token keeps a late exit timer from closing a palette opened again since.

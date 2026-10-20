@@ -1,4 +1,5 @@
 import { call } from './api.js'
+import { queueRosterPull, watchRosterChanges } from './roster-sync.js'
 import { isHex, inkText, paintCss } from './inks.js'
 import { DEFAULT_MASK, SHAPES, markupCache, maskOf } from './characters.js'
 import { createSource, EMPTY_ROSTER, indexRoster, isAgentSession } from './sources.js'
@@ -149,15 +150,9 @@ export function apply(ctx) {
     ui.set(state => (JSON.stringify(state.unread) === JSON.stringify(unread) ? state : { ...state, unread }))
   }
   const refreshed = new Set()
-  // Pulls can overlap (the poll and a navigation); an older answer never wins.
-  let pulls = 0
-  let applied = 0
-  const pull = async () => {
-    const order = ++pulls
+  const pull = queueRosterPull(async () => {
     const known = roster.getSnapshot()
     const value = await call('state', { since: known.revision, models: known.modelsKey ?? '', locale: language() })
-    if (order < applied) return
-    applied = order
     const nextActivity = JSON.stringify(value.activity ?? {})
     if (nextActivity !== activityKey) { activityKey = nextActivity; activity.set(value.activity ?? {}) }
     const nextWork = JSON.stringify(value.work ?? null)
@@ -188,7 +183,7 @@ export function apply(ctx) {
       refreshed.add(id)
       void Promise.resolve(ctx.sessions.refreshProjections?.(id)).catch(quietly('refresh projections'))
     }
-  }
+  })
 
   ctx.effect(() => {
     let stopped = false
@@ -202,9 +197,12 @@ export function apply(ctx) {
       if (!stopped) timer = setTimeout(loop, document.hidden ? 10000 : 1500)
     }
     const wake = () => { if (!document.hidden) void loop() }
+    const stopFeed = watchRosterChanges(revision => {
+      if (!stopped && revision !== roster.getSnapshot().revision) void pull().catch(quietly('roster update'))
+    })
     document.addEventListener('visibilitychange', wake)
     void loop()
-    return () => { stopped = true; clearTimeout(timer); document.removeEventListener('visibilitychange', wake) }
+    return () => { stopped = true; stopFeed(); clearTimeout(timer); document.removeEventListener('visibilitychange', wake) }
   }, 'ds-bot: roster poll')
 
   // Plugin updates: every window that opens asks the host once (the host keeps its
