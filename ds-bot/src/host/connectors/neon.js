@@ -113,13 +113,13 @@ const neon = {
 
 export default neon
 
-// A profile may override the address (to pin a project or a Postgres role). The read-only
-// mode, the read scope and the whitelist survive any override, so a config typo cannot turn
-// the connector into a write connection. Integrator: after merging a profile's override into
-// the definition, call this and use what it returns.
-export function configure(options = {}) {
-  const configured = typeof options === 'object' && options !== null && typeof options.url === 'string' && options.url !== ''
-    ? options.url
+// The framework hands a module's `configure` hook the profile override and merges what it
+// returns over the merged definition (see connectors.js). A profile may override the address
+// to pin a project or a Postgres role; the read-only mode, the read scope and the whitelist
+// survive any override, so a config typo cannot turn this connector into a write connection.
+export function configure(override = {}) {
+  const configured = typeof override === 'object' && override !== null && typeof override.url === 'string' && override.url !== ''
+    ? override.url
     : neon.mcpUrl
   return {
     url: readOnlyNeonUrl(configured),
