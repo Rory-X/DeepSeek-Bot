@@ -631,9 +631,9 @@ export function install(rt) {
     }
   }
 
-  async function mountReadTools(id, token, { refresh } = {}) {
+  async function mountReadTools(id, token, { refresh, url } = {}) {
     const connector = options[id]
-    const client = new McpHttpClient(connector.url, token, refresh === undefined ? {} : { refresh })
+    const client = new McpHttpClient(url ?? connector.url, token, refresh === undefined ? {} : { refresh })
     try {
       await client.open()
       const listed = await client.listTools()
@@ -699,11 +699,13 @@ export function install(rt) {
     const previous = mounts.get(id)?.token
     const oauthConnector = connector.mode === 'oauth-mcp'
     let token
+    let mountUrl
     if (!stopped) {
       if (oauthConnector) {
         try {
           const grant = await oauth.token(id)
           token = grant?.tokens.access
+          mountUrl = grant?.mountUrl
           // The grant carries the level the user authorized. A grant saved before levels
           // existed is classified once here and stored, so the view and the mount agree.
           if (grant !== undefined) {
@@ -796,7 +798,10 @@ export function install(rt) {
     }
     try {
       if (connector.mode !== 'mcp-client') {
-        const mounted = await mountReadTools(id, token, { refresh: oauthConnector ? refreshFor(id) : undefined })
+        const mounted = await mountReadTools(id, token, {
+          refresh: oauthConnector ? refreshFor(id) : undefined,
+          ...(mountUrl === undefined ? {} : { url: mountUrl }),
+        })
         if (stopped || mounts.get(id) !== attempt) {
           for (const undo of mounted.dispose) undo()
           mounted.client.close()
