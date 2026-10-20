@@ -1,0 +1,80 @@
+{
+  "levels": {
+    "default": "read",
+    "available": [
+      "read",
+      "write"
+    ]
+  },
+  "tiers": {
+    "read": [
+      {
+        "name": "gmail_list_folders",
+        "description": "List the folders of the connected Gmail mailbox (read-only)."
+      },
+      {
+        "name": "gmail_search",
+        "description": "Search the connected Gmail mailbox and answer message UIDs (read-only)."
+      },
+      {
+        "name": "gmail_list_messages",
+        "description": "List the newest messages of a Gmail folder with sender, date and subject (read-only)."
+      },
+      {
+        "name": "gmail_get_message",
+        "description": "Read one message of a Gmail folder: headers and its plain text body (read-only)."
+      }
+    ],
+    "write": [
+      {
+        "name": "gmail_list_folders",
+        "description": "List the folders of the connected Gmail mailbox (read-only)."
+      },
+      {
+        "name": "gmail_search",
+        "description": "Search the connected Gmail mailbox and answer message UIDs (read-only)."
+      },
+      {
+        "name": "gmail_list_messages",
+        "description": "List the newest messages of a Gmail folder with sender, date and subject (read-only)."
+      },
+      {
+        "name": "gmail_get_message",
+        "description": "Read one message of a Gmail folder: headers and its plain text body (read-only)."
+      },
+      {
+        "name": "gmail_send_email",
+        "description": "Send an email from the connected Gmail address. Every call asks for approval first; sending cannot be undone."
+      },
+      {
+        "name": "gmail_reply_email",
+        "description": "Reply to a message from the connected Gmail address. The caller supplies the original Message-ID and References. Every call asks for approval first; sending cannot be undone."
+      },
+      {
+        "name": "gmail_forward_email",
+        "description": "Forward a message from the connected Gmail address, keeping the attachments the caller passes. Every call asks for approval first; sending cannot be undone."
+      }
+    ]
+  },
+  "unregistered": [
+    "gmail_mark_read",
+    "gmail_mark_unread",
+    "gmail_move_messages",
+    "gmail_delete_messages",
+    "gmail_save_draft",
+    "gmail_label",
+    "gmail_archive",
+    "gmail_list_attachments",
+    "gmail_read_attachment",
+    "gmail_save_attachment",
+    "gmail_delete_permanent",
+    "gmail_empty_trash",
+    "gmail_delete_many",
+    "gmail_batch_delete",
+    "gmail_send_draft",
+    "gmail_settings",
+    "gmail_set_auto_forward",
+    "gmail_create_filter",
+    "gmail_set_signature"
+  ]
+}

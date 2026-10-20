@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import { parseCredential } from '../src/host/connectors/_imap.js'
 import { connectValues, credentialFields } from '../src/host/connector-setup.js'
 import { externalConnectors } from '../src/host/connectors/registry.js'
-import gmail, { GMAIL_HOST, GMAIL_TOOLS, createGmailTools, signInGmail } from '../src/host/connectors/gmail.js'
+import gmail, { GMAIL_HOST, GMAIL_SEND_TOOLS, GMAIL_TOOLS, createGmailTools, signInGmail } from '../src/host/connectors/gmail.js'
 
 const CRLF = '\r\n'
 const HEADER_FIELDS = 'FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO CONTENT-TYPE CONTENT-TRANSFER-ENCODING'
@@ -357,12 +357,151 @@ test('the client reads the card from `card`, not from the module\'s top level', 
   assert.equal(gmail.glyph, undefined)
   assert.equal(gmail.readOnlyNote, undefined)
   assert.equal(gmail.docsUrl, undefined)
-  assert.deepEqual(gmail.card, {
-    glyph: 'gmail',
-    about: 'Read your Gmail over IMAP: list folders, search, and read messages. Sending is not part of this connector.',
-    readOnlyNote: 'Read-only: opens the mailbox with EXAMINE and fetches bodies with BODY.PEEK, so reading a mail here never marks it as read. It never sends, deletes or moves a message.',
-    docsUrl: 'https://myaccount.google.com/apppasswords',
-  })
+  assert.deepEqual(Object.keys(gmail.card).sort(), ['about', 'docsUrl', 'glyph', 'readOnlyNote'])
+  assert.equal(gmail.card.glyph, 'gmail')
   assert.match(gmail.card.about, /Gmail/)
-  assert.match(gmail.card.readOnlyNote, /Read-only/)
+  assert.match(gmail.card.readOnlyNote, /read level/)
+  assert.equal(gmail.card.docsUrl, 'https://myaccount.google.com/apppasswords')
+})
+
+test('the module declares a read default and the capabilities the write level adds', () => {
+  assert.deepEqual(gmail.levels, ['read', 'write'])
+  assert.equal(gmail.defaultLevel, 'read')
+  assert.equal(gmail.imap.write, true)
+  assert.deepEqual(gmail.smtp, { host: 'smtp.gmail.com', port: 465 })
+  const keys = gmail.capabilities.map(capability => capability.key)
+  assert.deepEqual(keys, [
+    'read_mail',
+    'send_mail',
+  ])
+  // IMAP write tools (mark, label, archive, draft, move, trash) wait for the shared IMAP
+  // write session; this round wires the read surface and the send tools.
+  for (const deferred of ['mark_read', 'label_mail', 'archive_mail', 'save_draft', 'move_mail', 'trash_mail']) {
+    assert.equal(keys.includes(deferred), false, deferred)
+  }
+  for (const capability of gmail.capabilities) {
+    assert.ok(['read', 'write', 'destructive'].includes(capability.risk), capability.key)
+    assert.equal(typeof capability.title, 'string')
+    assert.equal(typeof capability.description, 'string')
+  }
+  const send = gmail.capabilities.find(capability => capability.key === 'send_mail')
+  assert.equal(send.risk, 'destructive')
+  assert.equal(send.preview.reversible, false)
+  // Permanent delete, batch delete and settings are not capabilities this connector offers.
+  assert.equal(keys.some(key => /permanent|batch|settings|filter|forward|signature/.test(key)), false)
+  assert.match(gmail.permissions.summary, /full capabilities/i)
+})
+
+
+// ---------------------------------------------------------------- the write level
+
+// A quiet SMTP server for the send-tool tests: it accepts the login and one message.
+function fakeSmtp() {
+  const state = { connections: 0, commands: [] }
+  const connect = () => {
+    state.connections += 1
+    const socket = new EventEmitter()
+    socket.destroyed = false
+    let buffer = ''
+    let phase = 'command'
+    let inData = false
+    const send = text => setImmediate(() => { if (!socket.destroyed) socket.emit('data', Buffer.from(text)) })
+    const handle = (line) => {
+      if (inData) {
+        if (line === '.') {
+          inData = false
+          send(`250 2.0.0 queued${CRLF}`)
+        }
+        return
+      }
+      state.commands.push(line)
+      if (phase === 'username') {
+        phase = 'password'
+        send(`334 UGFzc3dvcmQ6${CRLF}`)
+        return
+      }
+      if (phase === 'password') {
+        phase = 'command'
+        send(`235 2.7.0 authenticated${CRLF}`)
+        return
+      }
+      if (line.startsWith('EHLO ')) return send(`250-fake${CRLF}250 AUTH LOGIN${CRLF}`)
+      if (line === 'AUTH LOGIN') { phase = 'username'; return send(`334 VXNlcm5hbWU6${CRLF}`) }
+      if (line.startsWith('MAIL FROM:')) return send(`250 2.1.0 ok${CRLF}`)
+      if (line.startsWith('RCPT TO:')) return send(`250 2.1.5 ok${CRLF}`)
+      if (line === 'DATA') { inData = true; return send(`354 go${CRLF}`) }
+      if (line === 'QUIT') { send(`221 bye${CRLF}`); socket.destroyed = true; socket.emit('close'); return }
+      send(`500 unknown${CRLF}`)
+    }
+    socket.write = (text) => {
+      buffer += text
+      for (;;) {
+        const at = buffer.indexOf(CRLF)
+        if (at < 0) return
+        const line = buffer.slice(0, at)
+        buffer = buffer.slice(at + 2)
+        handle(line)
+      }
+    }
+    socket.end = () => { socket.destroyed = true; socket.emit('close') }
+    socket.destroy = socket.end
+    setImmediate(() => { socket.emit('connect'); send(`220 fake ready${CRLF}`) })
+    return socket
+  }
+  return { connect, state }
+}
+
+test('the write level mounts the send tools only when the approval hook is there', () => {
+  const server = fakeSmtp()
+  const read = gmail.mount({ secrets: FIELDS, redact: String, level: 'read', approve: async () => {} })
+  assert.deepEqual(read.tools.map(tool => tool.name), GMAIL_TOOLS)
+  read.close()
+  const noHook = gmail.mount({ secrets: FIELDS, redact: String, level: 'write' })
+  assert.deepEqual(noHook.tools.map(tool => tool.name), GMAIL_TOOLS)
+  noHook.close()
+  const write = gmail.mount({ secrets: FIELDS, redact: String, level: 'write', approve: async () => {}, connect: server.connect })
+  assert.deepEqual(write.tools.map(tool => tool.name), [...GMAIL_TOOLS, ...GMAIL_SEND_TOOLS])
+  write.close()
+})
+
+test('a send asks the approval hook first, with the card line and the running Session', async () => {
+  const server = fakeSmtp()
+  let seen
+  const mounted = gmail.mount({
+    secrets: FIELDS,
+    redact: String,
+    level: 'write',
+    approve: async (request) => { seen = request },
+    connect: server.connect,
+  })
+  try {
+    const send = mounted.tools.find(tool => tool.name === 'gmail_send_email')
+    const text = await send.execute({ to: ['a@b.com'], subject: 'Hi', text: 'body' }, { agent: { id: 'm1' } })
+    assert.match(seen.line, /Send to a@b\.com/)
+    assert.equal(seen.danger, true)
+    assert.equal(seen.exec.agent.id, 'm1')
+    assert.match(text, /^Sent to a@b\.com/)
+    assert.equal(server.state.connections, 1)
+    assert.ok(server.state.commands.includes(`MAIL FROM:<${ADDRESS}>`))
+  } finally {
+    mounted.close()
+  }
+})
+
+test('a denied send opens no SMTP connection', async () => {
+  const server = fakeSmtp()
+  const mounted = gmail.mount({
+    secrets: FIELDS,
+    redact: String,
+    level: 'write',
+    approve: async () => { throw new Error('The user denied this send.') },
+    connect: server.connect,
+  })
+  try {
+    const send = mounted.tools.find(tool => tool.name === 'gmail_send_email')
+    await assert.rejects(send.execute({ to: ['a@b.com'], subject: 'Hi', text: 'body' }), /denied/)
+    assert.equal(server.state.connections, 0)
+  } finally {
+    mounted.close()
+  }
 })
