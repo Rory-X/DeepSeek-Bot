@@ -133,6 +133,9 @@ export function createOAuthFlow({
       : undefined
     const address = typeof grant?.url === 'string' && grant.url !== '' ? grant.url : connector.url
     if (!/^https:\/\//i.test(String(address))) throw new OAuthError('The authorization address must start with https://', 'available')
+    // The grant is for this exact address: mounting must use it again, because a module
+    // that picks per level can return a read-only URL for read and a full one for write.
+    const mountUrl = typeof grant?.url === 'string' && grant.url !== '' ? address : undefined
     // A saved grant already has a client registered for this callback address; reuse it
     // so a reconnect does not register another dynamic client.
     const saved = await store.read(id)
@@ -162,7 +165,7 @@ export function createOAuthFlow({
       notify(onExpired, id)
     }, ttlMs)
     timer.unref?.()
-    pending.set(id, { state, verifier, redirectUri, client, resource, scopes: scopeNames, level, authorizationServer, expiresAt, timer })
+    pending.set(id, { state, verifier, redirectUri, client, resource, scopes: scopeNames, level, mountUrl, authorizationServer, expiresAt, timer })
     ensureRoute(webServer)
     await notify(onConnecting, id)
     return { authorizeUrl, expiresAt }
@@ -259,6 +262,7 @@ export function createOAuthFlow({
         tokens,
         scopes: attempt.scopes,
         ...(attempt.level === undefined ? {} : { level: attempt.level }),
+        ...(attempt.mountUrl === undefined ? {} : { mountUrl: attempt.mountUrl }),
         authorizedAt: now(),
       }
       // The store read happens after the exchange on purpose: a failed exchange stores

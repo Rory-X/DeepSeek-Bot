@@ -10,7 +10,10 @@ const CONNECTORS = {
   cloudflare: { displayName: 'Cloudflare', mode: 'oauth-mcp', url: 'https://mcp.test/mcp' },
   levelled: {
     displayName: 'Levelled', mode: 'oauth-mcp', url: 'https://mcp.test/mcp', levels: ['read', 'write'], defaultLevel: 'read',
-    authorize: ({ level }) => ({ url: 'https://mcp.test/mcp', scopes: level === 'write' ? ['read', 'write'] : ['read'] }),
+    authorize: ({ level }) => ({
+      url: level === 'write' ? 'https://mcp.test/mcp?readonly=false' : 'https://mcp.test/mcp?readonly=true',
+      scopes: level === 'write' ? ['read', 'write'] : ['read'],
+    }),
   },
 }
 
@@ -108,6 +111,9 @@ test('a module chooses the authorization for the level the user picked', async (
   const record = harness.credentials.records.get('ds-bot/connector-levelled')
   assert.equal(record.payload.level, 'write')
   assert.deepEqual(record.payload.scopes, ['read', 'write'])
+  // The grant keeps the exact address it was authorized for; the mount must use it, not
+  // the connector's static url, or a write grant would mount the read-only address.
+  assert.equal(record.payload.mountUrl, 'https://mcp.test/mcp?readonly=false')
   assert.deepEqual(harness.events, [['connecting', 'levelled'], ['authorized', 'levelled', 'access-1']])
 })
 
