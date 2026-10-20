@@ -618,6 +618,9 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-cap-note,.bt-connector-cap-lock{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 /* A capability that changes something says so, quietly. */
 .bt-connector-cap-badge{margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-accent);background:color-mix(in srgb,var(--bt-accent) 12%,transparent)}
+.bt-connector-cap[data-risk=destructive] .bt-connector-cap-badge{color:var(--bt-danger);background:color-mix(in srgb,var(--bt-danger) 12%,transparent)}
+.bt-connector-cap[data-risk=destructive] .bt-connector-cap-title{color:var(--bt-danger)}
+.bt-connector-cap-change{font-size:12px;line-height:16px;color:var(--bt-ink-3);font-style:italic;overflow-wrap:anywhere}
 .bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
