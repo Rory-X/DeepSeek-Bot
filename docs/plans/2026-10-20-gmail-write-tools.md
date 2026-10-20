@@ -25,7 +25,7 @@ capabilities: {
 | +write | `write` 开 | 上面全部 + `gmail_mark_read`、`gmail_label`、`gmail_archive`、`gmail_save_draft`、`gmail_move`、`gmail_trash` |
 | +send | `write` 开且 `send` 开 | 上面全部 + `gmail_send`、`gmail_reply`、`gmail_forward`、`gmail_send_draft` |
 
-- 附件两个工具是**只读**、不需要审批，归 read-only 档常驻；只读语义（不改邮件、不发信）不变，第三批的工具数由 4 增到 6。
+- 附件两个工具是**只读**、不需要审批，归 read-only 档常驻。**注意这是只读白名单的变更**：第二批签收的是 4 工具（`570e800`），第三批 read-only 面为 6 工具，需要按第三批重新签收；第二批 4 工具的签收作废、以第三批 6 工具为准（Probe 会逐条 diff 并补验两个附件工具）。
 - `gmail_save_attachment` 在路径策略定稿前**不注册**（三档都没有它）。
 
 ## 2. 工具清单（P1）
@@ -37,7 +37,7 @@ capabilities: {
 | `gmail_archive` | `uids[]`、`folder?` | 10 封/次 | 中 | **Archive 3 Gmail messages?** / “They leave the inbox and stay in All Mail; nothing is deleted.” |
 | `gmail_save_draft` | `to?[]`、`cc?[]`、`bcc?[]`、`subject`、`body`、`replyToUid?`（可选：作为对某封的回复草稿） | 1 封/次 | 低-中 | **Save a draft in Gmail?** / “The draft is stored in Drafts and is not sent. To: … Subject: … Preview: …” |
 | `gmail_list_attachments` | `uid`、`folder?` | 1 封/次 | 中（隐私） | 只读工具，不弹审批（同 `gmail_get_message`） |
-| `gmail_read_attachment` | `uid`、`folder?`、`index`、`maxChars?`（默认 8000，≤20000） | 1 封/次 | 中 | 只读工具，不弹审批。文本类：`BODY.PEEK[<part>]<0.N>` 按字节上限拉取（≤2 MB），超出标注截断；非文本类只提示类型/大小、不返回字节；`index` 越界直接拒绝 |
+| `gmail_read_attachment` | `uid`、`folder?`、`index`、`maxChars?`（默认 8000，≤20000） | 1 封/次 | 中 | 只读工具，不弹审批。文本类：`BODY.PEEK[<part>]<0.N>` 按字节上限拉取（≤2 MB），超出标注截断；非文本类只提示类型/大小、不返回字节；`index` 越界直接拒绝。HTML/文本转换只解析已下载的有限字节，**不做网络请求**（不加载远程图片/链接，0 出站） |
 | `gmail_save_attachment`（可选，P1.5） | `uid`、`folder?`、`index`、`path` | 1 封/次 | 中（落盘/恶意文件） | **Save an attachment from Gmail?** / “Writes <name> (<size>) to <path>. Files from mail can be dangerous; only open it if you trust the sender.” 依赖 DSH 文件路径策略确认 |
 
 ## 3. 工具清单（P2，默认不注册，需 `send` 能力）
@@ -87,7 +87,8 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 - **参数越权/注入**：未知字段、uid 超过批量上限、header 注入（`\r\n`）、目标文件夹/标签名注入，全部在发命令前拒绝。
 - **审批不可复用**：同一会话连续两次写，第二次必须重新弹卡；不缓存“上次允许”。
 - **`save_attachment` 路径策略未定前不注册**（不给模型可见工具）。
-- **`read_attachment`**：≤20,000 字符并带截断说明；二进制不返回字节。
+- **`read_attachment`**：≤20,000 字符并带截断说明；二进制不返回字节；HTML/文本提取不发起任何网络请求（不取远程图片/链接），验收断网/mock 断言 0 出站。
+- **`reply`/`forward` 的弹卡前读取**：只用 `EXAMINE` + `FETCH` 取最小字段（From/To/Subject/Message-ID），不整封下载，取到的内容不进 state/diagnostics。
 - **发送类卡面**：必须展示收件人/主题/正文预览，并写“永久不可撤回”；收件人合计 ≤20、正文 ≤100KB。
 - **回收站文案**：`gmail_trash` 写“30 天可恢复”；永久删除/批量删除不接入（注册表断言不存在）。
 - **不自动重试**：写失败/超时不重试（避免重复发信或重复写入），只返回人话错误。
@@ -105,6 +106,9 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 8. **卡与日志**：审批卡预览 ≤500 字符；`state.questions`/state/diagnostics 中不得出现正文全文（Probe 会扫正文字符串）；Bcc 不写进可见 header；SMTP 只走 envelope 收件人。
 9. **语义细节**：archive 只去掉 `\Inbox`、保留其它标签；非 ASCII 标签名 round-trip；回复主题不叠加 `Re:`；发送失败不自动重试、部分收件人失败如实报告。
 10. **能力开关**：`state.connectors.gmail.write` / `.send` 进元数据白名单、重启保留、迁移幂等；切换后工具注册表即时变化（Probe 会切两次验）。
+11. **只读面 4 → 6 是变更**：第三批 read-only 白名单为 6 个工具，第二批 4 工具的签收作废、以第三批重新签收为准。
+12. **附件提取 0 出站**：`read_attachment` 只解析已下载的有限字节；HTML 不加载远程图片/链接，不发起任何网络请求。
+13. **弹卡前只读最小字段**：`reply`/`forward` 构造卡片只取 From/To/Subject/Message-ID，不整封下载，内容不进 state/diagnostics。
 
 ## 8. 单测计划（实现时随代码交付）
 
