@@ -168,11 +168,24 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
     "write":    [{ "name": "gmail_mark_read",   "description": "…" }],
     "send":     [{ "name": "gmail_send",        "description": "…" }]
   },
-  "unregistered": ["gmail_save_attachment"]
+  "unregistered": [
+    "gmail_save_attachment",
+    "gmail_delete_permanent",
+    "gmail_empty_trash",
+    "gmail_delete_many",
+    "gmail_batch_delete",
+    "gmail_create_label",
+    "gmail_settings",
+    "gmail_set_auto_forward",
+    "gmail_create_filter",
+    "gmail_set_signature"
+  ]
 }
 ```
 
-Probe 用它与本节逐字节 diff；**description 任何改动都先改本节规格再改代码**，不一致记黄。
+- **JSON 必须由运行期生成**：从真实 mount 的注册表 dump，附生成脚本与命令（例如 `node scripts/dump-gmail-tools.mjs > docs/acceptance/gmail-tools-registry.json`），不接受手写；Probe 做三方对账（§8 文本 vs JSON vs 实际挂载 `tools/list`）。
+- `unregistered` 列全：`gmail_save_attachment` + 永久删除/清空回收站/批量删除 + 创建标签 + 设置类（过滤器/自动转发/签名）。Probe 用它对注册表做负向断言；实现里另加一条前缀规则：注册表中不得存在匹配 `/^gmail_(delete|purge|empty|settings|filter|signature|auto_forward)/` 的工具。
+- **description 任何改动都先改本节规格再改代码**，不一致记黄。
 
 ## 9. 单测计划（实现时随代码交付）
 
