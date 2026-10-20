@@ -33,3 +33,17 @@ Neon 是托管 Postgres，官方提供远程 MCP 服务（`https://mcp.neon.tech
 ## 验证
 
 `ds-bot/test/neon.test.js`：10 个用例，全部 mock fetch —— 只读声明与白名单、配置覆盖不能关只读、挂载只注册白名单且 `run_sql` 可用、401 刷新一次后重试、403 上报、刷新失败要求重连并删除 grant、超时、只读事务报错、授权 URL 只带 `read` 与只读地址、组织名作为账号。
+
+## 访问级别（第三批）
+
+单行 `neon`，两个级别：**只读（默认、推荐）** / **完整能力（可写）**。Neon 的 grant 在授权时把 `readonly`/`category`/`projectId`/`roleName` 固定死，所以**切换级别 = 断开重连、重新授权**。
+
+- **只读**：`?readonly=true` + 5 个 category + scope `read`；工具面 = 16 个只读工具。
+- **完整能力**：不带 `readonly`，`category=branches&querying&snapshots`，必填 `projectId`/`roleName`，scope `read write`；工具面 = 16 只读 + 4 写（`create_branch`、`run_sql`、`create_snapshot`、`delete_branch`）。每个写走审批卡；删分支卡显示分支标识 +「数据一起删除，不可恢复」，`run_sql` 卡显示角色 + SQL 前 200 字。
+- **设置**：`projectId`、`roleName`。写级别两项必填，只读级别可只填 `projectId`（只收窄）；缺项时行保持 off 并给原因，不发起授权。
+- **state**：`connectors.neon.settings` 在断开后保留；`level` 记录当前级别；老 grant 无 level 时按 scopes 推断（含写 scope → write）。
+
+## 待框架补齐（第三批依赖）
+
+- **按级别注册工具**：模块的 `toolsOf({ level })` 与按参数审批的 `actionApproval` 需要框架 P1（级别门控 + 审批卡带参数）。
+- **挂载地址**：模块 `authorize()` 在写级别返回不带 `readonly` 的地址，但现有挂载仍用 `connector.url`；需要框架在模块带 `authorize` 时用 **grant 的 resource** 挂载，否则写 grant 会挂在只读地址上（`tools/list` 仍是只读清单，写工具永远不出现）。
