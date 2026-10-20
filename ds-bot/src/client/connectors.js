@@ -159,6 +159,22 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   // service without dynamic registration asks for first.
   const oauth = connector.oauth === true
   const manual = oauth && connector.manualClient === true
+  // The settings a connector declares are plain text, shown with the stored value: they
+  // decide which address or project the mounted level runs against, not who the user is.
+  const settings = Array.isArray(connector.settings)
+    ? connector.settings.filter(field => field !== null && typeof field?.name === 'string' && field.name !== '')
+    : []
+  const [settingDraft, setSettingDraft] = useState(null)
+  const settingValue = (field) => {
+    if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name]
+    return typeof field.value === 'string' ? field.value : ''
+  }
+  const settingsChanged = settings.some(field => settingValue(field) !== (typeof field.value === 'string' ? field.value : ''))
+  const saveSettings = () => {
+    if (busy || !settingsChanged) return
+    const values = Object.fromEntries(settings.map(field => [field.name, settingValue(field).trim()]))
+    void run(actions.connectorSetSettings(connector.id, values), () => setSettingDraft(null))
+  }
   // The fields a connector declares (`credentials` on the host): the card draws one masked
   // input per field and sends them together as `values`. A host that declares none keeps the
   // single token field, labelled for its service.
@@ -185,6 +201,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const [appId, setAppId] = useState('')
   const [appSecret, setAppSecret] = useState('')
   const [authorizeUrl, setAuthorizeUrl] = useState(null)
+  const oauthLevel = () => (typeof shownLevel === 'string' && shownLevel !== '' ? shownLevel : undefined)
   const startAuthorization = async () => {
     if (busy) return
     setBusy(true)
@@ -192,7 +209,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     // Opened before the request so a popup blocker sees the reader's own press.
     const tab = window.open('about:blank', '_blank')
     try {
-      const result = await actions.connectorOauthStart(connector.id)
+      const result = await actions.connectorOauthStart(connector.id, oauthLevel())
       const url = typeof result?.authorizeUrl === 'string' ? result.authorizeUrl : ''
       if (url === '') throw new Error(t('The authorization page could not be opened'))
       setAuthorizeUrl(url)
@@ -272,8 +289,33 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   // A host whose profile forbids changes says why; every declared write then shows as
   // unavailable instead of disappearing.
   const writesLocked = typeof readOnly === 'string' && readOnly !== ''
-  // A connected connector that has something to show opens its panel from its own row.
-  const hasOptions = on && (levels.length > 0 || capabilities.length > 0 || permissions !== null)
+  // The host may name per-level reasons (a level that needs another setting); without them,
+  // a level that needs the unfilled settings is blocked here with the same words.
+  const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === 'object' ? connector.levelNotes : {}
+  // The level the reader picked. An OAuth connector sends it with the authorization request
+  // (`connector-oauth-start { level }`), so a stored level that cannot connect is not in the
+  // way; other connectors switch at once.
+  const [levelDraft, setLevelDraft] = useState(null)
+  const shownLevel = oauth ? (levelDraft ?? currentLevel) : currentLevel
+  const chooseLevel = (id) => {
+    if (oauth && !on) { setLevelDraft(id); return }
+    // A connected OAuth connector asks the host for the new level: it disconnects and the
+    // next Connect authorizes for that level.
+    setLevelDraft(null)
+    void run(actions.connectorSetLevel(connector.id, id))
+  }
+  const storedSetting = field => (typeof field.value === 'string' ? field.value : '').trim()
+  const settingsEmpty = settings.some(field => storedSetting(field) === '')
+  const levelBlocked = (id) => {
+    const note = typeof levelNotes[id] === 'string' && levelNotes[id] !== '' ? levelNotes[id] : null
+    if (note !== null) return note
+    if (settingsEmpty && /write|full/i.test(id)) return t('Fill in the settings before switching to this level.')
+    return null
+  }
+  // A connector with settings opens its panel even before it is connected: the settings are
+  // what a level needs in order to connect at all.
+  const hasOptions = settings.length > 0 || levels.length > 0
+    || (on && (capabilities.length > 0 || permissions !== null))
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   // The card names its own glyph; a host that declares none keeps the mark its id had.
@@ -339,26 +381,47 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         : h('div', { className: 'bt-connector-hint' }, t('Send the bot a message first, then press Test.')))
       : null,
     levelNote !== null ? h('div', { className: 'bt-connector-hint' }, levelNote) : null,
-    needsReauth ? h('div', { className: 'bt-connector-hint' }, t('Authorize again to use this access level.')) : null,
+    needsReauth ? h('div', { className: 'bt-connector-hint' }, t('Click Connect to authorize with this access level again.')) : null,
     oauth && docsUrl !== undefined ? h('div', { className: 'bt-connector-docs' },
       h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation'))) : null,
     hasOptions && details
       ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
+        settings.length > 0
+          ? h('div', { className: 'bt-connector-setting' },
+            h('div', { className: 'bt-connector-action-title' }, t('Settings')),
+            settings.map(field => h('label', { key: field.name, className: 'bt-connector-field' },
+              h('span', { className: 'bt-connector-field-name' }, typeof field.label === 'string' && field.label !== '' ? field.label : field.name),
+              h('div', { className: 'bt-q-field' }, h('input', {
+                className: 'bt-connector-input', value: settingValue(field), placeholder: field.name, 'aria-label': field.label ?? field.name,
+                autoComplete: 'off', spellCheck: false, disabled: busy,
+                onChange: (event) => setSettingDraft(previous => ({ ...previous, [field.name]: event.target.value })),
+                onKeyDown: (event) => { if (event.key === 'Enter') saveSettings() },
+              })))),
+            h('div', { className: 'bt-connector-form-row' },
+              h('button', {
+                type: 'button', className: 'bt-soft bt-soft-sm',
+                disabled: busy || !settingsChanged,
+                onClick: () => saveSettings(),
+              }, t('Save settings'))))
+          : null,
         levels.length > 0
           ? h('div', { className: 'bt-connector-setting' },
             h('div', { className: 'bt-connector-action-title' }, t('Access level')),
             h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
               levels.map((entry) => {
                 const item = levelItem(entry)
-                const current = item.id === currentLevel
-                return h('button', {
-                  key: item.id, type: 'button', role: 'radio', 'aria-checked': current,
-                  className: 'bt-connector-level', 'data-current': current || undefined,
-                  disabled: busy || (writesLocked && item.write === true),
-                  onClick: () => { if (!current) void run(actions.connectorSetLevel(connector.id, item.id)) },
-                },
-                h('span', { className: 'bt-connector-level-title' }, item.title),
-                item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null)
+                const current = item.id === shownLevel
+                const blocked = current ? null : levelBlocked(item.id)
+                return h('div', { key: item.id, className: 'bt-connector-level-wrap' },
+                  h('button', {
+                    type: 'button', role: 'radio', 'aria-checked': current,
+                    className: 'bt-connector-level', 'data-current': current || undefined,
+                    disabled: busy || (writesLocked && item.write === true) || blocked !== null,
+                    onClick: () => { if (!current && blocked === null) chooseLevel(item.id) },
+                  },
+                  h('span', { className: 'bt-connector-level-title' }, item.title),
+                  item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null),
+                  blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
               })),
             h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')))
           : null,
