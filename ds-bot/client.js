@@ -340,6 +340,7 @@ var ZH = {
   "Switching the access level needs a new authorization.": "切换访问级别需要重新授权。",
   Capabilities: "能力",
   "Unavailable on this host.": "这台主机上不可用。",
+  Write: "可写",
   "Chat found": "已找到会话",
   "Chat id": "会话 ID",
   "Chat id (optional)": "会话 ID（可空）",
@@ -3341,6 +3342,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-cap[data-locked]{color:var(--bt-ink-3)}
 .bt-connector-cap-title{font-size:13px;line-height:18px}
 .bt-connector-cap-note,.bt-connector-cap-lock{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+/* A capability that changes something says so, quietly. */
+.bt-connector-cap-badge{margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-accent);background:color-mix(in srgb,var(--bt-accent) 12%,transparent)}
 .bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
@@ -13912,7 +13915,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
           return (0, import_react32.createElement)(
             "li",
             { key: item.key, className: "bt-connector-cap", "data-write": item.write || void 0, "data-locked": locked || void 0 },
-            (0, import_react32.createElement)("span", { className: "bt-connector-cap-title" }, item.title),
+            (0, import_react32.createElement)("span", { className: "bt-connector-cap-title" }, item.title, item.write ? (0, import_react32.createElement)("span", { className: "bt-connector-cap-badge" }, t("Write")) : null),
             item.description !== null ? (0, import_react32.createElement)("span", { className: "bt-connector-cap-note" }, item.description) : null,
             locked ? (0, import_react32.createElement)("span", { className: "bt-connector-cap-lock" }, t("Unavailable on this host.")) : null
           );
