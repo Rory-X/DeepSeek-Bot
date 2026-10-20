@@ -172,3 +172,22 @@ test('a refresh that fails, or names no token, fails the call without retrying',
   await assert.rejects(refusedAgain.callTool('list_projects', {}), /answered 403/)
   assert.equal(calls, 4)
 })
+
+test('a reply that stops mid-body is reported as the server timing out', async () => {
+  const client = new McpHttpClient('https://mcp.test/', TOKEN, {
+    timeoutMs: 1_000,
+    fetch: async (url, init) => {
+      const body = JSON.parse(init.body)
+      if (body.method === 'initialize') {
+        return {
+          status: 200,
+          ok: true,
+          headers: { get: () => 'application/json' },
+          text: async () => { throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }) },
+        }
+      }
+      throw new Error(`unexpected ${body.method}`)
+    },
+  })
+  await assert.rejects(client.open(), error => error.name === 'TimeoutError' && /did not finish answering within 1s/.test(error.message))
+})
