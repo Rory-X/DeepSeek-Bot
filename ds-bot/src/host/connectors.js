@@ -262,14 +262,12 @@ export function install(rt) {
     .filter(address => address !== undefined)
     .some(address => !/^https:\/\//i.test(String(address)))
   const insecureText = id => `${options[id].displayName} addresses must start with https://`
-  // What a connect or an account probe must carry over instead of dropping: the legacy
-  // switches, the chosen access level and the connector's plain settings.
+  // What a connect or an account probe must carry over instead of dropping: the chosen
+  // access level (a legacy switch maps to write through `levelOf`) and the settings.
   const switchesOf = (id) => {
     const prior = state.connectors?.[id] ?? {}
     return {
-      ...(typeof prior.actions === 'boolean' ? { actions: prior.actions } : {}),
-      ...(typeof prior.toolbox === 'boolean' ? { toolbox: prior.toolbox } : {}),
-      ...(prior.level === undefined ? {} : { level: prior.level }),
+      level: levelOf(id),
       ...(prior.settings === undefined ? {} : { settings: prior.settings }),
     }
   }
@@ -383,6 +381,28 @@ export function install(rt) {
       return reason(error)
     }
   }
+  // What the connector may expose at its level: the read tools always, the action tools
+  // only at write level. A module may answer per level (`toolsOf`); otherwise its static
+  // lists apply, and the action list is still emptied for a read level.
+  const toolListsOf = (id) => {
+    const connector = options[id]
+    const level = levelOf(id)
+    let declared
+    if (typeof connector.toolsOf === 'function') {
+      declared = connector.toolsOf({ level, settings: settingsOf(id) })
+      if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) {
+        throw new Error(`${connector.displayName}'s toolsOf must return { readTools, actionTools }`)
+      }
+    }
+    const readTools = Array.isArray(declared?.readTools)
+      ? declared.readTools
+      : Array.isArray(connector.readTools) ? connector.readTools : []
+    const actionTools = level === 'write'
+      ? (Array.isArray(declared?.actionTools) ? declared.actionTools
+        : Array.isArray(connector.actionTools) ? connector.actionTools : [])
+      : []
+    return { level, readTools, actionTools }
+  }
   // A grant saved before levels existed is classified by its scopes: a scope the read
   // authorization never asked for means the grant can write. No scopes at all cannot be
   // classified, and the card asks for a new authorization.
@@ -493,6 +513,7 @@ export function install(rt) {
     const tokenName = tokenNameOf(connector)
     if (tokenName === undefined) throw new Error(`${connector.displayName} has no token credential`)
     if (typeof connector.notify?.send !== 'function') throw new Error(`${connector.displayName} has no send hook`)
+    if (levelOf(id) !== 'write') return { token: credentialKeyOf(connector), dispose: [] }
     if (connector.needsChatId === true && chatIdOf(state, id) === undefined) return { token: credentialKeyOf(connector), dispose: [] }
     const dispose = [ctx.tools.register(createNotifyTool({
       name: connector.notify.toolName ?? `notify_${id}`,
@@ -542,7 +563,7 @@ export function install(rt) {
         if (teamId !== undefined && parameters.properties?.teamId !== undefined && call.teamId === undefined) call.teamId = teamId
         // A connector's own default account answers account-scoped calls; an explicit
         // argument wins, and a parameter the tool does not take is never added.
-        for (const [name, value] of Object.entries(defaults ?? {})) {
+        for (const [name, value] of Object.entries((typeof defaults === 'function' ? defaults() : defaults) ?? {})) {
           if (value !== undefined && parameters.properties?.[name] !== undefined && call[name] === undefined) call[name] = value
         }
         try {
@@ -637,19 +658,24 @@ export function install(rt) {
     try {
       await client.open()
       const listed = await client.listTools()
-      // The toolbox replaces the four named action tools: with it on, an action is run
-      // through vercel_call (and still approved per call), so it is not offered twice.
-      const toolbox = connector.toolbox === true && state.connectors?.[id]?.toolbox === true
-      const actions = !toolbox && state.connectors?.[id]?.actions === true
-      const wanted = [...connector.readTools, ...(actions ? connector.actionTools ?? [] : [])]
+      const { level, readTools, actionTools } = toolListsOf(id)
+      // The toolbox is the write level's vendor catalog; it replaces the named action tools
+      // (the action runs through the call tool, still approved per call) so nothing is
+      // offered twice.
+      const toolbox = connector.toolbox === true && level === 'write'
+      const actions = toolbox ? [] : actionTools
+      const wanted = [...readTools, ...actions]
       const picked = listed.filter(tool => wanted.includes(tool.name))
       if (picked.length === 0) throw new Error(`${connector.displayName} offers none of the read tools DS Bot exposes`)
       const cloudflareToolbox = toolbox && connector.toolboxKind === 'cloudflare'
       const index = toolbox ? (cloudflareToolbox ? buildCloudflareToolIndex(listed) : buildToolIndex(listed)) : undefined
       const teamId = state.connectors?.[id]?.teamId ?? connector.teamId
-      const accountId = looksAccountId(state.connectors?.[id]?.accountId) ? state.connectors[id].accountId : undefined
-      const defaults = accountId === undefined ? {} : { account_id: accountId }
-      const actionNames = new Set(connector.actionTools ?? [])
+      const currentAccountId = () => (looksAccountId(state.connectors?.[id]?.accountId) ? state.connectors[id].accountId : undefined)
+      const defaults = () => {
+        const accountId = currentAccountId()
+        return accountId === undefined ? {} : { account_id: accountId }
+      }
+      const actionNames = new Set(actions)
       const dispose = []
       try {
         for (const tool of picked) {
@@ -665,7 +691,7 @@ export function install(rt) {
               index,
               output,
               redact: rt.redactSecrets,
-              accountId,
+              accountId: currentAccountId,
               approve: (name, exec) => requireApproval(connector, name, exec),
             })))
             toolboxes.set(CLOUDFLARE_TOOLBOX_TOOLS[1], { id, connector, blocked, kind: 'cloudflare' })
@@ -904,10 +930,12 @@ export function install(rt) {
       ...Object.fromEntries(['readOnly', 'readOnlyNote', 'glyph', 'about', 'docsUrl']
         .filter(key => connector[key] !== undefined)
         .map(key => [key, connector[key]])),
-      ...(connector.actionTools === undefined ? {} : { actions: state.connectors?.[id]?.actions === true }),
+      // Legacy fields for one release: the client reads the level now; these report what
+      // the level already decides.
+      ...(connector.actionTools === undefined ? {} : { actions: levelOf(id) === 'write' }),
       ...(connector.toolbox === true
         ? {
-            toolbox: state.connectors?.[id]?.toolbox === true,
+            toolbox: levelOf(id) === 'write',
             toolboxCall: connector.toolboxKind === 'cloudflare' ? CLOUDFLARE_TOOLBOX_TOOLS[1] : 'vercel_call',
           }
         : {}),
@@ -1141,26 +1169,6 @@ export function install(rt) {
       if (chatId === undefined) delete prior.chatId
       else prior.chatId = chatId
       state.connectors = { ...state.connectors, [body.id]: prior }
-      await rt.save()
-      await sync(body.id, true)
-      return connectorsView()
-    },
-    async 'connector-set-actions'(body) {
-      known(body.id)
-      const connector = options[body.id]
-      if (connector.actionTools === undefined) throw new Error('This connector has no actions')
-      const enabled = body.enabled === true
-      state.connectors = { ...state.connectors, [body.id]: { ...state.connectors?.[body.id], actions: enabled } }
-      await rt.save()
-      await sync(body.id, true)
-      return connectorsView()
-    },
-    async 'connector-set-toolbox'(body) {
-      known(body.id)
-      const connector = options[body.id]
-      if (connector.toolbox !== true) throw new Error('This connector has no toolbox')
-      const enabled = body.enabled === true
-      state.connectors = { ...state.connectors, [body.id]: { ...state.connectors?.[body.id], toolbox: enabled } }
       await rt.save()
       await sync(body.id, true)
       return connectorsView()
