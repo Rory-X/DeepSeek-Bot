@@ -10,8 +10,36 @@ import { pathToFileURL } from 'node:url'
 export const CONNECTOR_DIR = import.meta.dirname
 export const CONNECTOR_ID = /^[a-z][a-z0-9-]{0,39}$/
 export const CONNECTOR_MODES = ['mcp-client', 'read-tools', 'oauth-mcp', 'notify', 'rest-tools', 'imap', 'imap-read', 'custom']
+// An access level is what a connector may do once it is connected: read only, or read and
+// write. Every write tool is gated by it, so a connector that does not declare a level is
+// read only.
+export const CONNECTOR_LEVELS = ['read', 'write']
 // This file and test-only helpers stay out of the registry.
 const NOT_A_CONNECTOR = /^(registry\.js|_.*|.*\.test\.js)$/
+const LEVEL_HOOKS = ['authorize', 'toolsOf', 'readiness', 'normalizeSettings', 'actionApproval']
+
+// The level-aware part of the shape: the levels, the compatibility default, and the hooks
+// that take a level. A wrong default or a non-function hook is a configuration error.
+const checkLevels = (file, id, connector) => {
+  const levels = connector.levels === undefined ? ['read'] : connector.levels
+  if (!Array.isArray(levels) || levels.length === 0 || new Set(levels).size !== levels.length
+    || levels.some(level => !CONNECTOR_LEVELS.includes(level))) {
+    throw new Error(`Connector module ${file} ("${id}") levels must be a non-empty list of ${CONNECTOR_LEVELS.join(', ')}`)
+  }
+  if (connector.defaultLevel !== undefined && !levels.includes(connector.defaultLevel)) {
+    throw new Error(`Connector module ${file} ("${id}") needs a defaultLevel that is one of its levels`)
+  }
+  for (const hook of LEVEL_HOOKS) {
+    if (connector[hook] !== undefined && typeof connector[hook] !== 'function') {
+      throw new Error(`Connector module ${file} ("${id}") needs ${hook} to be a function`)
+    }
+  }
+  if (connector.settings !== undefined
+    && (!Array.isArray(connector.settings) || connector.settings.some(field => field === null || typeof field !== 'object' || typeof field.name !== 'string' || field.name === ''))) {
+    throw new Error(`Connector module ${file} ("${id}") settings must list fields with a name`)
+  }
+}
+
 
 const moduleFiles = dir => readdirSync(dir, { withFileTypes: true })
   .filter(entry => entry.isFile() && entry.name.endsWith('.js') && !NOT_A_CONNECTOR.test(entry.name))
@@ -45,6 +73,7 @@ export async function loadConnectorModules(dir = CONNECTOR_DIR) {
     if (!CONNECTOR_MODES.includes(connector.mode)) {
       throw new Error(`Connector module ${file} ("${id}") needs a mode: ${CONNECTOR_MODES.join(', ')}`)
     }
+    checkLevels(file, id, connector)
     const { id: key, ...definition } = connector
     loaded[key] = definition
   }

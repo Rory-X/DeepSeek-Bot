@@ -8,6 +8,10 @@ import { fakeCredentials, fakeOAuthServer, fakeResponse, fakeWebServer } from '.
 const CONNECTORS = {
   notion: { displayName: 'Notion', mode: 'oauth-mcp', url: 'https://mcp.test/mcp', oauth: { scopes: ['default'] } },
   cloudflare: { displayName: 'Cloudflare', mode: 'oauth-mcp', url: 'https://mcp.test/mcp' },
+  levelled: {
+    displayName: 'Levelled', mode: 'oauth-mcp', url: 'https://mcp.test/mcp', levels: ['read', 'write'], defaultLevel: 'read',
+    authorize: ({ level }) => ({ url: 'https://mcp.test/mcp', scopes: level === 'write' ? ['read', 'write'] : ['read'] }),
+  },
 }
 
 function setup({ server = fakeOAuthServer(), credentials = fakeCredentials(), webServer = fakeWebServer(), canWrite, ttlMs } = {}) {
@@ -93,6 +97,29 @@ test('a connector without its own scopes asks for the ones the server advertises
   const { flow } = setup()
   const started = await flow.start('cloudflare', { origin: 'https://dsh.test' })
   assert.equal(new URL(started.authorizeUrl).searchParams.get('scope'), 'read write')
+})
+
+test('a module chooses the authorization for the level the user picked', async () => {
+  const harness = setup()
+  const started = await harness.flow.start('levelled', { origin: 'https://dsh.test', level: 'write', settings: { projectId: 'p' } })
+  assert.equal(new URL(started.authorizeUrl).searchParams.get('scope'), 'read write')
+  const answer = await callback(harness.webServer, `${OAUTH_PREFIX}/levelled?${codeAndState(started.authorizeUrl)}`)
+  assert.equal(answer.statusCode, 200, answer.body)
+  const record = harness.credentials.records.get('ds-bot/connector-levelled')
+  assert.equal(record.payload.level, 'write')
+  assert.deepEqual(record.payload.scopes, ['read', 'write'])
+  assert.deepEqual(harness.events, [['connecting', 'levelled'], ['authorized', 'levelled', 'access-1']])
+})
+
+test('an authorization address a module returns must be https', async () => {
+  const flow = createOAuthFlow({
+    ctx: fakeContext({ services: { credentials: fakeCredentials(), webServer: fakeWebServer() } }),
+    connectorOf: () => ({ displayName: 'Plain', mode: 'oauth-mcp', url: 'https://mcp.test/mcp', authorize: () => ({ url: 'http://plain.test/mcp', scopes: ['read'] }) }),
+    request: fakeOAuthServer().fetch,
+    warn: () => {},
+    redact: text => text,
+  })
+  await assert.rejects(flow.start('plain', { origin: 'https://dsh.test', level: 'read' }), /must start with https/)
 })
 
 test('the callback address falls back to the web server loopback for the desktop app', async () => {
