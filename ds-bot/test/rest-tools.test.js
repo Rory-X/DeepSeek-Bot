@@ -209,6 +209,21 @@ test('a dotted body field nests its object, as a structured request needs', asyn
   assert.deepEqual(seen[0], { query_info: { title: '周报', content: '周报' }, start: 0 })
 })
 
+test('a per-tool result limit applies to an envelope answer too', async () => {
+  const book = { text: 'x'.repeat(30_000) }
+  const tool = (resultMax) => createRestTools('env', enveloped({ ok: 'code', success: 0, data: 'data' }, { resultMax }), { output, fetch: async () => answer(200, { code: 0, data: book }) })[0]
+
+  // A big read that the connector asked to keep whole stays whole.
+  const wide = await tool(40_000).execute({ q: 'x' })
+  assert.ok(wide.length > REST_RESULT_MAX)
+  assert.ok(!wide.includes('result cut:'))
+
+  // A narrower limit still cuts, with the same note.
+  const narrow = await tool(1_000).execute({ q: 'x' })
+  assert.ok(narrow.length < 2_000)
+  assert.match(narrow, /result cut: \d+ characters in all/)
+})
+
 test('an answer hook may format or refuse a successful response', async () => {
   const formatter = createRestTools('env', enveloped(undefined, {
     answer: ({ body }) => `notes: ${body.data.length}`,
