@@ -621,6 +621,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-cap[data-risk=destructive] .bt-connector-cap-badge{color:var(--bt-danger);background:color-mix(in srgb,var(--bt-danger) 12%,transparent)}
 .bt-connector-cap[data-risk=destructive] .bt-connector-cap-title{color:var(--bt-danger)}
 .bt-connector-cap-change{font-size:12px;line-height:16px;color:var(--bt-ink-3);font-style:italic;overflow-wrap:anywhere}
+/* A host that forbids changes grey out a destructive row like any other locked one. */
+.bt-connector-cap[data-locked] .bt-connector-cap-title,.bt-connector-cap[data-locked] .bt-connector-cap-badge{color:var(--bt-ink-3)}
 .bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
