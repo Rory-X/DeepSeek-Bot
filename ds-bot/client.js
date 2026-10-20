@@ -359,7 +359,9 @@ var ZH = {
   "Access level": "访问级别",
   "Read-only": "只读",
   "Can write": "可写",
-  "Authorize again to use this access level.": "要用这个访问级别，需要重新授权。",
+  "Click Connect to authorize with this access level again.": "点击连接，用这个访问级别重新授权。",
+  "Save settings": "保存设置",
+  "Fill in the settings before switching to this level.": "先填好设置，才能切换到这一级别。",
   "Changes: {target}": "会改动：{target}",
   "This cannot be undone.": "这个操作无法撤销。",
   "I understand what this changes": "我了解这次改动的内容",
@@ -2114,7 +2116,12 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     // A level change asks the host for a new grant: an OAuth connector goes back to off and
     // asks to authorize again, a token connector remounts with the new level.
     connectorSetLevel: (id, level) => after(call2("connector-set-level", { id, level })),
-    connectorOauthStart: (id) => after(call2("connector-oauth-start", { id })),
+    // Settings are plain values (a project id, a role name), saved in one request; the view
+    // comes back with what the host normalized.
+    connectorSetSettings: (id, values) => after(call2("connector-set-settings", { id, values })),
+    // The chosen level travels with the authorization request, so the grant is asked for the
+    // level the reader sees.
+    connectorOauthStart: (id, level) => after(call2("connector-oauth-start", { id, ...typeof level === "string" && level !== "" ? { level } : {} })),
     connectorOauthApp: (id, clientId, clientSecret) => after(call2("connector-oauth-app", { id, clientId, clientSecret })),
     saveCapability: (capability) => after(call2("capability-save", capability)),
     deleteCapability: (name) => after(call2("capability-delete", { name })),
@@ -3360,6 +3367,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-setting{display:flex;flex-direction:column;gap:6px}
 /* Write access as declared: the level buttons and the capability list, nothing to toggle. */
 .bt-connector-levels{display:flex;flex-wrap:wrap;gap:6px}
+.bt-connector-level-wrap{display:flex;flex-direction:column;gap:3px;min-width:0}
+.bt-connector-level-blocked{font-size:12px;line-height:16px;color:var(--bt-ink-3);max-width:260px;overflow-wrap:anywhere}
 .bt-connector-level{display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:8px 12px;border-radius:10px;border:.5px solid var(--bt-line-2);background:none;color:inherit;font:inherit;font-size:12px;line-height:16px;text-align:left;cursor:pointer}
 .bt-connector-level[data-current]{border-color:color-mix(in srgb,var(--bt-accent) 60%,transparent);background:color-mix(in srgb,var(--bt-accent) 8%,transparent)}
 .bt-connector-level:disabled{opacity:.5;cursor:default}
@@ -13964,6 +13973,18 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const [error, setError] = (0, import_react34.useState)(null);
   const oauth = connector.oauth === true;
   const manual = oauth && connector.manualClient === true;
+  const settings = Array.isArray(connector.settings) ? connector.settings.filter((field) => field !== null && typeof field?.name === "string" && field.name !== "") : [];
+  const [settingDraft, setSettingDraft] = (0, import_react34.useState)(null);
+  const settingValue = (field) => {
+    if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name];
+    return typeof field.value === "string" ? field.value : "";
+  };
+  const settingsChanged = settings.some((field) => settingValue(field) !== (typeof field.value === "string" ? field.value : ""));
+  const saveSettings = () => {
+    if (busy || !settingsChanged) return;
+    const values2 = Object.fromEntries(settings.map((field) => [field.name, settingValue(field).trim()]));
+    void run(actions.connectorSetSettings(connector.id, values2), () => setSettingDraft(null));
+  };
   const tokenFieldLabel = cardText(connector, "tokenLabel") ?? tokenLabel(connector.id);
   const tokenFieldPlaceholder = cardText(connector, "tokenPlaceholder") ?? void 0;
   const declared = Array.isArray(connector.inputs) ? connector.inputs.filter((input) => input !== null && typeof input?.name === "string" && input.name !== "") : [];
@@ -13982,13 +14003,14 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const [appId, setAppId] = (0, import_react34.useState)("");
   const [appSecret, setAppSecret] = (0, import_react34.useState)("");
   const [authorizeUrl, setAuthorizeUrl] = (0, import_react34.useState)(null);
+  const oauthLevel = () => typeof shownLevel === "string" && shownLevel !== "" ? shownLevel : void 0;
   const startAuthorization = async () => {
     if (busy) return;
     setBusy(true);
     setError(null);
     const tab = window.open("about:blank", "_blank");
     try {
-      const result = await actions.connectorOauthStart(connector.id);
+      const result = await actions.connectorOauthStart(connector.id, oauthLevel());
       const url = typeof result?.authorizeUrl === "string" ? result.authorizeUrl : "";
       if (url === "") throw new Error(t("The authorization page could not be opened"));
       setAuthorizeUrl(url);
@@ -14068,7 +14090,24 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const levelNote = typeof connector.levelNote === "string" && connector.levelNote !== "" ? connector.levelNote : null;
   const needsReauth = connector.needsReauth === true;
   const writesLocked = typeof readOnly === "string" && readOnly !== "";
-  const hasOptions = on && (levels.length > 0 || capabilities.length > 0 || permissions !== null);
+  const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === "object" ? connector.levelNotes : {};
+  const [levelDraft, setLevelDraft] = (0, import_react34.useState)(null);
+  const shownLevel = oauth ? levelDraft ?? currentLevel : currentLevel;
+  const chooseLevel = (id) => {
+    if (oauth) {
+      setLevelDraft(id);
+      return;
+    }
+    void run(actions.connectorSetLevel(connector.id, id));
+  };
+  const settingsEmpty = settings.some((field) => settingValue(field).trim() === "");
+  const levelBlocked = (id) => {
+    const note = typeof levelNotes[id] === "string" && levelNotes[id] !== "" ? levelNotes[id] : null;
+    if (note !== null) return note;
+    if (settingsEmpty && /write|full/i.test(id)) return t("Fill in the settings before switching to this level.");
+    return null;
+  };
+  const hasOptions = settings.length > 0 || levels.length > 0 || on && (capabilities.length > 0 || permissions !== null);
   const [details, setDetails] = (0, import_react34.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark;
@@ -14169,7 +14208,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       typeof connector.chatId === "string" && connector.chatId !== "" ? null : (0, import_react34.createElement)("div", { className: "bt-connector-hint" }, t("Send the bot a message first, then press Test."))
     ) : null,
     levelNote !== null ? (0, import_react34.createElement)("div", { className: "bt-connector-hint" }, levelNote) : null,
-    needsReauth ? (0, import_react34.createElement)("div", { className: "bt-connector-hint" }, t("Authorize again to use this access level.")) : null,
+    needsReauth ? (0, import_react34.createElement)("div", { className: "bt-connector-hint" }, t("Click Connect to authorize with this access level again.")) : null,
     oauth && docsUrl !== void 0 ? (0, import_react34.createElement)(
       "div",
       { className: "bt-connector-docs" },
@@ -14178,6 +14217,38 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     hasOptions && details ? (0, import_react34.createElement)(
       "div",
       { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings") },
+      settings.length > 0 ? (0, import_react34.createElement)(
+        "div",
+        { className: "bt-connector-setting" },
+        (0, import_react34.createElement)("div", { className: "bt-connector-action-title" }, t("Settings")),
+        settings.map((field) => (0, import_react34.createElement)(
+          "label",
+          { key: field.name, className: "bt-connector-field" },
+          (0, import_react34.createElement)("span", { className: "bt-connector-field-name" }, typeof field.label === "string" && field.label !== "" ? field.label : field.name),
+          (0, import_react34.createElement)("div", { className: "bt-q-field" }, (0, import_react34.createElement)("input", {
+            className: "bt-connector-input",
+            value: settingValue(field),
+            placeholder: field.name,
+            "aria-label": field.label ?? field.name,
+            autoComplete: "off",
+            spellCheck: false,
+            onChange: (event) => setSettingDraft((previous) => ({ ...previous, [field.name]: event.target.value })),
+            onKeyDown: (event) => {
+              if (event.key === "Enter") saveSettings();
+            }
+          }))
+        )),
+        (0, import_react34.createElement)(
+          "div",
+          { className: "bt-connector-form-row" },
+          (0, import_react34.createElement)("button", {
+            type: "button",
+            className: "bt-soft bt-soft-sm",
+            disabled: busy || !settingsChanged,
+            onClick: () => saveSettings()
+          }, t("Save settings"))
+        )
+      ) : null,
       levels.length > 0 ? (0, import_react34.createElement)(
         "div",
         { className: "bt-connector-setting" },
@@ -14187,23 +14258,28 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
           { className: "bt-connector-levels", role: "radiogroup", "aria-label": t("Access level") },
           levels.map((entry) => {
             const item = levelItem(entry);
-            const current = item.id === currentLevel;
+            const current = item.id === shownLevel;
+            const blocked = current ? null : levelBlocked(item.id);
             return (0, import_react34.createElement)(
-              "button",
-              {
-                key: item.id,
-                type: "button",
-                role: "radio",
-                "aria-checked": current,
-                className: "bt-connector-level",
-                "data-current": current || void 0,
-                disabled: busy || writesLocked && item.write === true,
-                onClick: () => {
-                  if (!current) void run(actions.connectorSetLevel(connector.id, item.id));
-                }
-              },
-              (0, import_react34.createElement)("span", { className: "bt-connector-level-title" }, item.title),
-              item.description !== null ? (0, import_react34.createElement)("span", { className: "bt-connector-level-note" }, item.description) : null
+              "div",
+              { key: item.id, className: "bt-connector-level-wrap" },
+              (0, import_react34.createElement)(
+                "button",
+                {
+                  type: "button",
+                  role: "radio",
+                  "aria-checked": current,
+                  className: "bt-connector-level",
+                  "data-current": current || void 0,
+                  disabled: busy || writesLocked && item.write === true || blocked !== null,
+                  onClick: () => {
+                    if (!current && blocked === null) chooseLevel(item.id);
+                  }
+                },
+                (0, import_react34.createElement)("span", { className: "bt-connector-level-title" }, item.title),
+                item.description !== null ? (0, import_react34.createElement)("span", { className: "bt-connector-level-note" }, item.description) : null
+              ),
+              blocked !== null ? (0, import_react34.createElement)("span", { className: "bt-connector-level-blocked" }, blocked) : null
             );
           })
         ),
