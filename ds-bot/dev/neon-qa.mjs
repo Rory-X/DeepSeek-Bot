@@ -170,6 +170,11 @@ try {
     [await shot('03-write-ready-1280')])
   const stored = await neonRow()
   record('QA-03d', 'the card shows the write level', stored?.level === 'write' ? 'pass' : 'fail', `level=${stored?.level}`)
+  // The mount must use the address the grant came from, not the connector's default one.
+  const calls = await mockJson('/debug/calls')
+  const lists = (Array.isArray(calls) ? calls : []).filter(call => call.kind === 'tools/list')
+  const mounted = lists.at(-1)
+  record('QA-03e', 'the write mount uses the grant address', mounted?.readOnly === false ? 'pass' : 'fail', JSON.stringify({ lists: lists.length, lastReadOnly: mounted?.readOnly }))
 
   await resetMock()
   const back = await api('connector-set-level', { id: 'neon', level: 'read' })

@@ -173,14 +173,16 @@ const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }
     const redirectUri = url.searchParams.get('redirect_uri')
     if (redirectUri === null) return json(res, 400, { error: 'invalid_request' })
     // A new authorization replaces the grant: tokens issued before it stop working.
+    // The grant parameters live in the `resource` URL, as Neon's server reads them.
     live.clear()
+    const resource = new URL(url.searchParams.get('resource') ?? origin)
     debug.authorize = {
-      readonly: url.searchParams.getAll('readonly'),
-      categories: url.searchParams.getAll('category'),
-      projectId: url.searchParams.get('projectId'),
-      roleName: url.searchParams.get('roleName'),
+      resource: resource.href,
+      readonly: resource.searchParams.getAll('readonly'),
+      categories: resource.searchParams.getAll('category'),
+      projectId: resource.searchParams.get('projectId'),
+      roleName: resource.searchParams.get('roleName'),
       scope: url.searchParams.get('scope'),
-      resource: url.searchParams.get('resource'),
       at: Date.now(),
     }
     const code = `code-${issued += 1}`
