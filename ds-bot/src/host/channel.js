@@ -321,6 +321,8 @@ export function install(rt) {
         case 'connector-set-chat':
         case 'connector-set-auto-push':
         case 'connector-oauth-start':
+        case 'connector-create-instance':
+        case 'connector-delete-instance':
           await rt.load()
           return ok(await rt.connectorEndpoint(endpoint, body, meta))
         case 'capability-save':
