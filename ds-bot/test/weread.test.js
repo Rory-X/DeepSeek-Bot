@@ -55,7 +55,7 @@ test('declares the official gateway, Bearer key and read-only REST mode', () => 
 })
 
 test('every tool is a read-only POST that names its own api_name and skill version', () => {
-  assert.equal(weread.restTools.length, 13)
+  assert.equal(weread.restTools.length, 15)
   for (const tool of weread.restTools) {
     assert.equal(tool.method, 'POST', `${tool.name} must be POST`)
     assert.equal(tool.readOnly, true, `${tool.name} must declare readOnly`)
@@ -75,12 +75,14 @@ test('every tool is a read-only POST that names its own api_name and skill versi
 test('the read-only tools are the ones Ada mapped, and no pass-through exists', () => {
   assert.deepEqual(weread.restTools.map(tool => tool.name), [
     'shelf', 'search', 'book', 'chapters', 'progress', 'notebooks', 'highlights',
-    'my_notes', 'popular_highlights', 'stats', 'similar', 'reviews', 'chapter_heat',
+    'my_notes', 'popular_highlights', 'stats', 'recommend', 'similar', 'reviews', 'review_single',
+    'chapter_heat',
   ])
   assert.deepEqual(weread.restTools.map(tool => tool.body.api_name.const), [
     '/shelf/sync', '/store/search', '/book/info', '/book/chapterinfo', '/book/getprogress',
     '/user/notebooks', '/book/bookmarklist', '/review/list/mine', '/book/bestbookmarks',
-    '/readdata/detail', '/book/similar', '/review/list', '/book/underlines',
+    '/readdata/detail', '/book/recommend', '/book/similar', '/review/list', '/review/single',
+    '/book/underlines',
   ])
   // Nothing that could write is declared, and no tool takes a free-form api_name, path, method
   // or header: the gateway call is fixed by the definition, not by the model.
@@ -123,6 +125,13 @@ adapterTest('a business error carries the service message, not the 499 status', 
     run('reviews', { bookId: 'CB_x' }, () => answer(499, { errcode: -2003, errmsg: '参数格式错误', errlog: 'CDQ34Je' })),
     /WeRead: 参数格式错误/,
   )
+})
+
+adapterTest('pages recommendations and fetches one review by its id', async () => {
+  const { sent } = await run('recommend', { count: 12, maxIdx: 0 }, () => answer(200, { books: [] }))
+  assert.deepEqual(JSON.parse(sent.options.body), { api_name: '/book/recommend', skill_version: '1.0.5', count: 12, maxIdx: 0 })
+  const { sent: single } = await run('review_single', { reviewId: 'r1', commentsCount: 3 }, () => answer(200, { reviewId: 'r1', review: {} }))
+  assert.deepEqual(JSON.parse(single.options.body), { api_name: '/review/single', skill_version: '1.0.5', reviewId: 'r1', commentsCount: 3 })
 })
 
 adapterTest('an unreachable gateway is one plain error', async () => {

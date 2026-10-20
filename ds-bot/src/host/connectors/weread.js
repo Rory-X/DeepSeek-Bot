@@ -22,7 +22,7 @@
 // re-read from Tencent/WeChatReading's SKILL.md.
 
 const GATEWAY = '/api/agent/gateway'
-const SKILL_VERSION = '1.0.5'
+export const SKILL_VERSION = '1.0.5'
 const ORIGIN = 'https://i.weread.qq.com'
 const VERIFY_TIMEOUT_MS = 15_000
 
@@ -155,6 +155,13 @@ export default {
         baseTime: { type: 'integer', description: 'Unix seconds inside the wanted period (0 = current period). overall takes 0.' },
       },
     }, { mode: 'mode', baseTime: 'baseTime' }),
+    call('recommend', 'Personalised recommendations for this reader, from their own reading. Page with maxIdx (start 0); count defaults to 12.', '/book/recommend', {
+      type: 'object',
+      properties: {
+        count: { type: 'integer', description: 'Page size; omit for the server default (12).' },
+        maxIdx: { type: 'integer', description: 'Page offset; 0 first, then the last item\'s searchIdx.' },
+      },
+    }, { count: 'count', maxIdx: 'maxIdx' }),
     call('similar', 'Books similar to one book. count and maxIdx must both be sent: start with count 12, maxIdx 0; page with the last item\'s idx and the returned sessionId.', '/book/similar', {
       type: 'object',
       properties: {
@@ -176,6 +183,18 @@ export default {
       },
       required: ['bookId'],
     }, { bookId: 'bookId', reviewListType: 'reviewListType', count: 'count', maxIdx: 'maxIdx', synckey: 'synckey' }),
+    call('review_single', 'One public review with its comments and likes. reviewId comes from weread_reviews (reviews[].review.reviewId) or weread_my_notes.', '/review/single', {
+      type: 'object',
+      properties: {
+        reviewId: { type: 'string', description: 'Review id from weread_reviews or weread_my_notes.' },
+        commentsCount: { type: 'integer', description: 'How many comments to return.' },
+        commentsDirection: { type: 'integer', description: 'Comment paging direction.' },
+        likesCount: { type: 'integer', description: 'How many likes to return.' },
+        likesDirection: { type: 'integer', description: 'Like paging direction.' },
+        synckey: { type: 'integer', description: 'Cursor from the previous answer; 0 first.' },
+      },
+      required: ['reviewId'],
+    }, { reviewId: 'reviewId', commentsCount: 'commentsCount', commentsDirection: 'commentsDirection', likesCount: 'likesCount', likesDirection: 'likesDirection', synckey: 'synckey' }),
     call('chapter_heat', 'How many readers highlighted each passage of one chapter (counts and scores only, no text). Take chapterUid from weread_chapters.', '/book/underlines', {
       type: 'object',
       properties: {
