@@ -5,8 +5,10 @@ import { hostText, t } from './i18n.js'
 
 export function splitBotFolders(order, folders = []) {
   const assigned = new Set(folders.flatMap(folder => folder.botIds))
+  const loose = order.filter(entry => entry.kind !== 'bot' || !assigned.has(entry.item.id))
   return {
-    loose: order.filter(entry => entry.kind !== 'bot' || !assigned.has(entry.item.id)),
+    pinned: loose.filter(entry => entry.item.pinned),
+    loose: loose.filter(entry => !entry.item.pinned),
     folders: [...folders].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))).map(folder => ({ ...folder, entries: order.filter(entry => entry.kind === 'bot' && folder.botIds.includes(entry.item.id)) })),
   }
 }
@@ -41,7 +43,7 @@ export function BotFolderSection({ folder, roster, actions, useUi, renderRow }) 
     h('div', { id: panelId, hidden: closed, className: 'bt-bot-folder-rows' },
       // Keep rows mounted so unread-clearing and active-chat tracking continue when folded.
       folder.entries.map(renderRow),
-      folder.entries.length === 0 ? h('button', { type: 'button', className: 'bt-bot-folder-empty', onClick: () => actions.openBotFolders({ folderId: folder.id }) }, t('Add Bots to this folder')) : null))
+      folder.entries.length === 0 ? h('button', { type: 'button', className: 'bt-bot-folder-empty', onClick: () => actions.openBotFolders({ folderId: folder.id }) }, t('Add Bots to this folder')) : h('div', { className: 'bt-bot-folder-divider', 'aria-hidden': true })))
 }
 
 export function BotFoldersDialog({ start, roster, actions }) {
@@ -130,6 +132,7 @@ export const BOT_FOLDERS_CSS = `
 .bt-bot-folder-edit svg{width:18px;height:18px}
 .bt-bot-folder-rows{display:flex;flex-direction:column;gap:var(--bt-row-stack-gap,3px)}
 .bt-bot-folder-rows[hidden]{display:none}
+.bt-bot-folder-divider{flex:none;height:0;margin:3px var(--bt-row-inset,8px) 2px;border-top:1px solid var(--bt-line)}
 .bt-bot-folder-empty{margin:4px 12px;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:var(--bt-ink-2);font:inherit;font-size:12px;cursor:pointer;text-align:left}
 .bt-bot-folder-toggle:focus-visible,.bt-bot-folder-edit:focus-visible,.bt-bot-folder-empty:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
 .bt-bot-folders-veil{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bt-hover);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;box-sizing:border-box}

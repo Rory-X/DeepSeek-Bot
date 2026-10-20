@@ -95,18 +95,18 @@ export function install(rt) {
   const output = { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] }
   rt.ctx.tools.register(defineTool({
     name: 'list_bot_folders',
-    description: 'Read sidebar Bot folders and their members. These organize the Bot list; they are separate from group chats and projects. Use list_bots for each Bot’s role and work before deciding how to group them.',
+    description: 'Read sidebar Bot folders, their pinned status and members. These organize the Bot list; they are separate from group chats and projects. Use list_bots for each Bot’s role and work before deciding how to group them.',
     parameters: {}, output,
     async execute() {
       await rt.load()
-      return JSON.stringify(rt.botFoldersView().map(folder => ({ ...folder, bots: folder.botIds.map(id => rt.state.bots[id].name) })))
+      return JSON.stringify(rt.botFoldersView().map(folder => ({ ...folder, pinned: Boolean(folder.pinned), bots: folder.botIds.map(id => rt.state.bots[id].name) })))
     },
   }))
   rt.ctx.tools.register(defineTool({
     name: 'organize_bots',
-    description: 'Main Bot only. Organize existing Bots in sidebar folders based on their roles and work. assign creates or reuses a named folder and moves all specified Bots into it atomically; folder "" moves them out. A Bot belongs to at most one folder. rename changes a folder name; delete removes an empty folder. This never starts, stops, deletes, or messages a Bot and never creates a group chat.',
+    description: 'Main Bot only. Organize existing Bots in sidebar folders based on their roles and work. assign creates or reuses a named folder and moves all specified Bots into it atomically; folder "" moves them out. A Bot belongs to at most one folder. rename changes a folder name; pin and unpin change its priority among folders; dissolve removes a folder even when populated, returning its Bots to normal list order; delete removes only an empty folder. These actions retain Bots, chats and their work. This never starts, stops, deletes, or messages a Bot and never creates a group chat.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['assign', 'rename', 'delete'] },
+      action: { type: 'string', required: true, enum: ['assign', 'rename', 'pin', 'unpin', 'dissolve', 'delete'] },
       folder: { type: 'string', required: true, description: 'Folder name. For assign, an empty string removes the Bots from their folders.' },
       bots: { type: 'array', items: { type: 'string' }, description: 'Exact Bot names or IDs from list_bots. Required for assign; [] creates an empty folder.' },
       new_name: { type: 'string', description: 'New folder name for rename.' },
@@ -127,7 +127,7 @@ export function install(rt) {
           return bot.id
         })
       }
-      const result = await mutate(args.action, { id: args.action === 'assign' ? undefined : folder.id, name: args.action === 'rename' ? args.new_name : folderName, botIds }, exec.agent.id)
+      const result = await mutate(args.action === 'unpin' ? 'pin' : args.action, { id: args.action === 'assign' ? undefined : folder.id, name: args.action === 'rename' ? args.new_name : folderName, botIds, pinned: args.action === 'pin' }, exec.agent.id)
       return JSON.stringify({ ok: true, folder: result })
     },
   }))

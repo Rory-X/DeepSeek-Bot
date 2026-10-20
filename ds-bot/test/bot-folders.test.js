@@ -108,6 +108,46 @@ test('deleted Bots and a promoted primary Bot leave no ghost folder members', as
   await rt.botFolderMutate('delete', { id: rt.botFoldersView()[0].id })
 })
 
+test('Main Bot tools pin, unpin and dissolve populated folders without changing Bots', async () => {
+  const rt = fixture()
+  const tool = rt.ctx.registeredTools.get('organize_bots')
+  const actor = { agent: { id: 'chief-part' } }
+  rt.state.bots.auth.pinned = true
+  const bots = structuredClone(rt.state.bots)
+  await tool.execute({ action: 'assign', folder: 'connector', bots: five }, actor)
+  await tool.execute({ action: 'assign', folder: 'design', bots: ['design'] }, actor)
+  const other = rt.botFoldersView().find(folder => folder.name === 'design')
+  for (const action of ['pin', 'unpin']) {
+    const result = JSON.parse(await tool.execute({ action, folder: 'CONNECTOR' }, actor))
+    assert.equal(result.folder.pinned, action === 'pin')
+    const read = JSON.parse(await rt.ctx.registeredTools.get('list_bot_folders').execute({}, {}))
+    assert.equal(read.find(folder => folder.name === 'connector').pinned, action === 'pin')
+  }
+  await assert.rejects(tool.execute({ action: 'delete', folder: 'connector' }, actor), /Move the Bots out/)
+  assert.deepEqual(JSON.parse(await tool.execute({ action: 'dissolve', folder: 'connector' }, actor)), { ok: true, folder: null })
+  assert.deepEqual(rt.botFoldersView(), [other])
+  assert.deepEqual(rt.state.bots, bots)
+})
+
+test('folder priority and dissolve tools enforce Main Bot rights and retain state on failures', async () => {
+  const rt = fixture()
+  await rt.botFolderMutate('assign', { name: 'connector', botIds: five })
+  const tool = rt.ctx.registeredTools.get('organize_bots')
+  const actor = { agent: { id: 'chief' } }
+  const before = structuredClone(rt.state)
+  for (const action of ['pin', 'unpin', 'dissolve']) {
+    const args = { action, folder: 'connector' }
+    for (const id of ['auth', 'unknown', undefined]) await assert.rejects(tool.execute(args, { agent: { id } }), /Only a Main Bot/)
+    await assert.rejects(tool.execute({ ...args, folder: 'missing' }, actor), /No Bot folder/)
+    rt.readOnly = () => 'read-only team'
+    await assert.rejects(tool.execute(args, actor), /read-only/)
+    rt.readOnly = () => undefined
+    rt.save = async () => { throw new Error('disk full') }
+    await assert.rejects(tool.execute(args, actor), /disk full/)
+    assert.deepEqual(rt.state, before)
+  }
+})
+
 test('folder names and membership survive a real store restart', async t => {
   const home = await mkdtemp(join(tmpdir(), 'ds-bot-folder-test-'))
   let ctx = fakeContext()

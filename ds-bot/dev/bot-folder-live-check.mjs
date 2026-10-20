@@ -31,6 +31,7 @@ for (const name of ['Auth', 'Gmail', 'Slack', 'Designer', 'Writer']) await api('
 team = await api('state')
 const byName = Object.fromEntries(team.bots.map(bot => [bot.name, bot.id]))
 await api('set-flags', { id: byName.Auth, pinned: true })
+await api('set-flags', { id: byName.Designer, pinned: true })
 await until(async () => Object.keys((await api('state')).work?.turns ?? {}).length === 0, 'initial greetings finish')
 const { chromium } = await import(pathToFileURL(process.env.BOARD_PLAYWRIGHT).href)
 const browser = await chromium.launch({ headless: true, env: { ...process.env, LD_LIBRARY_PATH: process.env.UI_VERIFY_LIBS ?? '' } })
@@ -56,7 +57,11 @@ try {
   const ids = page => page.locator('.bt-list [data-bot-id]').evaluateAll(rows => rows.map(row => row.dataset.botId))
   const orderBefore = await ids(a)
   const group = (page, id) => page.locator(`[data-bot-folder-id="${id}"]`)
-  const menu = async (page, id) => { await group(page, id).locator('.bt-bot-folder-edit').click(); await page.getByRole('menu').waitFor() }
+  const menu = async (page, id) => {
+    await group(page, id).locator('.bt-bot-folder-edit').click()
+    await page.getByRole('menu').waitFor()
+    await page.getByRole('menu').evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
+  }
   const folderNames = page => page.locator('.bt-bot-folder-name').allTextContents()
   const firstFolder = async (page, id) => page.waitForFunction(id => document.querySelector('.bt-bot-folder')?.dataset.botFolderId === id, id)
 
@@ -69,9 +74,15 @@ try {
   const modelCalls = (await readFile(join(home, 'mock.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   check('real Main Bot organize_bots updates both open lists without reload', modelCalls.some(call => call.out?.some(block => block.type === 'tool_use' && block.name === 'organize_bots')) && navigations === 0)
   check('group title uses the smaller font', await group(a, connector.id).locator('.bt-bot-folder-name').evaluate(el => getComputedStyle(el).fontSize) === '13px')
-  for (const page of [a, b]) check('folders precede ungrouped rows on ' + (page === a ? 'desktop' : 'phone'), await page.locator('.bt-list').evaluate(el => {
+  for (const page of [a, b]) check('pinned rows precede folders, then ordinary rows on ' + (page === a ? 'desktop' : 'phone'), await page.locator('.bt-list').evaluate((el, byName) => {
     const children = [...el.children]
-    return children.findIndex(child => child.classList.contains('bt-bot-folder')) < children.findIndex(child => child.classList.contains('bt-row'))
+    const index = children.findIndex(child => child.classList.contains('bt-bot-folder'))
+    return children.findIndex(child => child.dataset.botId === byName.Designer) < index && index < children.findIndex(child => child.dataset.botId === byName.Writer)
+  }, byName))
+  for (const page of [a, b]) check('divider follows the last member on ' + (page === a ? 'desktop' : 'phone'), await group(page, connector.id).evaluate(el => {
+    const last = [...el.querySelectorAll('[data-bot-id]')].at(-1)
+    const divider = el.querySelector('.bt-bot-folder-divider')
+    return divider && divider.getBoundingClientRect().top >= last.getBoundingClientRect().bottom && getComputedStyle(divider).borderTopWidth === '1px'
   }))
   const planning = await api('bot-folder-save', { name: 'planning', botIds: [byName.Writer] })
   stage = 'pin and unpin'
@@ -86,11 +97,25 @@ try {
   await a.getByRole('menuitem', { name: 'Unpin folder', exact: true }).click()
   await Promise.all([a, b].map(page => firstFolder(page, connector.id)))
   check('unpinning restores the normal folder order', true)
+
+  stage = 'Main Bot pin and unpin tools'
+  await api('send', { sessionId: team.mainBotId, text: '置顶分组 planning' })
+  await Promise.all([a, b].map(page => firstFolder(page, planning.id)))
+  for (const page of [a, b]) assert.ok(await page.locator('.bt-list').evaluate((el, id) => {
+    const children = [...el.children]
+    return children.findIndex(child => child.dataset.botId === id) < children.findIndex(child => child.classList.contains('bt-bot-folder'))
+  }, byName.Designer))
+  check('Main Bot pins the folder below pinned standalone Bots in both windows', true)
+  await until(async () => Object.keys((await api('state')).work?.turns ?? {}).length === 0, 'pin tool finishes')
+  await api('send', { sessionId: team.mainBotId, text: '取消置顶分组 planning' })
+  await Promise.all([a, b].map(page => firstFolder(page, connector.id)))
+  check('Main Bot unpins the folder in both windows', (await api('state')).botFolders.find(folder => folder.id === planning.id).pinned === false)
   await group(a, connector.id).locator('.bt-bot-folder-toggle').click()
   const current = (await api('state')).botFolders.find(folder => folder.id === connector.id)
   await api('bot-folder-save', { ...current, name: 'connectors' })
   await Promise.all([a, b].map(page => group(page, connector.id).getByRole('button', { name: 'connectors', exact: true }).waitFor()))
   check('live rename preserves the existing collapse preference', await group(a, connector.id).locator('.bt-bot-folder-toggle').getAttribute('aria-expanded') === 'false')
+  check('collapsed groups hide their bottom divider', !await group(a, connector.id).locator('.bt-bot-folder-divider').isVisible())
 
   await phone.setOffline(true)
   stage = 'offline recovery'
@@ -116,9 +141,11 @@ try {
   await a.getByRole('menuitem', { name: 'Dissolve folder', exact: true }).click()
   await Promise.all([a, b].map(page => group(page, planning.id).waitFor({ state: 'detached' })))
   check('dissolving a populated folder updates both windows and retains all Bots', (await api('state')).bots.length === team.bots.length)
-  await menu(a, connector.id)
-  await a.getByRole('menuitem', { name: 'Dissolve folder', exact: true }).click()
+  await api('send', { sessionId: team.mainBotId, text: '解散分组 connectors' })
   await Promise.all([a, b].map(page => group(page, connector.id).waitFor({ state: 'detached' })))
+  const calls = (await readFile(join(home, 'mock.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+  const folderActions = calls.flatMap(call => call.out ?? []).filter(block => block.type === 'tool_use' && block.name === 'organize_bots').map(block => block.input?.action)
+  check('real Main Bot tools pin, unpin and dissolve populated folders', ['pin', 'unpin', 'dissolve'].every(action => folderActions.includes(action)))
   assert.deepEqual(await ids(a), orderBefore)
   assert.deepEqual(await ids(b), orderBefore)
   check('former members return to normal pinned and recent-activity order', (await api('state')).bots.find(bot => bot.id === byName.Auth).pinned === true)
