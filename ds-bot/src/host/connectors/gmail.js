@@ -58,10 +58,15 @@ export default {
   ],
   accountField: 'account',
   readOnly: true,
-  glyph: 'gmail',
-  about: 'Read your Gmail over IMAP: list folders, search, and read messages. Sending is not part of this connector.',
-  readOnlyNote: 'Read-only: opens the mailbox with EXAMINE and fetches bodies with BODY.PEEK, so reading a mail here never marks it as read. It never sends, deletes or moves a message.',
-  docsUrl: 'https://myaccount.google.com/apppasswords',
+  // The client draws a connector's card from `card` only: the same fields at the module's
+  // top level are carried to the view but no longer read, so the card would show a name and
+  // a Connect button with no explanation.
+  card: {
+    glyph: 'gmail',
+    about: 'Read your Gmail over IMAP: list folders, search, and read messages. Sending is not part of this connector.',
+    readOnlyNote: 'Read-only: opens the mailbox with EXAMINE and fetches bodies with BODY.PEEK, so reading a mail here never marks it as read. It never sends, deletes or moves a message.',
+    docsUrl: 'https://myaccount.google.com/apppasswords',
+  },
   // Checked once, when the card saves the credentials: a login that opens INBOX read-only.
   // The framework hands the saved form over as `secrets`; `values` is accepted too so a
   // caller may pass either.

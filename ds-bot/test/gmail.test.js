@@ -87,9 +87,9 @@ test('the connector is one read-only IMAP module the registry can load', async (
   assert.equal(gmail.mode, 'imap')
   assert.equal(gmail.accountField, 'account')
   assert.equal(gmail.readOnly, true)
-  assert.equal(gmail.glyph, 'gmail')
+  assert.equal(gmail.card.glyph, 'gmail')
   assert.equal(GMAIL_HOST, 'imap.gmail.com')
-  assert.match(gmail.docsUrl, /apppasswords/)
+  assert.match(gmail.card.docsUrl, /apppasswords/)
   assert.equal(typeof gmail.verify, 'function')
   assert.equal(typeof gmail.mount, 'function')
   assert.deepEqual(gmail.credentials.map(field => field.name), ['GMAIL_ADDRESS', 'GMAIL_APP_PASSWORD'])
@@ -110,6 +110,9 @@ test('the framework registry loads the module and maps the card onto its two cre
   assert.equal(loaded.displayName, 'Gmail')
   assert.equal(loaded.mode, 'imap')
   assert.equal(loaded.readOnly, true)
+  // The registry hands the card through as it is; the client reads it from there.
+  assert.equal(loaded.card.glyph, 'gmail')
+  assert.match(loaded.card.about, /Gmail/)
   assert.deepEqual(credentialFields(loaded).map(field => field.name), ['GMAIL_ADDRESS', 'GMAIL_APP_PASSWORD'])
   assert.deepEqual(credentialFields(loaded).map(field => field.label), ['Gmail address', 'App password'])
   assert.deepEqual(connectValues(loaded, { values: FIELDS }), FIELDS)
@@ -346,9 +349,20 @@ test('a tool error is redacted before the model reads it', async () => {
   }
 })
 
-test('the module names Gmail\'s server and card strings', () => {
+test('the client reads the card from `card`, not from the module\'s top level', () => {
   assert.equal(GMAIL_HOST, 'imap.gmail.com')
-  assert.match(gmail.about, /Gmail/)
-  assert.match(gmail.readOnlyNote, /Read-only/)
-  assert.equal(gmail.docsUrl, 'https://myaccount.google.com/apppasswords')
+  // The view carries the old top-level fields but the client draws the card from `card`
+  // only, so the top level must stay empty or the card loses its text.
+  assert.equal(gmail.about, undefined)
+  assert.equal(gmail.glyph, undefined)
+  assert.equal(gmail.readOnlyNote, undefined)
+  assert.equal(gmail.docsUrl, undefined)
+  assert.deepEqual(gmail.card, {
+    glyph: 'gmail',
+    about: 'Read your Gmail over IMAP: list folders, search, and read messages. Sending is not part of this connector.',
+    readOnlyNote: 'Read-only: opens the mailbox with EXAMINE and fetches bodies with BODY.PEEK, so reading a mail here never marks it as read. It never sends, deletes or moves a message.',
+    docsUrl: 'https://myaccount.google.com/apppasswords',
+  })
+  assert.match(gmail.card.about, /Gmail/)
+  assert.match(gmail.card.readOnlyNote, /Read-only/)
 })
