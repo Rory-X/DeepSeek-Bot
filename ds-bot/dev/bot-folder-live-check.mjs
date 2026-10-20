@@ -49,14 +49,15 @@ try {
     await page.goto(login)
     await page.locator('.bt-list').waitFor({ timeout: 60000 })
     await feed
-    await page.locator('.bt-list [data-bot-id]').first().click()
-    if (page === b) await page.locator('[data-bt-nav-back]').click()
+    await page.getByRole('button', { name: 'New Bot folder', exact: true }).click()
+    await page.locator('.bt-bot-folders-dialog').getByRole('button', { name: 'Close', exact: true }).click()
   }
   let navigations = 0
   for (const page of [a, b]) page.on('domcontentloaded', () => { navigations++ })
   const ids = page => page.locator('.bt-list [data-bot-id]').evaluateAll(rows => rows.map(row => row.dataset.botId))
   const orderBefore = await ids(a)
   const group = (page, id) => page.locator(`[data-bot-folder-id="${id}"]`)
+  const pinnedRow = (page, id) => page.locator(`.bt-list > [data-bot-id="${id}"]`)
   const menu = async (page, id) => {
     await group(page, id).locator('.bt-bot-folder-edit').click()
     await page.getByRole('menu').waitFor()
@@ -84,6 +85,29 @@ try {
     const divider = el.querySelector('.bt-bot-folder-divider')
     return divider && divider.getBoundingClientRect().top >= last.getBoundingClientRect().bottom && getComputedStyle(divider).borderTopWidth === '1px'
   }))
+
+  stage = 'pinned members above their folder'
+  const originalMembers = [...connector.botIds]
+  for (const page of [a, b]) {
+    await pinnedRow(page, byName.Auth).waitFor()
+    assert.equal(await page.locator(`.bt-list [data-bot-id="${byName.Auth}"]`).count(), 1)
+    assert.equal(await group(page, connector.id).locator(`[data-bot-id="${byName.Auth}"]`).count(), 0)
+  }
+  check('pinned folder members appear once above all folders in both windows', true)
+  await api('set-flags', { id: byName.Auth, pinned: false })
+  await Promise.all([a, b].map(page => group(page, connector.id).locator(`[data-bot-id="${byName.Auth}"]`).waitFor()))
+  assert.deepEqual((await api('state')).botFolders.find(folder => folder.id === connector.id).botIds, originalMembers)
+  check('unpinning returns a member to the same folder without changing membership', true)
+  for (const id of originalMembers) await api('set-flags', { id, pinned: true })
+  await Promise.all([a, b].map(page => page.waitForFunction(id => document.querySelector(`[data-bot-folder-id="${id}"]`)?.querySelectorAll('[data-bot-id]').length === 0, connector.id)))
+  for (const page of [a, b]) {
+    assert.equal(await group(page, connector.id).locator('.bt-bot-folder-empty,.bt-bot-folder-divider').count(), 0)
+    for (const id of originalMembers) await pinnedRow(page, id).waitFor()
+  }
+  check('a folder with all members pinned retains its heading without an empty-folder hint', true)
+  for (const id of [byName.Gmail, byName.Slack]) await api('set-flags', { id, pinned: false })
+  await Promise.all([a, b].map(page => group(page, connector.id).locator('.bt-bot-folder-divider').waitFor()))
+
   const planning = await api('bot-folder-save', { name: 'planning', botIds: [byName.Writer] })
   stage = 'pin and unpin'
   await Promise.all([a, b].map(page => group(page, planning.id).waitFor()))
@@ -116,6 +140,11 @@ try {
   await Promise.all([a, b].map(page => group(page, connector.id).getByRole('button', { name: 'connectors', exact: true }).waitFor()))
   check('live rename preserves the existing collapse preference', await group(a, connector.id).locator('.bt-bot-folder-toggle').getAttribute('aria-expanded') === 'false')
   check('collapsed groups hide their bottom divider', !await group(a, connector.id).locator('.bt-bot-folder-divider').isVisible())
+  await api('set-flags', { id: byName.Auth, pinned: false })
+  await Promise.all([a, b].map(page => group(page, connector.id).locator(`[data-bot-id="${byName.Auth}"]`).waitFor({ state: 'attached' })))
+  check('unpinning restores membership inside a collapsed group without expanding it', await group(a, connector.id).locator(`[data-bot-id="${byName.Auth}"]`).isHidden())
+  await api('set-flags', { id: byName.Auth, pinned: true })
+  await Promise.all([a, b].map(page => pinnedRow(page, byName.Auth).waitFor()))
 
   await phone.setOffline(true)
   stage = 'offline recovery'
@@ -124,7 +153,8 @@ try {
   await group(a, planning.id).getByRole('button', { name: 'delivery', exact: true }).waitFor()
   await phone.setOffline(false)
   await group(b, planning.id).getByRole('button', { name: 'delivery', exact: true }).waitFor()
-  await group(b, planning.id).locator(`[data-bot-id="${byName.Auth}"]`).waitFor()
+  await pinnedRow(b, byName.Auth).waitFor()
+  assert.equal(await group(b, planning.id).locator(`[data-bot-id="${byName.Auth}"]`).count(), 0)
   check('reconnection catches up with moves and renamed folders', (await folderNames(b)).includes('delivery'))
   await menu(b, planning.id)
   await b.getByRole('menuitem', { name: 'Pin folder', exact: true }).click()

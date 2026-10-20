@@ -14,7 +14,8 @@ import { hostText, t } from './i18n.js'
 import { showsDshRow } from './dsh-offer.js'
 import { useRowMenu } from './hold.js'
 import { BoardEntry } from './project-board.js'
-import { BotFolderSection, splitBotFolders, BOT_FOLDERS_CSS } from './bot-folders.js'
+import { BotFolderSection, BOT_FOLDERS_CSS } from './bot-folders.js'
+import { splitBotFolders } from './bot-folder-order.js'
 
 // -------------------------------------------------------------------------
 // Sidebar

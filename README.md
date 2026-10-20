@@ -23,7 +23,7 @@ The global queue shows which Bot or project each task is waiting for. Each Bot r
 
 ## Bot folders
 
-Changes made by a Main Bot or another window update open Bot lists automatically. After the Main Bot card, pinned ungrouped chats appear first, followed by pinned folders, other folders and then other ungrouped chats. Each expanded folder has a thin divider below its last Bot. The folder's **…** menu offers **Pin folder**, **Unpin folder**, **Manage folder**, and **Dissolve folder**. Dissolving returns the members to the normal list order while retaining the Bots and their chats.
+Changes made by a Main Bot or another window update open Bot lists automatically. After the Main Bot card, all pinned chats appear first, followed by pinned folders, other folders and then other ungrouped chats. Pinning a folder member shows it above the folders without changing its membership; unpinning returns it to its folder. Each expanded folder has a thin divider below its last visible Bot. The folder's **…** menu offers **Pin folder**, **Unpin folder**, **Manage folder**, and **Dissolve folder**. Dissolving returns the members to the normal list order while retaining the Bots and their chats.
 
 Use **New Bot folder** below the Bot list, or **Move to folder…** in a Bot's menu, to organize specialists by work area. Select members and save; a small folder name such as `connector` appears above its Bots. Click the name to fold or expand it. Folder headings have no counts. Membership survives restart; folding is remembered in each browser. Edit a folder to rename it or change members, and delete it once empty. Chats and running work continue normally.
 

@@ -9210,15 +9210,6 @@ var BOARD_CSS = [
 
 // src/client/bot-folders.js
 var import_react20 = require("react");
-function splitBotFolders(order, folders = []) {
-  const assigned = new Set(folders.flatMap((folder) => folder.botIds));
-  const loose = order.filter((entry) => entry.kind !== "bot" || !assigned.has(entry.item.id));
-  return {
-    pinned: loose.filter((entry) => entry.item.pinned),
-    loose: loose.filter((entry) => !entry.item.pinned),
-    folders: [...folders].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))).map((folder) => ({ ...folder, entries: order.filter((entry) => entry.kind === "bot" && folder.botIds.includes(entry.item.id)) }))
-  };
-}
 function BotFolderSection({ folder, roster, actions, useUi, renderRow }) {
   const key = `ds-bot:folder:${roster.workspaceId ?? roster.mainBotId}:${folder.id}`;
   const [closed, setClosed] = (0, import_react20.useState)(false);
@@ -9269,7 +9260,8 @@ function BotFolderSection({ folder, roster, actions, useUi, renderRow }) {
       { id: panelId, hidden: closed, className: "bt-bot-folder-rows" },
       // Keep rows mounted so unread-clearing and active-chat tracking continue when folded.
       folder.entries.map(renderRow),
-      folder.entries.length === 0 ? (0, import_react20.createElement)("button", { type: "button", className: "bt-bot-folder-empty", onClick: () => actions.openBotFolders({ folderId: folder.id }) }, t("Add Bots to this folder")) : (0, import_react20.createElement)("div", { className: "bt-bot-folder-divider", "aria-hidden": true })
+      folder.botIds.length === 0 ? (0, import_react20.createElement)("button", { type: "button", className: "bt-bot-folder-empty", onClick: () => actions.openBotFolders({ folderId: folder.id }) }, t("Add Bots to this folder")) : null,
+      folder.entries.length > 0 ? (0, import_react20.createElement)("div", { className: "bt-bot-folder-divider", "aria-hidden": true }) : null
     )
   );
 }
@@ -9424,6 +9416,20 @@ var BOT_FOLDERS_CSS = `
 .bt-bot-folders-error{font-size:13px;color:var(--bt-danger)}
 @media (max-width:640px){.bt-bot-folders-veil{padding:12px}.bt-bot-folders-dialog{padding:18px;max-height:calc(100dvh - 24px)}}
 `;
+
+// src/client/bot-folder-order.js
+function splitBotFolders(order, folders = []) {
+  const assigned = new Set(folders.flatMap((folder) => folder.botIds));
+  const unpinned = order.filter((entry) => !entry.item.pinned);
+  return {
+    pinned: order.filter((entry) => entry.item.pinned),
+    loose: unpinned.filter((entry) => entry.kind !== "bot" || !assigned.has(entry.item.id)),
+    folders: [...folders].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))).map((folder) => ({
+      ...folder,
+      entries: unpinned.filter((entry) => entry.kind === "bot" && folder.botIds.includes(entry.item.id))
+    }))
+  };
+}
 
 // src/client/sidebar.js
 var import_react21 = require("react");

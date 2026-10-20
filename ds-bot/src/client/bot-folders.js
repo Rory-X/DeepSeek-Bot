@@ -3,16 +3,6 @@ import { ChevronRightIcon, DotsIcon, CloseIcon, PinMarkIcon } from './icons.js'
 import { useEscape } from './overlay-hooks.js'
 import { hostText, t } from './i18n.js'
 
-export function splitBotFolders(order, folders = []) {
-  const assigned = new Set(folders.flatMap(folder => folder.botIds))
-  const loose = order.filter(entry => entry.kind !== 'bot' || !assigned.has(entry.item.id))
-  return {
-    pinned: loose.filter(entry => entry.item.pinned),
-    loose: loose.filter(entry => !entry.item.pinned),
-    folders: [...folders].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))).map(folder => ({ ...folder, entries: order.filter(entry => entry.kind === 'bot' && folder.botIds.includes(entry.item.id)) })),
-  }
-}
-
 export function BotFolderSection({ folder, roster, actions, useUi, renderRow }) {
   const key = `ds-bot:folder:${roster.workspaceId ?? roster.mainBotId}:${folder.id}`
   const [closed, setClosed] = useState(false)
@@ -43,7 +33,8 @@ export function BotFolderSection({ folder, roster, actions, useUi, renderRow }) 
     h('div', { id: panelId, hidden: closed, className: 'bt-bot-folder-rows' },
       // Keep rows mounted so unread-clearing and active-chat tracking continue when folded.
       folder.entries.map(renderRow),
-      folder.entries.length === 0 ? h('button', { type: 'button', className: 'bt-bot-folder-empty', onClick: () => actions.openBotFolders({ folderId: folder.id }) }, t('Add Bots to this folder')) : h('div', { className: 'bt-bot-folder-divider', 'aria-hidden': true })))
+      folder.botIds.length === 0 ? h('button', { type: 'button', className: 'bt-bot-folder-empty', onClick: () => actions.openBotFolders({ folderId: folder.id }) }, t('Add Bots to this folder')) : null,
+      folder.entries.length > 0 ? h('div', { className: 'bt-bot-folder-divider', 'aria-hidden': true }) : null))
 }
 
 export function BotFoldersDialog({ start, roster, actions }) {
