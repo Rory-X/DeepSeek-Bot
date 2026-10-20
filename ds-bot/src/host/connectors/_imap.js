@@ -162,7 +162,9 @@ export function parseHeaderValue(value) {
 }
 
 // RFC 3501's modified UTF-7: `&` starts a run of base64 of UTF-16BE, `,` stands for `/`,
-// and `&-` is a literal `&`. A folder name in a Chinese mailbox arrives this way.
+// and `&-` is a literal `&`. A folder name in a Chinese mailbox arrives this way; what the
+// tools show is the decoded name, and a folder a tool is given is encoded back before it
+// goes on the wire.
 export function decodeMailboxName(name) {
   return String(name ?? '').replace(/&([^-]*)-/g, (whole, chunk) => {
     if (chunk === '') return '&'
@@ -171,6 +173,41 @@ export function decodeMailboxName(name) {
     for (let at = 0; at + 1 < bytes.length; at += 2) units.push((bytes[at] << 8) | bytes[at + 1])
     return String.fromCharCode(...units)
   })
+}
+
+// The other direction: a display name a tool was given becomes the mailbox name the
+// protocol takes. ASCII stays as it is, `&` becomes `&-`, and a run of other characters
+// becomes one `&…-` block of unpadded UTF-16BE base64.
+export function encodeMailboxName(name) {
+  const text = String(name ?? '')
+  let out = ''
+  let chunk = ''
+  const flush = () => {
+    if (chunk === '') return
+    const little = Buffer.from(chunk, 'utf16le')
+    const big = Buffer.alloc(little.length)
+    for (let at = 0; at + 1 < little.length; at += 2) {
+      big[at] = little[at + 1]
+      big[at + 1] = little[at]
+    }
+    out += `&${big.toString('base64').replace(/\//g, ',').replace(/=+$/, '')}-`
+    chunk = ''
+  }
+  for (const char of text) {
+    if (char === '&') {
+      flush()
+      out += '&-'
+      continue
+    }
+    if (char.codePointAt(0) >= 0x20 && char.codePointAt(0) <= 0x7e) {
+      flush()
+      out += char
+      continue
+    }
+    chunk += char
+  }
+  flush()
+  return out
 }
 
 // ---------------------------------------------------------------- message text
@@ -513,7 +550,7 @@ export class ImapClient {
 
   // EXAMINE, never SELECT: the mailbox stays read-only, so a fetch cannot change flags.
   async examine(folder) {
-    const answer = await this.#command(`EXAMINE ${quote(folder)}`)
+    const answer = await this.#command(`EXAMINE ${quote(encodeMailboxName(folder))}`)
     const lines = answer.items.map(item => item.line ?? '').join('\n')
     return { messages: Number(/^\* (\d+) EXISTS/.exec(lines)?.[1] ?? 0) }
   }
@@ -563,7 +600,7 @@ export class ImapClient {
   }
 
   async select(folder) {
-    const answer = await this.#command(`SELECT ${quote(folder)}`)
+    const answer = await this.#command(`SELECT ${quote(encodeMailboxName(folder))}`)
     const lines = answer.items.map(item => item.line ?? '').join('\n')
     return { messages: Number(/^\* (\d+) EXISTS/.exec(lines)?.[1] ?? 0) }
   }
@@ -583,10 +620,10 @@ export class ImapClient {
   async move(uids, folder) {
     const list = uidList(uids)
     if ((await this.capabilities()).has('MOVE')) {
-      await this.#command(`UID MOVE ${list} ${quote(folder)}`)
+      await this.#command(`UID MOVE ${list} ${quote(encodeMailboxName(folder))}`)
       return 'MOVE'
     }
-    await this.#command(`UID COPY ${list} ${quote(folder)}`)
+    await this.#command(`UID COPY ${list} ${quote(encodeMailboxName(folder))}`)
     await this.#command(`UID STORE ${list} +FLAGS.SILENT (\\Deleted)`)
     return 'COPY'
   }
@@ -600,20 +637,20 @@ export class ImapClient {
 
   async append(folder, { flags = [], date, raw } = {}) {
     if (!Buffer.isBuffer(raw) || raw.length === 0) throw new Error('A draft needs a message body.')
-    const parts = [`APPEND ${quote(folder)}`]
+    const parts = [`APPEND ${quote(encodeMailboxName(folder))}`]
     if (flags.length > 0) parts.push(`(${flagsOf(flags)})`)
     if (typeof date === 'string' && date !== '') parts.push(quote(date))
     await this.#commandLiteral(parts.join(' '), raw)
   }
 
-  // The folder whose flag, or else whose display name, matches: answered as the raw name
-  // the server sent (a write has to name the mailbox exactly as LIST did).
+  // The folder whose flag, or else whose display name, matches. It answers the display
+  // name, like LIST does: a command encodes it again, so the same name travels both ways.
   async folderMatching({ flag, names, label }) {
     const folders = await this.list()
     const match = folders.find(folder => folder.flags.some(value => value.toUpperCase() === flag))
       ?? folders.find(folder => names.test(folder.name))
     if (match === undefined) throw new Error(`The mailbox has no ${label} folder.`)
-    return match.wire ?? match.name
+    return match.name
   }
 
   // APPEND carries a literal body: the tagged line announces its length, then the bytes
