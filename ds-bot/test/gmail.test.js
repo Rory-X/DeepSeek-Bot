@@ -102,7 +102,14 @@ test('the connector is one read-only IMAP module the registry can load', async (
   assert.equal(mounted.mailbox, ADDRESS)
   assert.deepEqual(mounted.tools.map(tool => tool.name), GMAIL_TOOLS)
   await mounted.close()
-  assert.deepEqual(GMAIL_TOOLS, ['gmail_list_folders', 'gmail_search', 'gmail_list_messages', 'gmail_get_message'])
+  assert.deepEqual(GMAIL_TOOLS, [
+    'gmail_list_folders',
+    'gmail_search',
+    'gmail_list_messages',
+    'gmail_get_message',
+    'gmail_list_attachments',
+    'gmail_read_attachment',
+  ])
 })
 
 test('the framework registry loads the module and maps the card onto its two credentials', () => {
@@ -372,6 +379,7 @@ test('the module declares a read default and the capabilities the write level ad
   const keys = gmail.capabilities.map(capability => capability.key)
   assert.deepEqual(keys, [
     'read_mail',
+    'read_attachments',
     'mark_read',
     'label_mail',
     'archive_mail',
@@ -380,9 +388,7 @@ test('the module declares a read default and the capabilities the write level ad
     'delete_mail',
     'send_mail',
   ])
-  // Attachment reads are the only read capability still to come; sending a draft is out
-  // of this round, and permanent/batch/settings never appear.
-  assert.equal(keys.includes('read_attachments'), false)
+  // Sending a draft is out of this round; permanent/batch/settings never appear.
   for (const capability of gmail.capabilities) {
     assert.ok(['read', 'write', 'destructive'].includes(capability.risk), capability.key)
     assert.equal(typeof capability.title, 'string')
@@ -398,7 +404,8 @@ test('the module declares a read default and the capabilities the write level ad
   assert.equal(keys.some(key => /permanent|batch|settings|filter|forward|signature/.test(key)), false)
   // Every capability names a mounted tool family, and nothing the round did not wire.
   const capabilityTools = {
-    read_mail: GMAIL_TOOLS,
+    read_mail: ['gmail_list_folders', 'gmail_search', 'gmail_list_messages', 'gmail_get_message'],
+    read_attachments: ['gmail_list_attachments', 'gmail_read_attachment'],
     mark_read: ['gmail_mark_read', 'gmail_mark_unread'],
     label_mail: ['gmail_add_labels', 'gmail_remove_labels'],
     archive_mail: ['gmail_archive'],
@@ -414,7 +421,8 @@ test('the module declares a read default and the capabilities the write level ad
   }
   // The summary tells the reader what the mounted tools do, and nothing else.
   const declarationText = [gmail.permissions.summary, ...gmail.capabilities.flatMap(capability => [capability.title, capability.description])].join(' ')
-  assert.doesNotMatch(declarationText, /attachment/i)
+  assert.doesNotMatch(declarationText, /save_attachment|permanent delete|batch delete|filter|signature/i)
+  assert.match(gmail.permissions.summary, /attachment/i)
   assert.match(gmail.permissions.summary, /mark/i)
   assert.match(gmail.permissions.summary, /label/i)
   assert.match(gmail.permissions.summary, /archive/i)

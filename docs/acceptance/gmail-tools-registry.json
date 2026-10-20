@@ -23,6 +23,14 @@
       {
         "name": "gmail_get_message",
         "description": "Read one message of a Gmail folder: headers and its plain text body (read-only)."
+      },
+      {
+        "name": "gmail_list_attachments",
+        "description": "List the attachments of one Gmail message with their names, types and sizes (read-only)."
+      },
+      {
+        "name": "gmail_read_attachment",
+        "description": "Read a text attachment of one Gmail message (read-only; other types are refused with their type and size)."
       }
     ],
     "write": [
@@ -41,6 +49,14 @@
       {
         "name": "gmail_get_message",
         "description": "Read one message of a Gmail folder: headers and its plain text body (read-only)."
+      },
+      {
+        "name": "gmail_list_attachments",
+        "description": "List the attachments of one Gmail message with their names, types and sizes (read-only)."
+      },
+      {
+        "name": "gmail_read_attachment",
+        "description": "Read a text attachment of one Gmail message (read-only; other types are refused with their type and size)."
       },
       {
         "name": "gmail_mark_read",
@@ -89,8 +105,6 @@
     ]
   },
   "unregistered": [
-    "gmail_list_attachments",
-    "gmail_read_attachment",
     "gmail_save_attachment",
     "gmail_delete_permanent",
     "gmail_empty_trash",

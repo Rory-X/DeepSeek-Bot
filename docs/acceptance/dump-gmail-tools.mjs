@@ -22,9 +22,7 @@ process.stdout.write(`${JSON.stringify({
   levels: { default: gmail.defaultLevel, available: gmail.levels },
   tiers: { read, write },
   unregistered: [
-    // Read surface still to come: attachments.
-    'gmail_list_attachments',
-    'gmail_read_attachment',
+    // Saving an attachment to disk waits for a path policy.
     'gmail_save_attachment',
     // Never this connector: permanent delete, batch delete, draft sending, settings.
     'gmail_delete_permanent',

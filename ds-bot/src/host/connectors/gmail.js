@@ -23,7 +23,14 @@ export const GMAIL_ADDRESS_SECRET = 'GMAIL_ADDRESS'
 export const GMAIL_APP_PASSWORD_SECRET = 'GMAIL_APP_PASSWORD'
 // The four tools the shared core builds for `<id>`. Kept here so the card, the tests and
 // the declaration for QA name the same list.
-export const GMAIL_TOOLS = ['gmail_list_folders', 'gmail_search', 'gmail_list_messages', 'gmail_get_message']
+export const GMAIL_TOOLS = [
+  'gmail_list_folders',
+  'gmail_search',
+  'gmail_list_messages',
+  'gmail_get_message',
+  'gmail_list_attachments',
+  'gmail_read_attachment',
+]
 // What the write level adds: the shared IMAP write session's mailbox tools and the shared
 // SMTP helper's send tools. Labels and archive wait for the shared core's label extension;
 // sending a draft is not part of this round.
@@ -77,6 +84,8 @@ export function createGmailTools({ credential, account, redact, connect, timeout
     // Gmail understands its own search syntax through X-GM-RAW; the shared core offers the
     // `query` argument and the raw search key only when a connector asks for them.
     gmailQuery: true,
+    // Attachment list and text read are read-only tools and need no approval.
+    attachments: true,
   })
 }
 
@@ -109,6 +118,7 @@ export default {
   // mounted tool list, which the framework keeps empty at the read level.
   capabilities: [
     { key: 'read_mail', title: 'Read and search mail', description: 'List folders, search messages and read them without changing anything.', risk: 'read' },
+    { key: 'read_attachments', title: 'Read attachments', description: 'List the attachments of a message and read the text of one, up to 20000 characters; binary attachments are named by type and size only.', risk: 'read' },
     { key: 'mark_read', title: 'Mark mail read or unread', description: 'Change the read flag of up to 10 messages per call.', risk: 'write', preview: { change: 'Changes the read flag only', reversible: true } },
     { key: 'label_mail', title: 'Add or remove labels', description: 'Apply existing labels to up to 10 messages per call; labels are never created.', risk: 'write', preview: { change: 'Only the named labels change', reversible: true } },
     { key: 'archive_mail', title: 'Archive mail', description: 'Remove up to 10 messages from the inbox and keep them in All Mail.', risk: 'write', preview: { change: 'Removes the inbox label', reversible: true } },
@@ -117,7 +127,7 @@ export default {
     { key: 'delete_mail', title: 'Delete mail', description: 'Delete up to 10 messages per call, or permanently when the call asks for it.', risk: 'destructive', preview: { change: 'Deletes messages', reversible: true } },
     { key: 'send_mail', title: 'Send, reply and forward', description: 'Send mail as you, to at most 20 recipients per message; a send cannot be undone.', risk: 'destructive', preview: { change: 'Sends a message from your account', reversible: false } },
   ],
-  permissions: { summary: 'Reads your mail. With full capabilities it can mark, label, archive, move and trash mail, save drafts, and send from your address.' },
+  permissions: { summary: 'Reads your mail and attachments. With full capabilities it can mark, label, archive, move and trash mail, save drafts, and send from your address.' },
   // The framework mounts the shared IMAP write tools and the shared SMTP tools at the
   // write level when a module opts in; the read tools stay in this module's mount.
   imap: { host: GMAIL_HOST, port: 993, mailbox: 'INBOX', gmail: true, write: true },

@@ -120,11 +120,11 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 16. **标签存在性预检**：执行前 `LIST` 取现有标签；不存在 → 清晰错误、0 条 STORE，绝不隐式创建。
 17. **取原文时机**：需要引用时，原文正文在批准后读取；弹卡阶段只取最小头字段，因此批准前不会有原文进入任何持久化位置。
 
-## 8. 工具声明（3b 接线，base `e8cf27c`）
+## 8. 工具声明（3b 最终接线，base `b5fafb0`）
 
 访问级别：`read` / `write`，默认 `read`；read 级别下写工具**不存在**。
 
-**read 档（常驻 4 个）**
+**read 档（常驻 6 个，含只读附件工具）**
 
 | 工具 | description 原文 |
 | --- | --- |
@@ -132,8 +132,10 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 | `gmail_search` | Search the connected Gmail mailbox and answer message UIDs (read-only). |
 | `gmail_list_messages` | List the newest messages of a Gmail folder with sender, date and subject (read-only). |
 | `gmail_get_message` | Read one message of a Gmail folder: headers and its plain text body (read-only). |
+| `gmail_list_attachments` | List the attachments of one Gmail message with their names, types and sizes (read-only). |
+| `gmail_read_attachment` | Read a text attachment of one Gmail message (read-only; other types are refused with their type and size). |
 
-**write 档（在 read 之上新增 11 个：共享 IMAP 写会话 8 个 + 共享 SMTP 3 个；每次调用先弹审批卡）**
+**write 档新增 11 个（在 read 之上；write 级实际挂载 = read 6 + 新增 11 = 17；每次调用先弹审批卡）**
 
 | 工具 | description 原文 |
 | --- | --- |
@@ -151,7 +153,7 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 
 **未注册（负向断言）**
 
-- 等 `_imap.js` 附件解析：`gmail_list_attachments`、`gmail_read_attachment`、`gmail_save_attachment`。
+- `gmail_save_attachment`：落盘路径策略未定。
 - 永不做：`gmail_delete_permanent`、`gmail_empty_trash`、`gmail_delete_many`、`gmail_batch_delete`、`gmail_send_draft`、`gmail_settings`、`gmail_set_auto_forward`、`gmail_create_filter`、`gmail_set_signature`。
 
 机器可读注册表由运行期脚本生成（不是手写）：
@@ -160,7 +162,7 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 node docs/acceptance/dump-gmail-tools.mjs > docs/acceptance/gmail-tools-registry.json
 ```
 
-当前输出：read 4 个、write 15 个（4 read + 8 IMAP 写 + 3 SMTP）。
+当前输出：read 6 个；write 级 17 个（read 6 + 写/发 11）。
 
 ## 9. 单测计划（实现时随代码交付）
 
@@ -185,11 +187,11 @@ node docs/acceptance/dump-gmail-tools.mjs > docs/acceptance/gmail-tools-registry
 6. **声明形状**：`levels: ['read','write']`、`defaultLevel: 'read'`、`capabilities`（read/write/destructive，send 不可逆、trash 30 天可恢复）、`permissions.summary`、`imap.write: true`、`smtp: { host, port }`。
 
 
-## 11. 接线状态（3b 底座 `e8cf27c`）
+## 11. 接线状态（3b 最终底座 `b5fafb0`）
 
 - 框架已把 `level` 与 `approve({tool,line,danger,change,reversible,target,exec})` 注入 `mount`；Gmail 的 `mount` 接受 `{ secrets, redact, state, level, approve, connect }`。
-- read 档挂 4 个只读工具；write 档调共享 `createImapWriteTools`（P3：mark_read/mark_unread/move_messages/delete_messages/save_draft，另传 `gmailLabels:true` 得到 add_labels/remove_labels/archive）和 `createSmtpTools`（P4：send_email/reply_email/forward_email），每个工具的 execute 先 `await approve(...)`，拒绝/超时/取消 → 0 连接。
+- read 档挂 6 个只读工具（`createImapTools` 传 `gmailQuery:true, attachments:true`，多出 list_attachments/read_attachment，均不进审批）；write 档调共享 `createImapWriteTools`（P3：mark_read/mark_unread/move_messages/delete_messages/save_draft，另传 `gmailLabels:true` 得到 add_labels/remove_labels/archive）和 `createSmtpTools`（P4：send_email/reply_email/forward_email），每个写/发工具 execute 先 `await approve(...)`，拒绝/超时/取消 → 0 连接。
 - 卡面预览字段：模块在转发 `approve` 时按工具补 `change` 与 `reversible`（mark/move/draft/trash 可恢复，发送类 `reversible:false` 触发“不可撤回”确认）；框架负责 redact/截断与按 `exec.agent.id` 定向。
 - 本分支**不再带 `_smtp.js` 副本**：底座 `9cd333e` 自带框架版，直接 import。
-- `label`/`archive` 已在 3b 接线（gmailLabels 开关）；附件读取等 `_imap.js` 的附件解析；`send_draft` 不做。
+- `label`/`archive` 与只读附件读取均已在 3b 接线；`save_attachment`（落盘）不做；`send_draft` 不做。
 - 框架只有 `read`/`write` 两级，没有单独的 send 开关；Probe 的三档矩阵按 `read / write` 两档映射（发送工具属于 write 档）。
