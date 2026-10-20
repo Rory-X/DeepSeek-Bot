@@ -3,7 +3,7 @@
 > 用于 Probe 的只读核对。源码只有两个文件：`ds-bot/src/host/connectors/weread.js`、
 > `ds-bot/test/weread.test.js`（另有截图脚本 `ds-bot/dev/shots-weread.mjs`）。本文不是设计文档，
 > 只记录「接了什么、拒了什么、边界在哪」。
-> 分支 `feat/connector-weread`，基于冻结底座 `integ/connector-base-v2 @ ea71e4f`（锚现网 `40db3213`）。
+> 分支 `feat/connector-weread-v3`，基于框架 P1 `06dd4e5`（第二批最终树 `8ec91cc` 之上）。
 > 适配器用例在底座缺席的中间 rebase 上会自动 skip，底座在场时全跑。
 
 ## 1. 形态
@@ -82,7 +82,7 @@
   只转发声明参数（含模型走私 `api_name`/`path`/`url` 的负例）、鉴权错误不回显 key、
   业务错误取 `errmsg`（不是 "answered 499"）、网络失败归一、空结果不算失败、POST 校验成功/401/业务码/不可达。
 - `test/connectors.test.js`（底座已改为只比内置行）：**32 / 32 pass**，外部模块不再撞全等断言。
-- 全仓 `npm test`（本 branch，基于 `8ec91cc`）：**1032 tests / 1030 pass / 0 fail / 2 skip**，全绿。
+- 全仓 `npm test`（本 branch，基于框架 P1 `06dd4e5`）：**1044 tests / 1042 pass / 0 fail / 2 skip**，全绿。
 - `node scripts/build-client.mjs --check` → exit 0；`npm run lint` → 0 errors。
 - 目录 watchdog：`node dev/weread-catalog-check.mjs`（手动/月度，不随请求跑）——`/_list` 快照存在
   `docs/evidence/weread/catalog.json`，比对新增/消失端点与参数变化，并核对上游 SKILL.md 版本；
@@ -138,10 +138,9 @@
 - **错误映射（已实现）**：模块 `envelope` 把成功判定为「2xx 且 errcode 缺失或 0」，业务失败取 `errmsg`
   （如 `WeRead: 参数格式错误`），`-2010`/`-2013` 映射为 "did not accept this token or key"，
   `errlog` 不外传。真 key 实测：业务错误不再显示 "answered 499"。
-- **`resultMax` 在 envelope 分支被忽略（底座 bug）**：`rest-tools.js` 只在无 envelope 的分支用
-  `definition.resultMax`；微信读书有 envelope，所以 `shelf` 声明的 40k 上限没生效，28k 的书架仍被 20k 截断
-  （JSON 不完整）。需要 Forge 在 envelope 分支同样应用 `definition.resultMax`；修复 `6a4bd9f` 已好但
-  不进第一批，排第二增量，届时 rebase 后再验 40k。
+- **`resultMax`（已修，随第二批最终树 `8ec91cc` 进来）**：`rest-tools.js` 的 envelope 分支现在同样取
+  `definition.resultMax ?? REST_RESULT_MAX`，`shelf` 的 40k 上限生效。真 key 复验书架返回完整 JSON、无
+  `result cut:`（本线 28,199 字符；Probe 独立复跑 30,011 字符，均完整）。
 - **mock vs 真实**：单测全部 mock fetch；真实调用做了形状核对 + `verify` 实测通过，但没有跑真实数据的
   数值/单位校验。
 - **连接/卸载/重启**：连接态、secret 删除后的卸载、重启后按 secret 重新挂载都归
