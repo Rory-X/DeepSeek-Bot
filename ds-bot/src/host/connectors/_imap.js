@@ -830,7 +830,6 @@ export class ImapClient {
     const structure = parseStructureExpression(text.slice(at + 'BODYSTRUCTURE'.length))
     return structureParts(structure)
       .filter(part => part.disposition === 'ATTACHMENT' || part.filename !== undefined)
-      .slice(0, ATTACH_MAX_COUNT)
   }
 
   async fetchStructure(uid) {
@@ -1103,7 +1102,12 @@ export function createImapTools({ id, displayName, credential, account, host, po
         const attachments = await imap.listAttachments(uid)
         if (attachments.length === 0) return `No attachment in message UID ${uid}.`
         const shown = attachments.slice(0, ATTACH_MAX_COUNT)
-        return [`${attachments.length} attachment(s) in message UID ${uid}:`, ...shown.map(entry => `[${entry.index}] ${entry.filename} (${entry.type}, ${entry.size} bytes)`)].join('\n')
+        // A message with more attachments than the tool lists says how many were left out,
+        // so "N attachment(s)" never reads as if it were the whole list.
+        const header = shown.length < attachments.length
+          ? `${attachments.length} attachment(s) in message UID ${uid} (showing first ${shown.length}):`
+          : `${attachments.length} attachment(s) in message UID ${uid}:`
+        return [header, ...shown.map(entry => `[${entry.index}] ${entry.filename} (${entry.type}, ${entry.size} bytes)`)].join('\n')
       }),
     },
     {

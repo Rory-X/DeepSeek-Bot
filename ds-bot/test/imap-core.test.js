@@ -431,6 +431,11 @@ const ATTACH_STRUCTURE = '(("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 21
   '("APPLICATION" "PDF" ("NAME" "report.pdf") NIL NIL "BASE64" 1234 NIL NIL ("ATTACHMENT" ("filename" "../../evil.pdf")) NIL NIL)' +
   '("TEXT" "PLAIN" ("CHARSET" "UTF-8" "NAME" "=?UTF-8?B?5Lya6K6uLnR4dA==?=") NIL NIL "BASE64" 12 1 NIL ("ATTACHMENT" ("FILENAME" "=?UTF-8?B?5Lya6K6uLnR4dA==?=")) NIL NIL)' +
   ' "MIXED" ("BOUNDARY" "x") NIL NIL NIL)'
+const manyAttachmentStructure = (count) => '(' + Array.from({ length: count }, (_, index) => {
+  const name = `part-${index + 1}.txt`
+  return `("TEXT" "PLAIN" ("CHARSET" "UTF-8" "NAME" "${name}") NIL NIL "BASE64" 10 1 NIL ("ATTACHMENT" ("FILENAME" "${name}")) NIL NIL)`
+}).join('') + ')'
+
 const ATTACH_LITERAL = Buffer.from('aGVsbG8gYXR0YWNobWVudA==', 'utf8') // base64 of "hello attachment"
 
 const attachmentServer = ({ structure = ATTACH_STRUCTURE } = {}) => imapServer({
@@ -474,6 +479,14 @@ test('attachments are listed by name, type and size, never by content', async ()
   assert.match(listed, /\[2\] evil\.pdf \(APPLICATION\/PDF, 1234 bytes\)/)
   assert.match(listed, /\[3\] 会议\.txt \(TEXT\/PLAIN, 12 bytes\)/)
   assert.ok(!listed.includes('aGVsbG8'))
+})
+
+test('a message with more attachments than the limit says how many were shown', async () => {
+  const server = attachmentServer({ structure: manyAttachmentStructure(51) })
+  const tools = gmailRead(server)
+  const listed = await readTool(tools, 'list_attachments').execute({ uid: 9 })
+  assert.match(listed, /51 attachment\(s\) in message UID 9 \(showing first 50\):/)
+  assert.equal(listed.split('\n').length, 51)
 })
 
 test('a text attachment is read with BODY.PEEK, and a non-text one is refused without content', async () => {
