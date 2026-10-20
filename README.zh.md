@@ -90,6 +90,18 @@ ds bot 拥有群聊功能。群聊是非常好的多 bot 协作方式，但它�
 
 设置 → **连接器** 可以连接外部服务，连接后每个 bot 都能使用该服务的工具。GitHub（`GITHUB_TOKEN`）或 Vercel（`VERCEL_TOKEN`）只需连接一次：token 保存在密钥里，只在 MCP 连接中使用。GitHub 的工具名是 `mcp__github__…`；Vercel 只读连接，工具如 `vercel_list_projects`、`vercel_get_runtime_logs`。Vercel 的四个部署动作默认关闭：在连接器里打开后，每次调用前会在聊天里显示一张审批卡（允许一次 / 拒绝），不批准就什么都不会发出。另有一个工具箱开关，打开后会加上 `vercel_search_tools` 和 `vercel_call`，用搜索触达 Vercel 的全部能力；写操作仍需在这张卡上批准，会返回凭据或环境变量值的工具一律不提供。**Cloudflare** 用 OAuth 连接：点 Connect，在 Cloudflare 页面上同意只读权限即可，授权保存在 DSH 的凭据存储里而不是密钥里。它挂载 14 个具名只读工具（`cloudflare_get_zones`、`cloudflare_get_zones_dns_records`、分析类与 Workers 读取等）。可选的 **Full capabilities** 开关会加上 `cloudflare_search_tools` / `cloudflare_call`，覆盖服务器全部端点：GET/HEAD 直接读，任何写操作都先在审批卡上批准，会铸造或读取凭据的端点一律不提供；不走 Cloudflare 的代码执行工具。
 
+
+#### Telegram 通知
+
+Telegram 用你自己的 bot 发出 Bot 被要求发送的消息。
+
+1. 打开 [@BotFather](https://t.me/BotFather)，发送 `/newbot`，复制它给你的 token。
+2. 设置 → **连接器** → **Telegram**：粘贴 token，点 **Connect**。Telegram 接受 token 后，卡片上会显示 bot 的 username。
+3. 在 Telegram 里先给你的新 bot 发一条任意消息，然后点 **Test message**。连接器会找到这个私聊并向它发送一条测试消息。
+4. 如果 bot 收到多个 chat，或者你想发给群：在卡片上手动填 chat id（数字，群是负数），再点一次 **Test message**。留空会清除它。
+
+连接完成后，Bot 用 `notify_telegram(text)` 发消息，最多 4,096 字符。token 只放在密钥里，不会出现在 view、团队文件或日志中。
+
 ### 用量
 
 在 设置 → 用量 里，可以按时间、按 bot、按模型查看 Token 用量。

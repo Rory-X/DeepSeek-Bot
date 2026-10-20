@@ -90,6 +90,18 @@ Settings → **Capabilities** is a shared library of MCP servers, skills and pac
 
 Settings → **Connectors** connects outside services whose tools every Bot can use. Connect GitHub (`GITHUB_TOKEN`) or Vercel (`VERCEL_TOKEN`) once: the token stays in Secrets and only the MCP connection carries it. GitHub's tools are `mcp__github__…`; Vercel is connected read-only, with tools such as `vercel_list_projects` and `vercel_get_runtime_logs`. Vercel's four deployment actions are off by default: turn them on in the connector and each call first shows a card in the chat (Allow once / Deny); nothing is sent unless you allow it. A separate toolbox switch adds `vercel_search_tools` and `vercel_call`, reaching every Vercel capability by search; writes still ask on that card and tools that return credentials or environment values are never offered. **Cloudflare** connects with OAuth instead: press Connect, approve the read permissions on Cloudflare's page, and the grant is kept in DSH's credential store rather than in Secrets. It mounts 14 named read tools (`cloudflare_get_zones`, `cloudflare_get_zones_dns_records`, analytics and Workers reads, …). An optional **Full capabilities** switch adds `cloudflare_search_tools` / `cloudflare_call` over the whole endpoint list: GET/HEAD calls read directly, every change asks on the approval card first, and endpoints that mint or read credentials are never offered. Nothing runs through Cloudflare's code-execution tool.
 
+
+#### Telegram notifications
+
+Telegram sends a message a Bot was asked to send, from a bot of your own.
+
+1. Open [@BotFather](https://t.me/BotFather), send `/newbot`, and copy the token it gives you.
+2. Settings → **Connectors** → **Telegram**: paste the token and press **Connect**. The card shows the bot's username once Telegram accepts the token.
+3. In Telegram, send your new bot any message, then press **Test message**. The connector finds that private chat and sends a test message to it.
+4. Choose the chat by hand when the bot hears from several chats, or for a group: type the chat id on the card (a number, negative for a group) and press **Test message** again. An empty value clears it.
+
+Once connected, Bots send with `notify_telegram(text)`, up to 4,096 characters. The token stays in Secrets and never appears in a view, the team file or a log.
+
 ### Usage
 
 In **Settings** → **Usage**, you can see token usage by time, by bot and by model.
