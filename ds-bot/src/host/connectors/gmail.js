@@ -30,6 +30,19 @@ export const GMAIL_TOOLS = ['gmail_list_folders', 'gmail_search', 'gmail_list_me
 export const GMAIL_WRITE_TOOLS = ['gmail_mark_read', 'gmail_mark_unread', 'gmail_move_messages', 'gmail_delete_messages', 'gmail_save_draft']
 export const GMAIL_SEND_TOOLS = ['gmail_send_email', 'gmail_reply_email', 'gmail_forward_email']
 export const GMAIL_SMTP = { host: 'smtp.gmail.com', port: 465 }
+// What the card shows beside the line for each write: what changes and whether it can be
+// undone. The framework writes these onto the approval question; a send is the one that
+// cannot be undone. Tools not listed get the line and danger only.
+const GMAIL_APPROVAL_PREVIEW = {
+  mark_read: { change: 'Changes the read flag only', reversible: true },
+  mark_unread: { change: 'Changes the read flag only', reversible: true },
+  move_messages: { change: 'Moves messages between folders', reversible: true },
+  delete_messages: { change: 'Moves messages to Trash, restorable for 30 days', reversible: true },
+  save_draft: { change: 'Creates a draft, sends nothing', reversible: true },
+  send_email: { change: 'Sends a message from your account', reversible: false },
+  reply_email: { change: 'Sends a reply from your account', reversible: false },
+  forward_email: { change: 'Sends a message from your account', reversible: false },
+}
 
 // A connect-time check: the address and app password log in and INBOX opens read-only.
 // The shared core accepts the older one-string `address:secret` form too, which is what
@@ -113,6 +126,12 @@ export default {
     const account = { mailbox: secrets[GMAIL_ADDRESS_SECRET] }
     const read = createGmailTools({ credential, account, redact })
     if (levelNow !== 'write' || typeof approve !== 'function') return read
+    // The helpers know their line and danger; this module supplies the preview fields the
+    // card needs (what changes, and whether the call can be undone).
+    const approveWrite = (request) => {
+      const key = String(request?.tool ?? '').replace(/^gmail_/, '')
+      return approve({ ...request, ...GMAIL_APPROVAL_PREVIEW[key] })
+    }
     const mailbox = createImapWriteTools({
       id: GMAIL_ID,
       displayName: 'Gmail',
@@ -121,7 +140,7 @@ export default {
       host: GMAIL_HOST,
       port: 993,
       redact,
-      approve,
+      approve: approveWrite,
       ...(connect === undefined ? {} : { connect }),
     })
     const send = createSmtpTools({
@@ -131,7 +150,7 @@ export default {
       account,
       smtp: GMAIL_SMTP,
       redact,
-      approve,
+      approve: approveWrite,
       ...(connect === undefined ? {} : { connect }),
     })
     return { tools: [...read.tools, ...mailbox, ...send], close: read.close }

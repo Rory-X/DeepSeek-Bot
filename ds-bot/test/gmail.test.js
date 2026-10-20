@@ -486,6 +486,8 @@ test('a send asks the approval hook first, with the card line and the running Se
     const text = await send.execute({ to: ['a@b.com'], subject: 'Hi', text: 'body' }, { agent: { id: 'm1' } })
     assert.match(seen.line, /Send to a@b\.com/)
     assert.equal(seen.danger, true)
+    assert.equal(seen.reversible, false)
+    assert.match(seen.change, /Sends a message from your account/)
     assert.equal(seen.exec.agent.id, 'm1')
     assert.match(text, /^Sent to a@b\.com/)
     assert.equal(server.state.connections, 1)
@@ -497,17 +499,21 @@ test('a send asks the approval hook first, with the card line and the running Se
 
 test('a denied mailbox write opens no IMAP connection', async () => {
   const server = imapServer()
+  let seen
   const mounted = gmail.mount({
     secrets: FIELDS,
     redact: String,
     level: 'write',
-    approve: async () => { throw new Error('The user denied this write.') },
+    approve: async (request) => { seen = request; throw new Error('The user denied this write.') },
     connect: server.connect,
   })
   try {
     const tool = mounted.tools.find(item => item.name === 'gmail_mark_read')
     await assert.rejects(tool.execute({ uids: [1] }, { agent: { id: 'm1' } }), /denied/)
     assert.equal(server.sockets.length, 0)
+    assert.equal(seen.exec.agent.id, 'm1')
+    assert.equal(seen.reversible, true)
+    assert.match(seen.change, /read flag/)
   } finally {
     mounted.close()
   }

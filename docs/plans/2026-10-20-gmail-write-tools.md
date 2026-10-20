@@ -187,6 +187,7 @@ node docs/acceptance/dump-gmail-tools.mjs > docs/acceptance/gmail-tools-registry
 
 - 框架已把 `level` 与 `approve({tool,line,danger,change,reversible,target,exec})` 注入 `mount`；Gmail 的 `mount` 接受 `{ secrets, redact, state, level, approve, connect }`。
 - read 档挂 4 个只读工具；write 档调共享 `createImapWriteTools`（P3：mark_read/mark_unread/move_messages/delete_messages/save_draft）和 `createSmtpTools`（P4：send_email/reply_email/forward_email），每个工具的 execute 先 `await approve(...)`，拒绝/超时/取消 → 0 连接。
+- 卡面预览字段：模块在转发 `approve` 时按工具补 `change` 与 `reversible`（mark/move/draft/trash 可恢复，发送类 `reversible:false` 触发“不可撤回”确认）；框架负责 redact/截断与按 `exec.agent.id` 定向。
 - 本分支**不再带 `_smtp.js` 副本**：底座 `9cd333e` 自带框架版，直接 import。
 - `label`/`archive` 等共享核心的 label 扩展；附件读取等 `_imap.js` 的附件解析；`send_draft` 不做。
 - 框架只有 `read`/`write` 两级，没有单独的 send 开关；Probe 的三档矩阵按 `read / write` 两档映射（发送工具属于 write 档）。
