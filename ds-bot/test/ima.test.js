@@ -9,8 +9,13 @@ import connector, {
   IMA_REST_TOOLS,
   IMA_WRITE_PATHS,
   IMA_WRITE_TOOLS,
+  IMA_URL_RULES,
+  assertImportUrls,
   approvalFor,
   auth,
+  buildWriteBody,
+  createImaWriteTools,
+  validateWriteArgs,
   imaAnswer,
   imaError,
   verifyIma,
@@ -46,11 +51,12 @@ test('the module is a rest-tools connector the registry can load by its default 
   ])
 })
 
-test('the declaration covers exactly the nine read calls, all POST and read-only', () => {
+test('the declaration covers exactly the ten read calls, all POST and read-only', () => {
   assert.deepEqual(IMA_REST_TOOLS.map(tool => tool.name).sort(), [
     'get_kb',
     'get_media',
     'get_note',
+    'list_addable_kb',
     'list_kb',
     'list_notebooks',
     'list_notes',
@@ -193,7 +199,7 @@ test('the card copy lives under card, where the client reads it', () => {
 const mounted = (fetch, secrets = { [IMA_CLIENT_ID_SECRET]: CLIENT_ID, [IMA_API_KEY_SECRET]: API_KEY }) =>
   createRestTools('ima', connector, { secrets, output: { schema: { type: 'string' }, render: () => [] }, fetch })
 
-test('the adapter mounts all nine tools under the ima id', { skip: noAdapter }, () => {
+test('the adapter mounts all ten read tools under the ima id', { skip: noAdapter }, () => {
   const names = mounted(async () => answer(200, envelope({}))).map(tool => tool.name)
   assert.deepEqual(names, [
     'ima_search_notes',
@@ -205,6 +211,7 @@ test('the adapter mounts all nine tools under the ima id', { skip: noAdapter }, 
     'ima_search_kb',
     'ima_search_kb_list',
     'ima_get_media',
+    'ima_list_addable_kb',
   ])
   for (const tool of mounted(async () => answer(200, envelope({})))) {
     assert.equal(tool.parameters.type, 'object')
@@ -216,6 +223,9 @@ test('each mounted tool POSTs to ima.qq.com with both headers and only its mappe
   const calls = []
   const tools = mounted(async (url, init) => { calls.push([url, init]); return answer(200, envelope({ notes: [] })) })
   const byName = Object.fromEntries(tools.map(tool => [tool.name, tool]))
+  // The builder is the write-side whitelist: an argument the declaration does not name is
+  // dropped before a body exists.
+  assert.deepEqual(buildWriteBody(IMA_WRITE_TOOLS[0], { content: '# x', admin: true }), { content_format: 1, content: '# x' })
   const callsOf = [
     ['ima_search_notes', { query: '周报', start: 0, end: 20 }, { query_info: { title: '周报', content: '周报' }, start: 0, end: 20 }],
     ['ima_list_notebooks', { cursor: '0', limit: 20 }, { cursor: '0', limit: 20 }],
@@ -226,6 +236,7 @@ test('each mounted tool POSTs to ima.qq.com with both headers and only its mappe
     ['ima_search_kb', { query: 'q', cursor: '', knowledge_base_id: 'kb1' }, { query: 'q', cursor: '', knowledge_base_id: 'kb1' }],
     ['ima_search_kb_list', { query: '', cursor: '', limit: 1 }, { query: '', cursor: '', limit: 1 }],
     ['ima_get_media', { media_id: 'm1' }, { media_id: 'm1' }],
+    ['ima_list_addable_kb', { cursor: '', limit: 1 }, { cursor: '', limit: 1 }],
   ]
   for (const [name, args] of callsOf) assert.equal(await byName[name].execute(args), '{"notes":[]}', name)
   assert.equal(calls.length, callsOf.length)
@@ -263,17 +274,17 @@ test('the adapter unwraps ima answers, and a 429 stays a rate limit whatever the
 // Third batch: the write declarations exist but are not wired into the mounted tool list
 // until the shared adapter accepts `write: true`. These tests pin the draft shape.
 test('the write declarations cover the third batch and cannot run yet', () => {
-  assert.deepEqual(IMA_WRITE_TOOLS.map(tool => tool.name), ['create_note', 'append_note', 'add_note_to_kb', 'import_url', 'list_addable_kb'])
+  assert.deepEqual(IMA_WRITE_TOOLS.map(tool => tool.name), ['create_note', 'append_note', 'add_note_to_kb', 'import_url'])
   for (const tool of IMA_WRITE_TOOLS) {
     assert.equal(tool.method, 'POST', tool.name)
+    assert.equal(tool.write, true, tool.name)
     assert.match(tool.path, /^\/openapi\/(note|wiki)\/v1\//, tool.name)
     assert.ok(tool.description.length > 20, tool.name)
-    if (tool.name === 'list_addable_kb') assert.equal(tool.readOnly, true, tool.name)
-    else assert.equal(tool.write, true, tool.name)
   }
-  // The mounted read surface stays the nine read tools: a write definition in `restTools`
+  // Read level mounts ten read tools and no write tool: a write definition in `restTools`
   // would be refused by the adapter until the write contract lands.
   assert.equal(connector.restTools, IMA_REST_TOOLS)
+  assert.equal(connector.restTools.length, 10)
   assert.equal(connector.restTools.some(tool => tool.write === true), false)
   assert.deepEqual(connector.levels, ['read', 'write'])
   assert.equal(connector.defaultLevel, 'read')
@@ -304,17 +315,21 @@ test('the write declarations map only declared arguments or constants', () => {
 test('a write call says what it will change and that it cannot be undone', () => {
   const created = approvalFor('create_note', { content: 'x'.repeat(42) })
   assert.match(created.line, /Create an ima note \(42 characters\)/)
+  assert.match(created.line, /cannot be undone/)
   assert.equal(created.danger, false)
   assert.equal(created.reversible, false)
   assert.equal(created.change, 'creates a new note')
   const appended = approvalFor('append_note', { note_id: 'n-1', content: 'abc' })
   assert.match(appended.line, /Append 3 characters to ima note n-1/)
+  assert.match(appended.line, /cannot be undone/)
   assert.equal(appended.target, 'n-1')
   assert.equal(appended.reversible, false)
   const added = approvalFor('add_note_to_kb', { note_id: 'n-1', knowledge_base_id: 'kb-1' })
   assert.match(added.line, /Add ima note n-1 to knowledge base kb-1/)
+  assert.match(added.line, /cannot be undone/)
   const imported = approvalFor('import_url', { knowledge_base_id: 'kb-1', urls: ['https://a.example/1', 'https://a.example/2'] })
-  assert.match(imported.line, /Import 2 URLs into knowledge base kb-1: https:\/\/a\.example\/1/)
+  assert.match(imported.line, /Import 2 URLs into knowledge base kb-1 \(first: https:\/\/a\.example\/1\)/)
+  assert.match(imported.line, /cannot be undone/)
   const single = approvalFor('import_url', { knowledge_base_id: 'kb-1', urls: ['https://a.example/1'] })
   assert.match(single.line, /Import 1 URL into/)
   // The framework cuts the line again; a 400-character body still yields a short line.
@@ -357,4 +372,134 @@ test('capabilities describe the write batch without registering a tool', () => {
   // Display only: the mounted tool names are still the nine read ones.
   const mountedNames = connector.restTools.map(tool => tool.name)
   for (const item of IMA_CAPABILITIES) assert.equal(mountedNames.includes(item.key), false, item.key)
+})
+
+// Probe's import-url rules: a URL the host must not hand to ima is refused before the card
+// and before any request, so the outbound count stays zero.
+test('import URLs are refused before anything is sent', () => {
+  assert.deepEqual(assertImportUrls(['https://example.com/a', 'http://example.com/b']), ['https://example.com/a', 'http://example.com/b'])
+  assert.deepEqual(IMA_URL_RULES.protocols, ['http:', 'https:'])
+  assert.ok(IMA_URL_RULES.deniedHosts.includes('bilibili.com'))
+  assert.ok(IMA_URL_RULES.deniedHosts.includes('youtube.com'))
+  const refused = [
+    'file:///etc/passwd',
+    'ftp://example.com/a',
+    'javascript:alert(1)',
+    'https://www.bilibili.com/video/BV1',
+    'https://b23.tv/abc',
+    'https://www.youtube.com/watch?v=1',
+    'https://youtu.be/abc',
+    'http://localhost/a',
+    'http://localhost.localdomain/a',
+    'http://127.0.0.1/a',
+    'http://10.1.2.3/a',
+    'http://192.168.1.1/a',
+    'http://172.20.1.1/a',
+    'http://169.254.1.1/a',
+    'http://[::1]/a',
+    'http://host.local/a',
+    'not a url at all',
+    '',
+  ]
+  for (const url of refused) assert.throws(() => assertImportUrls([url]), /ima cannot import|ima imports|Not a URL|URL to import/, url)
+  assert.throws(() => assertImportUrls([]), /at least one URL/)
+  assert.throws(() => assertImportUrls(Array.from({ length: 11 }, (_, index) => `https://example.com/${index}`)), /at most 10/)
+  assert.throws(() => validateWriteArgs('import_url', { urls: ['file:///etc/passwd'] }), /http\(s\) URLs only/)
+  // Only import_url carries the URL rules.
+  assert.doesNotThrow(() => validateWriteArgs('create_note', { content: 'x' }))
+})
+
+test('the fallback mount offers write tools only at write level', () => {
+  const output = { schema: { type: 'string' }, render: () => [] }
+  assert.deepEqual(createImaWriteTools({ level: 'read', output }), [])
+  assert.deepEqual(createImaWriteTools({ level: 'write', output }).map(tool => tool.name), [
+    'ima_create_note',
+    'ima_append_note',
+    'ima_add_note_to_kb',
+    'ima_import_url',
+  ])
+})
+
+test('a refused write sends nothing and an invalid URL never reaches the card', async () => {
+  const output = { schema: { type: 'string' }, render: () => [] }
+  const approve = async () => { throw new Error('denied') }
+  let asked = 0
+  const fetch = async () => { asked += 1; return answer(200, envelope({})) }
+  const [create] = createImaWriteTools({ level: 'write', output, approve, fetch })
+  await assert.rejects(create.execute({ content: '# hi' }), /denied/)
+  assert.equal(asked, 0)
+
+  let carded = 0
+  let sent = 0
+  const [, , , importUrl] = createImaWriteTools({
+    level: 'write',
+    output,
+    approve: async () => { carded += 1 },
+    fetch: async () => { sent += 1; return answer(200, envelope({})) },
+  })
+  await assert.rejects(importUrl.execute({ knowledge_base_id: 'kb', folder_id: 'kb', urls: ['file:///etc/passwd'] }), /http\(s\) URLs only/)
+  assert.equal(carded, 0)
+  assert.equal(sent, 0)
+})
+
+test('a write sends only mapped fields and asks with target, change and reversibility', async () => {
+  const output = { schema: { type: 'string' }, render: () => [] }
+  const cards = []
+  const calls = []
+  const tools = createImaWriteTools({
+    level: 'write',
+    output,
+    secrets: { [IMA_CLIENT_ID_SECRET]: CLIENT_ID, [IMA_API_KEY_SECRET]: API_KEY },
+    approve: async summary => { cards.push(summary) },
+    fetch: async (url, init) => { calls.push([url, init]); return answer(200, envelope({ note_id: 'n-new' })) },
+  })
+  const byName = Object.fromEntries(tools.map(tool => [tool.name, tool]))
+  // The builder is the write-side whitelist: an argument the declaration does not name is
+  // dropped before a body exists.
+  assert.deepEqual(buildWriteBody(IMA_WRITE_TOOLS[0], { content: '# x', admin: true }), { content_format: 1, content: '# x' })
+
+  assert.equal(await byName.ima_create_note.execute({ content: '# Weekly', folder_id: 'f-1', admin: true, injected: 'no' }), '{"note_id":"n-new"}')
+  const [createUrl, createInit] = calls[0]
+  assert.equal(createUrl, `${IMA_BASE}/openapi/note/v1/import_doc`)
+  assert.equal(createInit.method, 'POST')
+  assert.equal(createInit.headers['ima-openapi-clientid'], CLIENT_ID)
+  assert.equal(createInit.headers['ima-openapi-apikey'], API_KEY)
+  assert.equal(createInit.headers['content-type'], 'application/json')
+  assert.deepEqual(JSON.parse(createInit.body), { content_format: 1, content: '# Weekly', folder_id: 'f-1' })
+  assert.equal(cards[0].tool, 'create_note')
+  assert.match(cards[0].line, /Create an ima note/)
+  assert.match(cards[0].line, /cannot be undone/)
+  assert.equal(cards[0].change, 'creates a new note')
+  assert.equal(cards[0].reversible, false)
+  assert.equal(cards[0].danger, false)
+
+  await byName.ima_append_note.execute({ note_id: 'n-1', content: 'more' })
+  assert.deepEqual(JSON.parse(calls[1][1].body), { note_id: 'n-1', content_format: 1, content: 'more' })
+  assert.equal(cards[1].target, 'n-1')
+  assert.match(cards[1].line, /Append 4 characters to ima note n-1/)
+
+  await byName.ima_add_note_to_kb.execute({ knowledge_base_id: 'kb-1', note_id: 'n-1', title: 'Weekly' })
+  assert.deepEqual(JSON.parse(calls[2][1].body), { media_type: 11, title: 'Weekly', knowledge_base_id: 'kb-1', note_info: { content_id: 'n-1' } })
+  assert.equal(cards[2].target, 'kb-1')
+  assert.match(cards[2].line, /Add ima note n-1 to knowledge base kb-1/)
+
+  await byName.ima_import_url.execute({ knowledge_base_id: 'kb-1', folder_id: 'kb-1', urls: ['https://example.com/a', 'https://example.com/b'] })
+  assert.deepEqual(JSON.parse(calls[3][1].body), { knowledge_base_id: 'kb-1', folder_id: 'kb-1', urls: ['https://example.com/a', 'https://example.com/b'] })
+  assert.match(cards[3].line, /Import 2 URLs into knowledge base kb-1/)
+  assert.equal(cards[3].target, 'kb-1')
+})
+
+test('a write maps HTTP and business failures the way the read path does', async () => {
+  const output = { schema: { type: 'string' }, render: () => [] }
+  const build = response => createImaWriteTools({ level: 'write', output, approve: async () => {}, fetch: async () => response })[0]
+  await assert.rejects(build({ status: 429, ok: false, text: async () => '' }).execute({ content: 'x' }), /rate limiting/)
+  await assert.rejects(build(answer(200, { code: 100009, msg: '内容过大' })).execute({ content: 'x' }), /split it into smaller parts/)
+  await assert.rejects(build(answer(200, { code: 310001, msg: '' })).execute({ content: 'x' }), /notebook does not exist/)
+  const ok = build(answer(200, envelope({ note_id: 'n-1' })))
+  assert.equal(await ok.execute({ content: 'x' }), '{"note_id":"n-1"}')
+  // A body the declaration did not map is refused before the request.
+  let asked = 0
+  const [safe] = createImaWriteTools({ level: 'write', output, approve: async () => {}, fetch: async () => { asked += 1; return answer(200, envelope({})) } })
+  await assert.rejects(safe.execute({ content: { nested: 'no' } }), /must be text, a number, a boolean or a list/)
+  assert.equal(asked, 0)
 })

@@ -76,7 +76,13 @@
 
 ## 第三批：写能力接入计划（2026-10-20 定，未开工）
 
-状态（2026-10-20）：不依赖框架的部分已先落进模块——`IMA_WRITE_TOOLS`（P0/P1/P2 的 5 条声明草案，含 `write: true` 与 `approval`）、`approvalFor()` 文案、`IMA_CAPABILITIES` / `IMA_PERMISSIONS` 展示清单、`levels: ['read','write']`、notes/knowledge-base 两套错误码。它们**未接进 `restTools`**，所以现有挂载面仍是 9 个只读工具；等 Forge 的写契约冻结后再接线。
+状态（2026-10-20 3b）：写能力的模块侧已就位，等 P2 接线。
+- 读级 10 个工具：原 9 个 + `ima_list_addable_kb`（`get_addable_knowledge_base_list`，只读、常驻、不弹卡）。
+- 写级再挂 4 个：`ima_create_note` / `ima_append_note` / `ima_add_note_to_kb` / `ima_import_url`，声明在 `IMA_WRITE_TOOLS`（`write: true` + `approval`），P2 到来前**未进 `restTools`**，所以现在一个写工具也注册不了。
+- 审批行统一带「This cannot be undone through the API.」，`reversible: false`、`change`/`target` 按语义给（note_id / kb_id / URL 数量）；框架 redact + 截 200 字。
+- URL 前置校验：`assertImportUrls()` 在弹卡与发请求之前拒绝 `file://`、非 http(s)、B 站 / YouTube / b23.tv、`localhost` / `.local` / 环回 / 私网 / 链路本地地址；规则在 `IMA_URL_RULES` 可逐条断言。
+- 兜底挂载 `createImaWriteTools({ level, secrets, approve })`：read 级返回空，write 级返回 4 个工具；复用共享口径（只发映射字段、20 s 超时、双 header、先审批后发送、拒绝零请求），等 P2 核心收敛后改接 `restTools`。
+- `levels: ['read','write']`、`defaultLevel: 'read'`、`IMA_CAPABILITIES` / `IMA_PERMISSIONS`、notes/knowledge-base 两套错误码均已声明。
 
 范围（按审批卡逐次确认）：
 
