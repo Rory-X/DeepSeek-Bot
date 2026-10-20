@@ -62,6 +62,27 @@ does not name never reaches the request; no header comes from model arguments; r
 redacted and cut at 20,000 characters; any other method is refused when the tools are
 built. There is no generic pass-through or proxy.
 
+## Notification connectors
+
+`mode: 'notify'` sends one message the user asked for. The module brings the service; the
+framework brings everything the card and the tool need.
+
+- Module: one token (`credentials`/`tokenSecret`), `needsChatId: true` when the service
+  sends to a chat, `verify({ token, secrets, api }) → { account? }`, and
+  `notify: { send({ token, chatId, text, secrets, api }), discoverChatId({ token, secrets,
+  api }) → { chatId?, candidates? }, maxText?, testText?, toolName?, toolDescription?,
+  chatIdPattern?, chatIdHint?, missingChatText?, multipleChatsText? }`.
+- The framework registers `notify_<id>` (one `text` argument) only while the token and,
+  when the service needs one, a chat id exist. A valid token without a chat is still
+  connected: the view says `mode: 'notify'`, `chatId: null`, `canTest: true`, and the card
+  asks the user to message the bot first.
+- `connector-connect` verifies the token, saves it and runs `discoverChatId` once;
+  `connector-test` sends one test message through `send` (discovering the chat first when
+  missing) and reports a failure on the row without disconnecting; `connector-set-chat`
+  stores a typed chat id or clears it with an empty string. All three return the whole view.
+- The chat id lives in the team file; the token stays in Secrets and never appears in a
+  view, a log or an error.
+
 ## Tests
 
 - `ds-bot/test/connector-registry.test.js`: loading, ordering, ignored files, every

@@ -317,6 +317,8 @@ export function install(rt) {
         case 'connector-retry':
         case 'connector-set-actions':
         case 'connector-set-toolbox':
+        case 'connector-test':
+        case 'connector-set-chat':
         case 'connector-oauth-start':
           await rt.load()
           return ok(await rt.connectorEndpoint(endpoint, body, meta))

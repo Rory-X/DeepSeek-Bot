@@ -21,6 +21,7 @@ import { createApprovalDesk } from './connector-approval.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
 import { credentialFields, connectValues } from './connector-setup.js'
 import { externalConnectors } from './connectors/registry.js'
+import { chatIdOf, createNotifyTool, NOTIFY_TEST_TEXT, parseChatId } from './notify.js'
 import { createOAuthFlow } from './oauth/flow.js'
 import { createRestTools } from './rest-tools.js'
 import { output } from './tools.js'
@@ -409,6 +410,52 @@ export function install(rt) {
     }
   }
 
+  // A notification connector's token is its first credential; the chat id lives in the
+  // team file and is found at connect time, typed by the user, or looked for again by Test.
+  const tokenNameOf = connector => connector.tokenSecret ?? credentialFields(connector)[0]?.name
+  const notifyTokenOf = (connector) => {
+    const name = tokenNameOf(connector)
+    return name === undefined ? undefined : rt.secretValue(name)
+  }
+  // A module asks its service which chat wrote to the bot. A failure leaves the connector
+  // connected: the card asks the user to message the bot and Test looks again.
+  const discoverChat = async (connector, token) => {
+    const hook = connector.notify?.discoverChatId
+    if (typeof hook !== 'function' || token === undefined) return {}
+    const found = await hook({ token, secrets: secretMapOf(connector), api: connector.api })
+    return found !== null && typeof found === 'object' && !Array.isArray(found) ? found : {}
+  }
+  const rememberChat = (id, found) => {
+    if (typeof found?.chatId !== 'string' || found.chatId === '') return false
+    state.connectors = { ...state.connectors, [id]: { ...state.connectors?.[id], chatId: found.chatId } }
+    return true
+  }
+
+  // The send tool exists only while the connector has a token and a chat to send to. A
+  // valid token without a chat is still connected; the card asks for that first message.
+  function mountNotify(id) {
+    const connector = options[id]
+    const tokenName = tokenNameOf(connector)
+    if (tokenName === undefined) throw new Error(`${connector.displayName} has no token credential`)
+    if (typeof connector.notify?.send !== 'function') throw new Error(`${connector.displayName} has no send hook`)
+    if (connector.needsChatId === true && chatIdOf(state, id) === undefined) return { token: credentialKeyOf(connector), dispose: [] }
+    const dispose = [ctx.tools.register(createNotifyTool({
+      name: connector.notify.toolName ?? `notify_${id}`,
+      description: connector.notify.toolDescription ?? `Send a message through ${connector.displayName}. Use it for notifications the user asked for.`,
+      maxText: connector.notify.maxText,
+      output,
+      redact: rt.redactSecrets,
+      send: text => connector.notify.send({
+        token: rt.secretValue(tokenName),
+        chatId: chatIdOf(state, id),
+        text,
+        secrets: secretMapOf(connector),
+        api: connector.api,
+      }),
+    }))]
+    return { token: credentialKeyOf(connector), dispose }
+  }
+
   // A mounted OAuth tool the server refuses (401/403) asks for one refresh. A failed
   // refresh marks the connector for Reconnect; the tool call fails with its reason.
   const refreshFor = id => async () => {
@@ -618,7 +665,7 @@ export function install(rt) {
           statuses.set(id, { state: 'error', error: reason(error) })
           return
         }
-      } else if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
+      } else if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom' || connector.mode === 'notify') {
         token = configuredOf(connector) ? credentialKeyOf(connector) : undefined
       } else {
         token = rt.secretValue(connector.tokenSecret)
@@ -643,9 +690,11 @@ export function install(rt) {
       await claimAccount(id, token, replaced)
       if (stopped || mounts.get(id) !== attempt) return
     }
-    if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
+    if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom' || connector.mode === 'notify') {
       try {
-        const mounted = connector.mode === 'rest-tools' ? mountRestTools(id) : mountConnectorTools(id)
+        const mounted = connector.mode === 'rest-tools'
+          ? mountRestTools(id)
+          : connector.mode === 'notify' ? mountNotify(id) : mountConnectorTools(id)
         if (stopped || mounts.get(id) !== attempt) {
           for (const undo of mounted.dispose) undo()
           mounted.close?.()
@@ -720,6 +769,7 @@ export function install(rt) {
     if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
       return configuredOf(connector) ? state.connectors?.[id]?.account ?? null : null
     }
+    if (connector.mode === 'notify') return notifyTokenOf(connector) === undefined ? null : state.connectors?.[id]?.account ?? null
     if (rt.secretValue(connector.tokenSecret) === undefined) return null
     return state.connectors?.[id]?.[connector.accountField] ?? null
   }
@@ -739,6 +789,14 @@ export function install(rt) {
       ...(oauthConnector ? { oauth: true } : {}),
       ...((connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom')
         ? { mode: connector.mode, inputs: credentialFields(connector) }
+        : {}),
+      ...(connector.mode === 'notify'
+        ? {
+            mode: 'notify',
+            chatId: connector.needsChatId === true ? chatIdOf(state, id) ?? null : null,
+            canTest: notifyTokenOf(connector) !== undefined,
+            inputs: credentialFields(connector),
+          }
         : {}),
       ...(connector.card === undefined ? {} : { card: connector.card }),
       ...Object.fromEntries(['readOnly', 'readOnlyNote', 'glyph', 'about', 'docsUrl']
@@ -765,9 +823,13 @@ export function install(rt) {
       if (connector.mode === 'oauth-mcp') throw new Error(`${connector.displayName} connects with OAuth, not a token`)
       const token = typeof body.token === 'string' ? body.token.trim() : ''
       if (insecure(body.id)) throw new Error(insecureText(body.id))
-      if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
+      if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom' || connector.mode === 'notify') {
         await rt.loadSecrets()
-        const values = connectValues(connector, body)
+        // A single-token card may still post `token`; the module's declared credential
+        // takes that value under its own name.
+        const fields = credentialFields(connector)
+        const single = fields.length === 1 && (body.values === null || typeof body.values !== 'object')
+        const values = connectValues(connector, single ? { ...body, values: { [fields[0].name]: body.token } } : body)
         const account = await verifyConnector(body.id, connector, values)
         state.connectors = { ...state.connectors, [body.id]: { ...switchesOf(body.id), ...account, connectedAt: Date.now() } }
         try {
@@ -778,6 +840,15 @@ export function install(rt) {
         } catch (error) {
           delete state.connectors[body.id]
           throw error
+        }
+        // The chat the bot already hears from is filled in now. A token without a chat
+        // still connects: the card asks for the first message and Test looks again.
+        if (connector.mode === 'notify' && connector.needsChatId === true) {
+          try {
+            rememberChat(body.id, await discoverChat(connector, values[tokenNameOf(connector)]))
+          } catch (error) {
+            rt.warn('ds-bot: could not look for the %s chat: %s', connector.displayName, reason(error))
+          }
         }
         await rt.save()
         await sync(body.id, true)
@@ -836,6 +907,53 @@ export function install(rt) {
     async 'connector-retry'(body) {
       known(body.id)
       await rt.loadSecrets()
+      await sync(body.id, true)
+      return connectorsView()
+    },
+    // One test message through the module's real send path. The token is good, so a
+    // failure shows on the card without turning the connector off.
+    async 'connector-test'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.mode !== 'notify') throw new Error('This connector has no test message')
+      await rt.loadSecrets()
+      const token = notifyTokenOf(connector)
+      if (token === undefined) throw new Error('Connect this connector first')
+      const tested = (error) => {
+        statuses.set(body.id, error === undefined ? { state: 'ready' } : { state: 'ready', error })
+        return connectorsView()
+      }
+      if (connector.needsChatId === true && chatIdOf(state, body.id) === undefined) {
+        let found
+        try {
+          found = await discoverChat(connector, token)
+        } catch (error) {
+          return tested(reason(error))
+        }
+        if (Array.isArray(found.candidates)) return tested(connector.notify.multipleChatsText ?? 'Several chats are available: type the chat id you want.')
+        if (!rememberChat(body.id, found)) return tested(connector.notify.missingChatText ?? 'Message the bot first, then press Test again.')
+        await rt.save()
+        await sync(body.id, true)
+      }
+      try {
+        const text = typeof connector.notify.testText === 'string' && connector.notify.testText !== '' ? connector.notify.testText : NOTIFY_TEST_TEXT
+        await connector.notify.send({ token, chatId: chatIdOf(state, body.id), text, secrets: secretMapOf(connector), api: connector.api })
+      } catch (error) {
+        return tested(reason(error))
+      }
+      return tested(undefined)
+    },
+    // A typed chat id, or an empty string to clear it and wait for the next message.
+    async 'connector-set-chat'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.needsChatId !== true) throw new Error('This connector has no chat id')
+      const chatId = parseChatId(connector, body.chatId)
+      const prior = { ...state.connectors?.[body.id] }
+      if (chatId === undefined) delete prior.chatId
+      else prior.chatId = chatId
+      state.connectors = { ...state.connectors, [body.id]: prior }
+      await rt.save()
       await sync(body.id, true)
       return connectorsView()
     },
