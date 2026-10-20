@@ -101,6 +101,8 @@ Vercel is read-only by default. In Settings → Connectors you can turn on its f
 
 Connector modules live in `ds-bot/src/host/connectors/`: each file exports one connector and the plugin loads it at start, so a new service is one file plus its tests (see `docs/plans/2026-10-20-connector-modules.md`).
 
+**Telegram** sends notifications from a bot you make with @BotFather. Open [@BotFather](https://t.me/BotFather), send `/newbot` and copy the token; in Settings → **Connectors** → **Telegram** paste it and press **Connect**, and the card shows the bot's username. The chat to send to is the private chat the bot already hears from: send the bot a message first, then press **Test message**, and the connector fills the chat id in and sends a test message. A chat id can also be typed — a number, negative for a group — and an empty value clears it. `notify_telegram(text)` then sends an ordinary message up to 4,096 characters; the token stays in Secrets and never reaches the team file, a view or a log. A profile can hide the connector with `telegram: false`.
+
 ## Models
 
 Model providers are set up with dsh's `llm-pi-ai` plugin in `cordis.patch.yml`. Every Bot runs on one model of its own, from the models DSH serves. A new team's first Main Bot has none: its chat opens on a model card and it greets the user only after a pick. The Create Bot form starts on the DSH default model. The Bot's details panel and settings (or a Main Bot's `update_bot`) change it; a Bot whose model is no longer served shows the card again. A team saved by an older version keeps the model each Bot last ran on.
