@@ -107,12 +107,7 @@ const instanceOf = (connector) => {
     max: Number.isInteger(value.max) && value.max > 0 ? value.max : null,
   }
 }
-// What the add button calls one more of the module's items; a module without its own words
-// keeps the generic line. The soft cap is the host's, and only a guess when it names none.
-const INSTANCE_ADD = {
-  neon: () => t('Add a Neon project'),
-}
-const instanceAddText = base => (INSTANCE_ADD[base] ?? (() => t('Add another connection')))()
+// The soft cap is the host's, and only a guess when it names none.
 const INSTANCE_SOFT_MAX = 8
 const instanceMax = instance => (instance.max === null ? (instance.base === 'neon' ? INSTANCE_SOFT_MAX : null) : instance.max)
 
@@ -155,7 +150,6 @@ const capabilityItem = (entry, index) => {
     available: entry?.available !== false,
   }
 }
-
 function statusText(connector) {
   if (connector.state === 'connecting') return connector.oauth === true ? t('Waiting for the browser…') : t('Connecting…')
   // The host writes an OAuth failure as a sentence; it is shown as it came.
@@ -172,7 +166,37 @@ function statusText(connector) {
   return cardAbout(connector) ?? (connector.oauth === true ? t('Not connected') : '')
 }
 
-function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }) {
+// A project authorization is one project's grant, not the module: its own connection state,
+// its own access level, its own errors.
+function authorizationStatus(connector) {
+  if (connector.state === 'connecting') return connector.oauth === true ? t('Waiting for the browser…') : t('Connecting…')
+  if (connector.state === 'error') return connector.error ?? t('Could not connect')
+  if (connector.state === 'ready') {
+    return connector.account ? t('Connected as {account}', { account: connector.account }) : t('Connected')
+  }
+  return t('Not connected')
+}
+
+// The module's own card: one connection with the host, and the project authorizations it
+// keeps under it. The base connection reads across every project; a write needs a grant
+// bound to one project, and those are counted here.
+function groupStatusText(base, count) {
+  if (base.state === 'connecting') return t('Waiting for the browser…')
+  if (base.state === 'error') return base.error ?? t('Could not connect')
+  if (base.state !== 'ready') return t('Not connected')
+  if (count === 0) return t('Connected · Read-only (all projects)')
+  return count === 1
+    ? t('Connected · 1 project authorization')
+    : t('Connected · {count} project authorizations', { count })
+}
+
+const declaredSettingsOf = (connector) => (Array.isArray(connector.settings)
+  ? connector.settings.filter(field => field !== null && typeof field?.name === 'string' && field.name !== '')
+  : [])
+
+const levelsOfConnector = (connector) => (Array.isArray(connector.levels) ? connector.levels.filter(entry => entry !== null) : [])
+
+function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = useState(false)
   // The credential values, by the secret name the host declared; a form with one field is
   // the token field the cards always had.
@@ -183,39 +207,6 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
   // service without dynamic registration asks for first.
   const oauth = connector.oauth === true
   const manual = oauth && connector.manualClient === true
-  // One row of a multi-instance module: the card names the module and lets the reader
-  // rename or remove this instance; other rows are untouched by either.
-  const instance = instanceOf(connector)
-  const isInstance = instance !== null
-  // The settings a connector declares are plain text, shown with the stored value: they
-  // decide which address or project the mounted level runs against, not who the user is.
-  const declaredSettings = Array.isArray(connector.settings)
-    ? connector.settings.filter(field => field !== null && typeof field?.name === 'string' && field.name !== '')
-    : []
-  // The card's own name is a plain label the reader types, kept apart from the module's
-  // settings; when the host already sends it as one, that field is the name.
-  const labelField = isInstance && !declaredSettings.some(field => field.name === 'label')
-    ? { name: 'label', label: t('Name'), value: instance.label, placeholder: connector.name }
-    : null
-  const settings = labelField === null ? declaredSettings : [labelField, ...declaredSettings]
-  const [settingDraft, setSettingDraft] = useState(null)
-  const settingValue = (field) => {
-    if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name]
-    return typeof field.value === 'string' ? field.value : ''
-  }
-  const settingsChanged = settings.some(field => settingValue(field) !== (typeof field.value === 'string' ? field.value : ''))
-  const saveSettings = () => {
-    if (busy || !settingsChanged) return
-    const values = Object.fromEntries(settings.map(field => [field.name, settingValue(field).trim()]))
-    void run(actions.connectorSetSettings(connector.id, values), () => setSettingDraft(null))
-  }
-  // Removing an instance asks once, in place: the grant it deletes cannot be restored.
-  const [removeAsk, setRemoveAsk] = useState(false)
-  const lastInstance = isInstance && instanceCount <= 1
-  const removeInstance = () => {
-    if (busy) return
-    void run(actions.connectorDeleteInstance(connector.id), () => setRemoveAsk(false))
-  }
   // The fields a connector declares (`credentials` on the host): the card draws one masked
   // input per field and sends them together as `values`. A host that declares none keeps the
   // single token field, labelled for its service.
@@ -242,6 +233,70 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
   const [appId, setAppId] = useState('')
   const [appSecret, setAppSecret] = useState('')
   const [authorizeUrl, setAuthorizeUrl] = useState(null)
+  const run = (task, after) => {
+    setBusy(true)
+    setError(null)
+    return task.then(() => { after?.() }, failure => setError(failure?.message ?? String(failure))).finally(() => setBusy(false))
+  }
+  const complete = () => fields.every(field => !field.required || given(field) !== '')
+  const connect = () => {
+    if (busy || !complete()) return
+    const filled = {}
+    for (const field of fields) {
+      const value = given(field)
+      if (value !== '') filled[field.name] = value
+    }
+    const done = () => { setValues({}); setChatDraft(null); setForm(false) }
+    const submit = () => declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token)
+    if (notify) {
+      const chatId = chatValue.trim()
+      // The chat id typed beside the secret is saved once the token is known to be good.
+      void run(submit().then(() => (chatId === '' ? undefined : actions.connectorSetChat(connector.id, chatId))), done)
+      return
+    }
+    // A host that declares its fields takes them as `values`; an older one takes the token.
+    void run(submit(), done)
+  }
+  const saveChat = () => {
+    if (busy) return
+    void run(actions.connectorSetChat(connector.id, chatValue.trim()), () => setChatDraft(null))
+  }
+  const on = connector.state !== 'off'
+  // Write access is what the connector declares: its level, its capabilities in its own
+  // order, and a line about its permissions. Nothing here switches them on or off; the
+  // level is the setting, and a change asks the host for a new grant.
+  const levels = levelsOfConnector(connector)
+  const currentLevel = typeof connector.level === 'string' ? connector.level : null
+  const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter(entry => entry !== null && typeof entry === 'object') : []
+  const capWrites = capabilities.some((entry) => {
+    const item = capabilityItem(entry, 0)
+    return item.risk !== 'read'
+  })
+  const permissions = typeof connector.permissions?.summary === 'string' && connector.permissions.summary !== '' ? connector.permissions.summary : null
+  // The host says why a connector is not ready at its level, and when a level change needs
+  // the reader to authorize again.
+  const levelNote = typeof connector.levelNote === 'string' && connector.levelNote !== '' ? connector.levelNote : null
+  const needsReauth = connector.needsReauth === true
+  // A host whose profile forbids changes says why; every declared write then shows as
+  // unavailable instead of disappearing.
+  const writesLocked = typeof readOnly === 'string' && readOnly !== ''
+  const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === 'object' ? connector.levelNotes : {}
+  // The level the reader picked. An OAuth connector sends it with the authorization request
+  // (`connector-oauth-start { level }`), so a stored level that cannot connect is not in the
+  // way; other connectors switch at once.
+  const [levelDraft, setLevelDraft] = useState(null)
+  const shownLevel = oauth ? (levelDraft ?? currentLevel) : currentLevel
+  const levelBlocked = (id) => {
+    const note = typeof levelNotes[id] === 'string' && levelNotes[id] !== '' ? levelNotes[id] : null
+    return note
+  }
+  const chooseLevel = (id) => {
+    if (oauth && !on) { setLevelDraft(id); return }
+    // A connected OAuth connector asks the host for the new level: it disconnects and the
+    // next Connect authorizes for that level.
+    setLevelDraft(null)
+    void run(actions.connectorSetLevel(connector.id, id))
+  }
   const oauthLevel = () => (typeof shownLevel === 'string' && shownLevel !== '' ? shownLevel : undefined)
   const startAuthorization = async () => {
     if (busy) return
@@ -280,104 +335,15 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
       setBusy(false)
     }
   }
-  const run = (task, after) => {
-    setBusy(true)
-    setError(null)
-    return task.then(() => { after?.() }, failure => setError(failure?.message ?? String(failure))).finally(() => setBusy(false))
-  }
-  const complete = () => fields.every(field => !field.required || given(field) !== '')
-  const connect = () => {
-    if (busy || !complete()) return
-    const filled = {}
-    for (const field of fields) {
-      const value = given(field)
-      if (value !== '') filled[field.name] = value
-    }
-    const done = () => { setValues({}); setChatDraft(null); setForm(false) }
-    const submit = () => declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token)
-    if (notify) {
-      const chatId = chatValue.trim()
-      // The chat id typed beside the secret is saved once the token is known to be good.
-      void run(submit().then(() => (chatId === '' ? undefined : actions.connectorSetChat(connector.id, chatId))), done)
-      return
-    }
-    // A host that declares its fields takes them as `values`; an older one takes the token.
-    void run(submit(), done)
-  }
-  const saveChat = () => {
-    if (busy) return
-    void run(actions.connectorSetChat(connector.id, chatValue.trim()), () => setChatDraft(null))
-  }
-  const on = connector.state !== 'off'
-  // Write access is what the connector declares: its level, its capabilities in its own
-  // order, and a line about its permissions. Nothing here switches them on or off; the
-  // level is the setting, and a change asks the host for a new grant.
-  const levels = Array.isArray(connector.levels) ? connector.levels.filter(entry => entry !== null) : []
-  const currentLevel = typeof connector.level === 'string' ? connector.level : null
-  const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter(entry => entry !== null && typeof entry === 'object') : []
-  const capWrites = capabilities.some((entry) => {
-    const item = capabilityItem(entry, 0)
-    return item.risk !== 'read'
-  })
-  const permissions = typeof connector.permissions?.summary === 'string' && connector.permissions.summary !== '' ? connector.permissions.summary : null
-  // The host says why a connector is not ready at its level, and when a level change needs
-  // the reader to authorize again.
-  const levelNote = typeof connector.levelNote === 'string' && connector.levelNote !== '' ? connector.levelNote : null
-  const needsReauth = connector.needsReauth === true
-  // A host whose profile forbids changes says why; every declared write then shows as
-  // unavailable instead of disappearing.
-  const writesLocked = typeof readOnly === 'string' && readOnly !== ''
-  // The host may name per-level reasons (a level that needs another setting); without them,
-  // a level that needs the unfilled settings is blocked here with the same words.
-  const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === 'object' ? connector.levelNotes : {}
-  // The level the reader picked. An OAuth connector sends it with the authorization request
-  // (`connector-oauth-start { level }`), so a stored level that cannot connect is not in the
-  // way; other connectors switch at once.
-  const [levelDraft, setLevelDraft] = useState(null)
-  const shownLevel = oauth ? (levelDraft ?? currentLevel) : currentLevel
-  const chooseLevel = (id) => {
-    if (oauth && !on) { setLevelDraft(id); return }
-    // A connected OAuth connector asks the host for the new level: it disconnects and the
-    // next Connect authorizes for that level.
-    setLevelDraft(null)
-    void run(actions.connectorSetLevel(connector.id, id))
-  }
-  const storedSetting = field => (typeof field.value === 'string' ? field.value : '').trim()
-  // The card's own name is not a requirement of the level; the module's settings are.
-  const settingsEmpty = declaredSettings.some(field => field.name !== 'label' && storedSetting(field) === '')
-  const levelBlocked = (id) => {
-    const note = typeof levelNotes[id] === 'string' && levelNotes[id] !== '' ? levelNotes[id] : null
-    if (note !== null) return note
-    if (settingsEmpty && /write|full/i.test(id)) return t('Fill in the settings before switching to this level.')
-    return null
-  }
-  // A connector with settings opens its panel even before it is connected: the settings are
-  // what a level needs in order to connect at all. An instance always opens it, because the
-  // panel is where the instance is renamed or removed.
-  const hasOptions = isInstance || settings.length > 0 || levels.length > 0
-    || (on && (capabilities.length > 0 || permissions !== null))
+  // A connector with a level or capabilities opens its panel; settings and instances live on
+  // the module's grouped card instead.
+  const hasOptions = levels.length > 0 || (on && (capabilities.length > 0 || permissions !== null))
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   // The card names its own glyph; a host that declares none keeps the mark its id had.
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark
   // What the connector says about itself: its docs and the words on its token field.
   const docsUrl = typeof connector.card?.docsUrl === 'string' && connector.card.docsUrl !== '' ? connector.card.docsUrl : TOKEN_URLS[connector.id]
-  // One input per declared setting; the card's own name goes in the same form when the host
-  // does not already send it as one.
-  const fieldNode = field => h('label', { key: field.name, className: 'bt-connector-field' },
-    h('span', { className: 'bt-connector-field-name' }, typeof field.label === 'string' && field.label !== '' ? field.label : field.name),
-    h('div', { className: 'bt-q-field' }, h('input', {
-      className: 'bt-connector-input', value: settingValue(field), placeholder: field.placeholder ?? (typeof field.label === 'string' && field.label !== '' ? field.label : field.name), 'aria-label': field.label ?? field.name,
-      autoComplete: 'off', spellCheck: false, disabled: busy,
-      onChange: (event) => setSettingDraft(previous => ({ ...previous, [field.name]: event.target.value })),
-      onKeyDown: (event) => { if (event.key === 'Enter') saveSettings() },
-    })))
-  const saveSettingsRow = h('div', { className: 'bt-connector-form-row' },
-    h('button', {
-      type: 'button', className: 'bt-soft bt-soft-sm',
-      disabled: busy || !settingsChanged,
-      onClick: () => saveSettings(),
-    }, t('Save settings')))
   const permissionsNode = permissions !== null ? h('div', { className: 'bt-connector-hint' }, permissions) : null
   const capabilitiesNode = capabilities.length > 0
     ? h('div', { className: 'bt-connector-setting' },
@@ -395,12 +361,6 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
           item.change !== null ? h('span', { className: 'bt-connector-cap-change' }, item.change) : null,
           locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
       })))
-    : null
-  const settingsBlock = settings.length > 0
-    ? h('div', { className: 'bt-connector-setting' },
-      h('div', { className: 'bt-connector-action-title' }, t('Settings')),
-      settings.map(fieldNode),
-      saveSettingsRow)
     : null
   const levelBlock = levels.length > 0
     ? h('div', { className: 'bt-connector-setting' },
@@ -423,45 +383,15 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
         })),
       h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')))
     : null
-  // An instance is removed in place, after one confirmation; the last one stays, so the
-  // module always has a card to connect. Its removal is not a module setting.
-  const removeNode = isInstance
-    ? h('div', { className: 'bt-connector-setting bt-connector-remove' },
-      removeAsk
-        ? h('div', { className: 'bt-connector-remove-ask' },
-          h('div', { className: 'bt-connector-action-title' }, t('Remove this instance')),
-          h('div', { className: 'bt-connector-hint' }, t('Removing this instance disconnects it and deletes its authorization. The project itself is not changed.')),
-          h('div', { className: 'bt-connector-form-row' },
-            h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => setRemoveAsk(false) }, t('Cancel')),
-            h('button', { type: 'button', className: 'bt-soft bt-soft-sm bt-danger', disabled: busy, onClick: removeInstance }, busy ? t('Removing…') : t('Remove'))))
-        : h('button', {
-          type: 'button', className: 'bt-connector-link bt-connector-link-btn bt-danger',
-          disabled: busy || lastInstance,
-          onClick: () => setRemoveAsk(true),
-        }, t('Remove this instance')),
-      lastInstance ? h('div', { className: 'bt-connector-hint' }, t('Keep at least one connection.')) : null)
-    : null
-  const panelBody = isInstance
-    ? h('div', { className: 'bt-connector-instance-grid' },
-      h('div', { className: 'bt-connector-action-title bt-connector-instance-title' }, t('Instance settings')),
-      settings.map(fieldNode),
-      levelBlock,
-      h('div', { className: 'bt-connector-instance-save' },
-        saveSettingsRow,
-        labelField !== null
-          ? h('div', { className: 'bt-connector-hint' }, t('The name changes only this card; the connection and its tools stay the same.'))
-          : null))
-    : null
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
   const mark = h('span', { className: 'bt-connector-mark' }, Mark ? h(Mark) : null)
   const text = h('span', { className: 'bt-connector-text' },
-    // A long instance name is cut with an ellipsis on a phone; the title keeps it complete.
     h('span', { className: 'bt-connector-name', title: connector.name }, connector.name),
     h('span', { className: 'bt-connector-status' }, statusText(connector)))
   return h('div', {
     ref: row, className: 'bt-connector', 'data-state': connector.state, 'data-open': details || undefined,
-    'data-notify': notify || undefined, 'data-instance': isInstance || undefined,
+    'data-notify': notify || undefined,
   },
     h('div', { className: 'bt-connector-head' },
       hasOptions
@@ -519,13 +449,11 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
     oauth && docsUrl !== undefined ? h('div', { className: 'bt-connector-docs' },
       h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation'))) : null,
     hasOptions && details
-      ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings'), 'data-instance': isInstance || undefined },
+      ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
         h('div', { className: 'bt-connector-panel-inner' },
-          isInstance ? panelBody : settingsBlock,
-          isInstance ? null : levelBlock,
+          levelBlock,
           permissionsNode,
-          capabilitiesNode,
-          isInstance ? removeNode : null))
+          capabilitiesNode))
       : null,
     !oauth && !on && form ? h('div', { className: 'bt-connector-form' },
       fields.map((field, index) => {
@@ -579,34 +507,379 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
     error ? h('div', { className: 'bt-connector-error', role: 'alert' }, error) : null)
 }
 
-// One more instance of a module: a card that is off until the reader connects it. The host
-// assigns the next free id; over its soft cap it refuses and its own sentence is shown.
-function AddInstanceRow({ base, count, max, actions }) {
+// One project authorization: its own grant, its own settings and level, its own Connect. The
+// row is compact until opened; the module's card above it holds the policy in one place.
+function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded = false, onToggle }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-  const atCap = typeof max === 'number' && count >= max
-  const add = () => {
-    if (busy || atCap) return
+  const [settingDraft, setSettingDraft] = useState(null)
+  const [removeAsk, setRemoveAsk] = useState(false)
+  const [levelDraft, setLevelDraft] = useState(null)
+  const [authorizeUrl, setAuthorizeUrl] = useState(null)
+  const oauth = connector.oauth === true
+  const instance = instanceOf(connector)
+  const declared = declaredSettingsOf(connector)
+  // The project's own name is a plain label the reader types, kept beside the module's
+  // settings; when the host already sends it as one, that field is the name.
+  const labelField = instance !== null && !declared.some(field => field.name === 'label')
+    ? { name: 'label', label: t('Name'), value: instance.label, placeholder: connector.name }
+    : null
+  const fields = labelField === null ? declared : [labelField, ...declared]
+  const settingValue = (field) => {
+    if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name]
+    return typeof field.value === 'string' ? field.value : ''
+  }
+  const settingsChanged = fields.some(field => settingValue(field) !== (typeof field.value === 'string' ? field.value : ''))
+  const run = (task, after) => {
     setBusy(true)
     setError(null)
-    void actions.connectorCreateInstance(base)
-      .catch(failure => setError(failure?.message ?? String(failure)))
-      .finally(() => setBusy(false))
+    return task.then(() => { after?.() }, failure => setError(failure?.message ?? String(failure))).finally(() => setBusy(false))
   }
-  return h('div', { className: 'bt-connector-add' },
-    h('button', {
-      type: 'button', className: 'bt-connector-add-btn', disabled: busy || atCap,
-      onClick: add,
-    },
-    h('span', { className: 'bt-connector-add-plus', 'aria-hidden': true },
-      h('svg', { width: 14, height: 14, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' },
-        h('path', { d: 'M10 4.5v11M4.5 10h11' }))),
-    h('span', null, busy ? t('Adding…') : instanceAddText(base))),
-    atCap ? h('div', { className: 'bt-connector-hint' }, t('You can connect up to {max} instances.', { max })) : null,
+  const saveSettings = () => {
+    if (busy || !settingsChanged) return
+    const values = Object.fromEntries(fields.map(field => [field.name, settingValue(field).trim()]))
+    void run(actions.connectorSetSettings(connector.id, values), () => setSettingDraft(null))
+  }
+  const on = connector.state !== 'off'
+  const levels = levelsOfConnector(connector)
+  const currentLevel = typeof connector.level === 'string' ? connector.level : null
+  const writesLocked = typeof readOnly === 'string' && readOnly !== ''
+  const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === 'object' ? connector.levelNotes : {}
+  // Unsaved settings do not unlock a level: the gate reads the saved values, so a filled but
+  // unsaved form cannot switch to a level the host would refuse.
+  const storedSetting = field => (typeof field.value === 'string' ? field.value : '').trim()
+  const settingsEmpty = declared.some(field => field.name !== 'label' && storedSetting(field) === '')
+  const levelBlocked = (id) => {
+    const note = typeof levelNotes[id] === 'string' && levelNotes[id] !== '' ? levelNotes[id] : null
+    if (note !== null) return note
+    if (settingsEmpty && /write|full/i.test(id)) return t('Fill in the settings before switching to this level.')
+    return null
+  }
+  // An off authorization carries the level it will ask for into its Connect request; a
+  // connected one asks the host to disconnect and authorize again.
+  const shownLevel = oauth ? (levelDraft ?? currentLevel) : currentLevel
+  const chooseLevel = (id) => {
+    if (oauth && !on) { setLevelDraft(id); return }
+    setLevelDraft(null)
+    void run(actions.connectorSetLevel(connector.id, id))
+  }
+  const startAuthorization = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    const tab = window.open('about:blank', '_blank')
+    try {
+      const level = typeof shownLevel === 'string' && shownLevel !== '' ? shownLevel : undefined
+      const result = await actions.connectorOauthStart(connector.id, level)
+      const url = typeof result?.authorizeUrl === 'string' ? result.authorizeUrl : ''
+      if (url === '') throw new Error(t('The authorization page could not be opened'))
+      setAuthorizeUrl(url)
+      if (tab !== null) {
+        try { tab.location.href = url } catch { /* the link below stays the way in */ }
+        tab.focus?.()
+      }
+    } catch (failure) {
+      try { tab?.close?.() } catch { /* a blocked or closed tab needs nothing */ }
+      setError(failure?.message ?? String(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const remove = () => {
+    if (busy) return
+    void run(actions.connectorDeleteInstance(connector.id), () => setRemoveAsk(false))
+  }
+  const fieldNode = field => h('label', { key: field.name, className: 'bt-connector-field' },
+    h('span', { className: 'bt-connector-field-name' }, typeof field.label === 'string' && field.label !== '' ? field.label : field.name),
+    h('div', { className: 'bt-q-field' }, h('input', {
+      className: 'bt-connector-input', value: settingValue(field), placeholder: field.placeholder ?? (typeof field.label === 'string' && field.label !== '' ? field.label : field.name), 'aria-label': field.label ?? field.name,
+      autoComplete: 'off', spellCheck: false, disabled: busy,
+      onChange: (event) => setSettingDraft(previous => ({ ...previous, [field.name]: event.target.value })),
+      onKeyDown: (event) => { if (event.key === 'Enter') saveSettings() },
+    })))
+  const levelBlock = levels.length > 0
+    ? h('div', { className: 'bt-connector-setting' },
+      h('div', { className: 'bt-connector-action-title' }, t('Access level')),
+      h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
+        levels.map((entry) => {
+          const item = levelItem(entry)
+          const current = item.id === shownLevel
+          const blocked = current ? null : levelBlocked(item.id)
+          return h('div', { key: item.id, className: 'bt-connector-level-wrap' },
+            h('button', {
+              type: 'button', role: 'radio', 'aria-checked': current,
+              className: 'bt-connector-level', 'data-current': current || undefined,
+              disabled: busy || (writesLocked && item.write === true) || blocked !== null,
+              onClick: () => { if (!current && blocked === null) chooseLevel(item.id) },
+            },
+            h('span', { className: 'bt-connector-level-title' }, item.title),
+            item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null),
+            blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
+        })),
+      h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')))
+    : null
+  const removeBlock = h('div', { className: 'bt-connector-setting bt-connector-remove' },
+    removeAsk
+      ? h('div', { className: 'bt-connector-remove-ask' },
+        h('div', { className: 'bt-connector-action-title' }, t('Remove project authorization')),
+        h('div', { className: 'bt-connector-hint' }, t('Removing this authorization deletes its Neon grant. The project itself is not changed.')),
+        h('div', { className: 'bt-connector-form-row' },
+          h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => setRemoveAsk(false) }, t('Cancel')),
+          h('button', { type: 'button', className: 'bt-soft bt-soft-sm bt-danger', disabled: busy, onClick: remove }, busy ? t('Removing…') : t('Remove'))))
+      : h('button', {
+        type: 'button', className: 'bt-connector-link bt-connector-link-btn bt-danger',
+        disabled: busy,
+        onClick: () => setRemoveAsk(true),
+      }, t('Remove project authorization')))
+  const connectAction = oauth && connector.state === 'error'
+    ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void startAuthorization() } }, t('Connect again'))
+    : on && connector.state !== 'connecting'
+      ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(connector.id)) } }, t('Disconnect'))
+      : connector.state === 'connecting'
+        ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
+        : oauth
+          ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void startAuthorization() } }, t('Connect'))
+          : null
+  return h('div', {
+    className: 'bt-connector-project', 'data-state': connector.state, 'data-open': expanded || undefined,
+    'data-project-id': connector.id,
+  },
+    h('div', { className: 'bt-connector-project-head' },
+      h('button', { type: 'button', className: 'bt-connector-project-main', 'aria-expanded': expanded, onClick: onToggle },
+        h('span', { className: 'bt-connector-project-text' },
+          h('span', { className: 'bt-connector-project-name', title: connector.name }, connector.name),
+          h('span', { className: 'bt-connector-project-status' }, authorizationStatus(connector))),
+        h('span', { className: 'bt-connector-chevron', 'aria-hidden': true }, h(ChevronRightIcon))),
+      h('span', { className: 'bt-connector-actions' }, connectAction)),
+    expanded ? h('div', { className: 'bt-connector-project-body' },
+      h('div', { className: 'bt-connector-instance-grid' },
+        fields.map(fieldNode),
+        levelBlock,
+        h('div', { className: 'bt-connector-instance-save' },
+          h('div', { className: 'bt-connector-form-row' },
+            h('button', {
+              type: 'button', className: 'bt-soft bt-soft-sm',
+              disabled: busy || !settingsChanged,
+              onClick: saveSettings,
+            }, t('Save settings'))),
+          h('div', { className: 'bt-connector-hint' }, t('The name changes only this authorization; its connection and tools stay the same.')))),
+      removeBlock)
+      : null,
+    authorizeUrl !== null && !on ? h('div', { className: 'bt-connector-form-row' },
+      h('a', { className: 'bt-connector-link', href: authorizeUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Open the authorization page'))) : null,
+    error ? h('div', { className: 'bt-connector-error', role: 'alert' }, error) : null)
+}
+
+// Add a project: create the module's next authorization, save the project's settings with it,
+// and stop there. Connecting is the row's own press, so nothing is authorized before the
+// reader has seen the settings the grant will carry.
+function AddProjectForm({ base, baseId, existingIds, actions, onCreated, onCancel }) {
+  const declared = declaredSettingsOf(base)
+  const valueFields = declared.filter(field => field.name !== 'label')
+  const levels = levelsOfConnector(base)
+  const firstLevel = levels.length > 0 ? levelItem(levels[0]).id : 'read'
+  const [values, setValues] = useState({})
+  const [level, setLevel] = useState(firstLevel)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const given = name => (values[name] ?? '').trim()
+  const roleField = valueFields.find(field => field.name === 'roleName')
+  const projectField = valueFields.find(field => field.name === 'projectId')
+  // A project id is what names the project; a write level also needs the restricted role,
+  // the same requirement the host checks before it authorizes.
+  const ready = (projectField === undefined || given('projectId') !== '')
+    && !(level === 'write' && roleField !== undefined && given('roleName') === '')
+  const add = async () => {
+    if (busy || !ready) return
+    setBusy(true)
+    setError(null)
+    let created = null
+    try {
+      const before = new Set(existingIds)
+      const view = await actions.connectorCreateInstance(baseId)
+      // The host answers with the whole view; the new row is the group's id that was not
+      // there before.
+      created = Array.isArray(view)
+        ? view.find(row => instanceOf(row)?.base === baseId && !before.has(row.id))
+        : undefined
+      if (created === undefined) throw new Error(t('The project authorization could not be created.'))
+      const settings = {}
+      for (const field of valueFields) settings[field.name] = given(field.name)
+      if (given('label') !== '') settings.label = given('label')
+      await actions.connectorSetSettings(created.id, settings)
+      if (level !== firstLevel) await actions.connectorSetLevel(created.id, level)
+      const id = created.id
+      onCreated(id)
+    } catch (failure) {
+      // A half-made authorization would sit in the list with no project; take it back out.
+      if (created !== null) await actions.connectorDeleteInstance(created.id).catch(() => {})
+      setError(failure?.message ?? String(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const fieldInput = (name, label, placeholder) => h('label', { key: name, className: 'bt-connector-field' },
+    h('span', { className: 'bt-connector-field-name' }, label),
+    h('div', { className: 'bt-q-field' }, h('input', {
+      className: 'bt-connector-input', value: values[name] ?? '', placeholder, 'aria-label': label,
+      autoComplete: 'off', spellCheck: false, disabled: busy,
+      onChange: (event) => setValues(previous => ({ ...previous, [name]: event.target.value })),
+      onKeyDown: (event) => { if (event.key === 'Enter' && ready) void add() },
+    })))
+  return h('div', { className: 'bt-connector-add-form' },
+    fieldInput('label', t('Name (optional)'), t('The project name, if you want a different card name')),
+    valueFields.map(field => fieldInput(field.name, typeof field.label === 'string' && field.label !== '' ? field.label : field.name, field.label ?? field.name)),
+    levels.length > 0
+      ? h('div', { className: 'bt-connector-setting' },
+        h('div', { className: 'bt-connector-action-title' }, t('Access level')),
+        h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
+          levels.map((entry) => {
+            const item = levelItem(entry)
+            const current = item.id === level
+            const blocked = current ? null
+              : item.write && given('projectId') === '' ? t('Fill in the project ID first.')
+              : item.write && roleField !== undefined && given('roleName') === '' ? t('Fill in the SQL role first.')
+              : null
+            return h('div', { key: item.id, className: 'bt-connector-level-wrap' },
+              h('button', {
+                type: 'button', role: 'radio', 'aria-checked': current,
+                className: 'bt-connector-level', 'data-current': current || undefined,
+                disabled: busy || blocked !== null,
+                onClick: () => { if (!current && blocked === null) setLevel(item.id) },
+              },
+              h('span', { className: 'bt-connector-level-title' }, item.title)),
+              blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
+          })))
+      : null,
+    h('div', { className: 'bt-connector-hint' }, t('After adding, connect the authorization from its row.')),
+    h('div', { className: 'bt-connector-form-row' },
+      h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: onCancel }, t('Cancel')),
+      h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || !ready, onClick: () => void add() }, busy ? t('Adding…') : t('Add project'))),
     error !== null ? h('div', { className: 'bt-connector-error', role: 'alert' }, error) : null)
 }
 
-// The instances of one module are drawn together where its first card was; every other
+// One card per module that keeps several connections: the base connection on top, and the
+// project authorizations it may carry inside the same panel. The list above the settings
+// shows the module once, not one card per project.
+function GroupCard({ rows, actions, readOnly = null }) {
+  const base = rows.find(row => row.id === instanceOf(row)?.base) ?? rows[0]
+  const projects = rows.filter(row => row !== base)
+  const instance = instanceOf(base)
+  const baseId = instance?.base ?? base.id
+  const max = instance === null ? null : instanceMax(instance)
+  const projectMax = max === null ? null : Math.max(0, max - 1)
+  const [details, setDetails] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [authorizeUrl, setAuthorizeUrl] = useState(null)
+  const [openProject, setOpenProject] = useState(null)
+  const [adding, setAdding] = useState(false)
+  const oauth = base.oauth === true
+  const on = base.state !== 'off'
+  const atCap = typeof max === 'number' && rows.length >= max
+  const Mark = CARD_GLYPHS[base.card?.glyph] ?? CARD_GLYPHS[base.id] ?? GenericMark
+  const docsUrl = typeof base.card?.docsUrl === 'string' && base.card.docsUrl !== '' ? base.card.docsUrl : TOKEN_URLS[base.id]
+  const levelNote = typeof base.levelNote === 'string' && base.levelNote !== '' ? base.levelNote : null
+  const needsReauth = base.needsReauth === true
+  const run = (task, after) => {
+    setBusy(true)
+    setError(null)
+    return task.then(() => { after?.() }, failure => setError(failure?.message ?? String(failure))).finally(() => setBusy(false))
+  }
+  // The base connection is the read-only grant that covers every project; a write is always
+  // asked for by a project authorization below, never here.
+  const startAuthorization = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    const tab = window.open('about:blank', '_blank')
+    try {
+      const result = await actions.connectorOauthStart(base.id, 'read')
+      const url = typeof result?.authorizeUrl === 'string' ? result.authorizeUrl : ''
+      if (url === '') throw new Error(t('The authorization page could not be opened'))
+      setAuthorizeUrl(url)
+      if (tab !== null) {
+        try { tab.location.href = url } catch { /* the link below stays the way in */ }
+        tab.focus?.()
+      }
+    } catch (failure) {
+      try { tab?.close?.() } catch { /* a blocked or closed tab needs nothing */ }
+      setError(failure?.message ?? String(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const connectAction = oauth && base.state === 'error'
+    ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void startAuthorization() } }, t('Connect again'))
+    : on && base.state !== 'connecting'
+      ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(base.id)) } }, t('Disconnect'))
+      : base.state === 'connecting'
+        ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
+        : oauth
+          ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void startAuthorization() } }, t('Connect'))
+          : null
+  const text = h('span', { className: 'bt-connector-text' },
+    h('span', { className: 'bt-connector-name', title: base.name }, base.name),
+    h('span', { className: 'bt-connector-status' }, groupStatusText(base, projects.length)))
+  const mark = h('span', { className: 'bt-connector-mark' }, Mark ? h(Mark) : null)
+  const plus = h('span', { className: 'bt-connector-add-plus', 'aria-hidden': true },
+    h('svg', { width: 14, height: 14, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' },
+      h('path', { d: 'M10 4.5v11M4.5 10h11' })))
+  return h('div', {
+    className: 'bt-connector', 'data-group': baseId, 'data-state': base.state, 'data-open': details || undefined,
+  },
+    h('div', { className: 'bt-connector-head' },
+      h('button', {
+        type: 'button', className: 'bt-connector-main', 'aria-expanded': details,
+        onClick: () => setDetails(value => !value),
+      }, mark, text, h('span', { className: 'bt-connector-chevron', 'aria-hidden': true }, h(ChevronRightIcon))),
+      h('span', { className: 'bt-connector-actions' }, connectAction)),
+    error !== null ? h('div', { className: 'bt-connector-error', role: 'alert' }, error) : null,
+    oauth && !on && authorizeUrl !== null && base.state !== 'connecting' ? h('div', { className: 'bt-connector-form-row' },
+      h('a', { className: 'bt-connector-link', href: authorizeUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Open the authorization page'))) : null,
+    details
+      ? h('div', { className: 'bt-connector-panel', role: 'group', 'aria-label': t('Connector settings') },
+        h('div', { className: 'bt-connector-panel-inner' },
+          h('div', { className: 'bt-connector-setting bt-connector-base' },
+            h('div', { className: 'bt-connector-action-title' }, t('Base connection')),
+            h('div', { className: 'bt-connector-hint' }, t('Read-only access covers all projects. Writing needs a project authorization.')),
+            base.account ? h('div', { className: 'bt-connector-hint' }, t('Connected as {account}', { account: base.account })) : null,
+            levelNote !== null ? h('div', { className: 'bt-connector-hint' }, levelNote) : null,
+            needsReauth ? h('div', { className: 'bt-connector-hint' }, t('Click Connect to authorize with this access level again.')) : null,
+            oauth && docsUrl !== undefined
+              ? h('div', { className: 'bt-connector-docs' },
+                h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation')))
+              : null),
+          h('div', { className: 'bt-connector-setting bt-connector-projects' },
+            h('div', { className: 'bt-connector-action-title' }, t('Project authorizations')),
+            projects.length === 0
+              ? h('div', { className: 'bt-connector-hint' }, t('No project authorizations yet. Add one to run write tools against a project.'))
+              : h('div', { className: 'bt-connector-project-list' }, projects.map(row => h(ProjectAuthorizationRow, {
+                key: row.id,
+                connector: row,
+                actions,
+                readOnly,
+                expanded: openProject === row.id,
+                onToggle: () => setOpenProject(current => (current === row.id ? null : row.id)),
+              }))),
+            adding
+              ? h(AddProjectForm, {
+                key: 'add-project',
+                base,
+                baseId,
+                existingIds: rows.map(row => row.id),
+                actions,
+                onCreated: (id) => { setAdding(false); setOpenProject(id) },
+                onCancel: () => setAdding(false),
+              })
+              : h('button', {
+                type: 'button', className: 'bt-connector-add-btn', disabled: atCap, onClick: () => setAdding(true),
+              }, plus, h('span', null, t('Add a project'))),
+            atCap ? h('div', { className: 'bt-connector-hint' }, t('You can add up to {max} project authorizations.', { max: projectMax })) : null)))
+      : null)
+}
+
+// The project authorizations of one module are drawn inside its base card; every other
 // connector keeps its own place in the list.
 function connectorGroups(list) {
   const groups = []
@@ -629,8 +902,8 @@ function connectorGroups(list) {
   return groups
 }
 
-// Settings → Connectors: one row per connector, and one row per instance of a module that
-// keeps several connections.
+// Settings → Connectors: one row per connector. A module that keeps project authorizations
+// still shows one card, and its authorizations live inside that card's panel.
 export function ConnectorsPage({ roster, actions }) {
   const list = roster?.connectors ?? []
   const readOnly = typeof roster?.readOnly === 'string' && roster.readOnly !== '' ? roster.readOnly : null
@@ -641,14 +914,7 @@ export function ConnectorsPage({ roster, actions }) {
       rows.push(h(ConnectorRow, { key: connector.id, connector, actions, readOnly }))
       continue
     }
-    for (const connector of group.rows) {
-      rows.push(h(ConnectorRow, { key: connector.id, connector, actions, readOnly, instanceCount: group.rows.length }))
-    }
-    const first = instanceOf(group.rows[0])
-    rows.push(h(AddInstanceRow, {
-      key: `${group.base}-add`, base: group.base, count: group.rows.length,
-      max: first === null ? null : instanceMax(first), actions,
-    }))
+    rows.push(h(GroupCard, { key: `${group.base}-group`, rows: group.rows, actions, readOnly }))
   }
   return h('section', { className: 'bt-set-section' },
     h('div', { className: 'bt-set-card bt-connectors-card' }, rows.length === 0

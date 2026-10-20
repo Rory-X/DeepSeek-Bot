@@ -371,6 +371,8 @@ var ZH = {
   "Click Connect to authorize with this access level again.": "点击连接，用这个访问级别重新授权。",
   "Save settings": "保存设置",
   "Fill in the settings before switching to this level.": "先填好设置，才能切换到这一级别。",
+  "Fill in the project ID first.": "先填写 Project ID。",
+  "Fill in the SQL role first.": "先填写 SQL role。",
   "Changes: {target}": "会改动：{target}",
   "This cannot be undone.": "这个操作无法撤销。",
   "I understand what this changes": "我了解这次改动的内容",
@@ -391,16 +393,24 @@ var ZH = {
   Off: "关闭",
   On: "开启",
   "Connector settings": "连接器设置",
-  "Instance settings": "实例设置",
-  "The name changes only this card; the connection and its tools stay the same.": "名称只改这张卡片，连接和工具都不变。",
-  "Add a Neon project": "添加 Neon 项目",
-  "Add another connection": "再添加一个连接",
+  "Base connection": "基础连接",
+  "Read-only access covers all projects. Writing needs a project authorization.": "只读授权覆盖所有项目；需要写入时请添加项目授权。",
+  "Project authorizations": "项目授权",
+  "Connected · Read-only (all projects)": "已连接 · 只读（全部项目）",
+  "Connected · 1 project authorization": "已连接 · 1 个项目授权",
+  "Connected · {count} project authorizations": "已连接 · {count} 个项目授权",
+  "No project authorizations yet. Add one to run write tools against a project.": "还没有项目授权。添加后即可对相应项目执行写操作。",
+  "Add a project": "添加项目",
+  "Add project": "添加项目",
+  "The project name, if you want a different card name": "项目名称，用于卡片显示（可留空）",
+  "The project authorization could not be created.": "项目授权创建失败。",
+  "After adding, connect the authorization from its row.": "添加后请在对应行点连接完成授权。",
+  "You can add up to {max} project authorizations.": "最多可添加 {max} 个项目授权。",
+  "Remove project authorization": "移除项目授权",
+  "Removing this authorization deletes its Neon grant. The project itself is not changed.": "移除后会删除它的 Neon 授权；项目本身不受影响。",
+  "The name changes only this authorization; its connection and tools stay the same.": "名称只改这条项目授权，它的连接和工具都不变。",
   "Adding…": "正在添加…",
-  "You can connect up to {max} instances.": "最多连接 {max} 个实例。",
-  "Remove this instance": "移除这个实例",
-  "Removing this instance disconnects it and deletes its authorization. The project itself is not changed.": "移除后此实例会断开，它的授权也会被删除；项目本身不受影响。",
   "Removing…": "正在移除…",
-  "Keep at least one connection.": "至少保留一个连接。",
   "Waiting for the browser…": "正在浏览器里等待…",
   "Not connected": "未连接",
   "Could not connect": "连接失败",
@@ -3390,7 +3400,7 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 button.bt-connector-main{cursor:pointer;min-height:24px}
 button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
 .bt-connector-chevron{flex:none;display:inline-flex;color:var(--bt-ink-3);transition:transform .15s ease}
-.bt-connector[data-open] .bt-connector-chevron{transform:rotate(90deg)}
+.bt-connector[data-open]>.bt-connector-head .bt-connector-chevron{transform:rotate(90deg)}
 .bt-connector-panel{display:flex;flex-direction:column;gap:12px;padding-top:10px;border-top:1px solid var(--bt-line);animation:bt-veil-in .16s ease-out}
 @media (prefers-reduced-motion:reduce){.bt-connector-chevron{transition:none}.bt-connector-panel{animation:none}}
 .bt-connector-action-row{display:flex;align-items:center;gap:12px}
@@ -3454,6 +3464,27 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-add-btn:disabled{opacity:.4;cursor:default}
 .bt-connector-add-plus{display:inline-flex;flex:none;color:var(--bt-ink-3)}
 .bt-connector-add .bt-connector-error{padding-left:0}
+/* A module keeps one card and puts its project authorizations inside it: a compact row per
+   grant under the base connection, with the add form under the list. */
+.bt-connector[data-group] .bt-connector-status{white-space:normal}
+.bt-connector-base .bt-connector-docs{padding-left:0}
+.bt-connector-projects{display:flex;flex-direction:column;gap:8px}
+.bt-connector-project-list{display:flex;flex-direction:column;gap:8px}
+.bt-connector-project{border:.5px solid var(--bt-line);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.bt-connector-project[data-open]{background:color-mix(in srgb,var(--bt-line) 10%,transparent)}
+.bt-connector-project-head{display:flex;align-items:center;gap:8px;min-width:0}
+.bt-connector-project-main{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;margin:0;padding:2px 0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:8px}
+.bt-connector-project-main:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-connector-project-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.bt-connector-project-name{font-size:13px;line-height:18px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-connector-project-status{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-connector-project[data-state=ready] .bt-connector-project-status{color:var(--bt-ink-2)}
+.bt-connector-project[data-state=error] .bt-connector-project-status{color:var(--bt-danger);white-space:normal}
+.bt-connector-project[data-open]>.bt-connector-project-head .bt-connector-chevron{transform:rotate(90deg)}
+.bt-connector-project-body{display:flex;flex-direction:column;gap:10px;padding-top:8px;border-top:.5px solid var(--bt-line);min-width:0}
+.bt-connector-project .bt-connector-error{padding-left:0}
+.bt-connector-add-form{display:flex;flex-direction:column;gap:8px;padding:10px;border:.5px dashed var(--bt-line-2);border-radius:10px;min-width:0}
+.bt-connector-add-form .bt-connector-form-row{justify-content:flex-end}
 /* A wide settings panel lays the instance fields out two by two; a phone keeps one column. */
 @media (min-width:900px){
 .bt-connector-instance-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
@@ -14416,10 +14447,6 @@ var instanceOf = (connector) => {
     max: Number.isInteger(value.max) && value.max > 0 ? value.max : null
   };
 };
-var INSTANCE_ADD = {
-  neon: () => t("Add a Neon project")
-};
-var instanceAddText = (base) => (INSTANCE_ADD[base] ?? (() => t("Add another connection")))();
 var INSTANCE_SOFT_MAX = 8;
 var instanceMax = (instance) => instance.max === null ? instance.base === "neon" ? INSTANCE_SOFT_MAX : null : instance.max;
 var wantsChinese = () => language().startsWith("zh");
@@ -14461,35 +14488,30 @@ function statusText2(connector) {
   }
   return cardAbout(connector) ?? (connector.oauth === true ? t("Not connected") : "");
 }
-function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }) {
+function authorizationStatus(connector) {
+  if (connector.state === "connecting") return connector.oauth === true ? t("Waiting for the browser…") : t("Connecting…");
+  if (connector.state === "error") return connector.error ?? t("Could not connect");
+  if (connector.state === "ready") {
+    return connector.account ? t("Connected as {account}", { account: connector.account }) : t("Connected");
+  }
+  return t("Not connected");
+}
+function groupStatusText(base, count) {
+  if (base.state === "connecting") return t("Waiting for the browser…");
+  if (base.state === "error") return base.error ?? t("Could not connect");
+  if (base.state !== "ready") return t("Not connected");
+  if (count === 0) return t("Connected · Read-only (all projects)");
+  return count === 1 ? t("Connected · 1 project authorization") : t("Connected · {count} project authorizations", { count });
+}
+var declaredSettingsOf = (connector) => Array.isArray(connector.settings) ? connector.settings.filter((field) => field !== null && typeof field?.name === "string" && field.name !== "") : [];
+var levelsOfConnector = (connector) => Array.isArray(connector.levels) ? connector.levels.filter((entry) => entry !== null) : [];
+function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = (0, import_react36.useState)(false);
   const [values, setValues] = (0, import_react36.useState)({});
   const [busy, setBusy] = (0, import_react36.useState)(false);
   const [error, setError] = (0, import_react36.useState)(null);
   const oauth = connector.oauth === true;
   const manual = oauth && connector.manualClient === true;
-  const instance = instanceOf(connector);
-  const isInstance = instance !== null;
-  const declaredSettings = Array.isArray(connector.settings) ? connector.settings.filter((field) => field !== null && typeof field?.name === "string" && field.name !== "") : [];
-  const labelField = isInstance && !declaredSettings.some((field) => field.name === "label") ? { name: "label", label: t("Name"), value: instance.label, placeholder: connector.name } : null;
-  const settings = labelField === null ? declaredSettings : [labelField, ...declaredSettings];
-  const [settingDraft, setSettingDraft] = (0, import_react36.useState)(null);
-  const settingValue = (field) => {
-    if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name];
-    return typeof field.value === "string" ? field.value : "";
-  };
-  const settingsChanged = settings.some((field) => settingValue(field) !== (typeof field.value === "string" ? field.value : ""));
-  const saveSettings = () => {
-    if (busy || !settingsChanged) return;
-    const values2 = Object.fromEntries(settings.map((field) => [field.name, settingValue(field).trim()]));
-    void run(actions.connectorSetSettings(connector.id, values2), () => setSettingDraft(null));
-  };
-  const [removeAsk, setRemoveAsk] = (0, import_react36.useState)(false);
-  const lastInstance = isInstance && instanceCount <= 1;
-  const removeInstance = () => {
-    if (busy) return;
-    void run(actions.connectorDeleteInstance(connector.id), () => setRemoveAsk(false));
-  };
   const tokenFieldLabel = cardText(connector, "tokenLabel") ?? tokenLabel(connector.id);
   const tokenFieldPlaceholder = cardText(connector, "tokenPlaceholder") ?? void 0;
   const declared = Array.isArray(connector.inputs) ? connector.inputs.filter((input) => input !== null && typeof input?.name === "string" && input.name !== "") : [];
@@ -14508,6 +14530,65 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
   const [appId, setAppId] = (0, import_react36.useState)("");
   const [appSecret, setAppSecret] = (0, import_react36.useState)("");
   const [authorizeUrl, setAuthorizeUrl] = (0, import_react36.useState)(null);
+  const run = (task, after) => {
+    setBusy(true);
+    setError(null);
+    return task.then(() => {
+      after?.();
+    }, (failure) => setError(failure?.message ?? String(failure))).finally(() => setBusy(false));
+  };
+  const complete = () => fields.every((field) => !field.required || given(field) !== "");
+  const connect = () => {
+    if (busy || !complete()) return;
+    const filled = {};
+    for (const field of fields) {
+      const value = given(field);
+      if (value !== "") filled[field.name] = value;
+    }
+    const done = () => {
+      setValues({});
+      setChatDraft(null);
+      setForm(false);
+    };
+    const submit = () => declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token);
+    if (notify) {
+      const chatId = chatValue.trim();
+      void run(submit().then(() => chatId === "" ? void 0 : actions.connectorSetChat(connector.id, chatId)), done);
+      return;
+    }
+    void run(submit(), done);
+  };
+  const saveChat = () => {
+    if (busy) return;
+    void run(actions.connectorSetChat(connector.id, chatValue.trim()), () => setChatDraft(null));
+  };
+  const on = connector.state !== "off";
+  const levels = levelsOfConnector(connector);
+  const currentLevel = typeof connector.level === "string" ? connector.level : null;
+  const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter((entry) => entry !== null && typeof entry === "object") : [];
+  const capWrites = capabilities.some((entry) => {
+    const item = capabilityItem(entry, 0);
+    return item.risk !== "read";
+  });
+  const permissions = typeof connector.permissions?.summary === "string" && connector.permissions.summary !== "" ? connector.permissions.summary : null;
+  const levelNote = typeof connector.levelNote === "string" && connector.levelNote !== "" ? connector.levelNote : null;
+  const needsReauth = connector.needsReauth === true;
+  const writesLocked = typeof readOnly === "string" && readOnly !== "";
+  const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === "object" ? connector.levelNotes : {};
+  const [levelDraft, setLevelDraft] = (0, import_react36.useState)(null);
+  const shownLevel = oauth ? levelDraft ?? currentLevel : currentLevel;
+  const levelBlocked = (id) => {
+    const note = typeof levelNotes[id] === "string" && levelNotes[id] !== "" ? levelNotes[id] : null;
+    return note;
+  };
+  const chooseLevel = (id) => {
+    if (oauth && !on) {
+      setLevelDraft(id);
+      return;
+    }
+    setLevelDraft(null);
+    void run(actions.connectorSetLevel(connector.id, id));
+  };
   const oauthLevel = () => typeof shownLevel === "string" && shownLevel !== "" ? shownLevel : void 0;
   const startAuthorization = async () => {
     if (busy) return;
@@ -14551,102 +14632,11 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
       setBusy(false);
     }
   };
-  const run = (task, after) => {
-    setBusy(true);
-    setError(null);
-    return task.then(() => {
-      after?.();
-    }, (failure) => setError(failure?.message ?? String(failure))).finally(() => setBusy(false));
-  };
-  const complete = () => fields.every((field) => !field.required || given(field) !== "");
-  const connect = () => {
-    if (busy || !complete()) return;
-    const filled = {};
-    for (const field of fields) {
-      const value = given(field);
-      if (value !== "") filled[field.name] = value;
-    }
-    const done = () => {
-      setValues({});
-      setChatDraft(null);
-      setForm(false);
-    };
-    const submit = () => declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token);
-    if (notify) {
-      const chatId = chatValue.trim();
-      void run(submit().then(() => chatId === "" ? void 0 : actions.connectorSetChat(connector.id, chatId)), done);
-      return;
-    }
-    void run(submit(), done);
-  };
-  const saveChat = () => {
-    if (busy) return;
-    void run(actions.connectorSetChat(connector.id, chatValue.trim()), () => setChatDraft(null));
-  };
-  const on = connector.state !== "off";
-  const levels = Array.isArray(connector.levels) ? connector.levels.filter((entry) => entry !== null) : [];
-  const currentLevel = typeof connector.level === "string" ? connector.level : null;
-  const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter((entry) => entry !== null && typeof entry === "object") : [];
-  const capWrites = capabilities.some((entry) => {
-    const item = capabilityItem(entry, 0);
-    return item.risk !== "read";
-  });
-  const permissions = typeof connector.permissions?.summary === "string" && connector.permissions.summary !== "" ? connector.permissions.summary : null;
-  const levelNote = typeof connector.levelNote === "string" && connector.levelNote !== "" ? connector.levelNote : null;
-  const needsReauth = connector.needsReauth === true;
-  const writesLocked = typeof readOnly === "string" && readOnly !== "";
-  const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === "object" ? connector.levelNotes : {};
-  const [levelDraft, setLevelDraft] = (0, import_react36.useState)(null);
-  const shownLevel = oauth ? levelDraft ?? currentLevel : currentLevel;
-  const chooseLevel = (id) => {
-    if (oauth && !on) {
-      setLevelDraft(id);
-      return;
-    }
-    setLevelDraft(null);
-    void run(actions.connectorSetLevel(connector.id, id));
-  };
-  const storedSetting = (field) => (typeof field.value === "string" ? field.value : "").trim();
-  const settingsEmpty = declaredSettings.some((field) => field.name !== "label" && storedSetting(field) === "");
-  const levelBlocked = (id) => {
-    const note = typeof levelNotes[id] === "string" && levelNotes[id] !== "" ? levelNotes[id] : null;
-    if (note !== null) return note;
-    if (settingsEmpty && /write|full/i.test(id)) return t("Fill in the settings before switching to this level.");
-    return null;
-  };
-  const hasOptions = isInstance || settings.length > 0 || levels.length > 0 || on && (capabilities.length > 0 || permissions !== null);
+  const hasOptions = levels.length > 0 || on && (capabilities.length > 0 || permissions !== null);
   const [details, setDetails] = (0, import_react36.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark;
   const docsUrl = typeof connector.card?.docsUrl === "string" && connector.card.docsUrl !== "" ? connector.card.docsUrl : TOKEN_URLS[connector.id];
-  const fieldNode = (field) => (0, import_react36.createElement)(
-    "label",
-    { key: field.name, className: "bt-connector-field" },
-    (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, typeof field.label === "string" && field.label !== "" ? field.label : field.name),
-    (0, import_react36.createElement)("div", { className: "bt-q-field" }, (0, import_react36.createElement)("input", {
-      className: "bt-connector-input",
-      value: settingValue(field),
-      placeholder: field.placeholder ?? (typeof field.label === "string" && field.label !== "" ? field.label : field.name),
-      "aria-label": field.label ?? field.name,
-      autoComplete: "off",
-      spellCheck: false,
-      disabled: busy,
-      onChange: (event) => setSettingDraft((previous) => ({ ...previous, [field.name]: event.target.value })),
-      onKeyDown: (event) => {
-        if (event.key === "Enter") saveSettings();
-      }
-    }))
-  );
-  const saveSettingsRow = (0, import_react36.createElement)(
-    "div",
-    { className: "bt-connector-form-row" },
-    (0, import_react36.createElement)("button", {
-      type: "button",
-      className: "bt-soft bt-soft-sm",
-      disabled: busy || !settingsChanged,
-      onClick: () => saveSettings()
-    }, t("Save settings"))
-  );
   const permissionsNode = permissions !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, permissions) : null;
   const capabilitiesNode = capabilities.length > 0 ? (0, import_react36.createElement)(
     "div",
@@ -14666,13 +14656,6 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
         locked ? (0, import_react36.createElement)("span", { className: "bt-connector-cap-lock" }, t("Unavailable on this host.")) : null
       );
     }))
-  ) : null;
-  const settingsBlock = settings.length > 0 ? (0, import_react36.createElement)(
-    "div",
-    { className: "bt-connector-setting" },
-    (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Settings")),
-    settings.map(fieldNode),
-    saveSettingsRow
   ) : null;
   const levelBlock = levels.length > 0 ? (0, import_react36.createElement)(
     "div",
@@ -14710,48 +14693,12 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
     ),
     (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization."))
   ) : null;
-  const removeNode = isInstance ? (0, import_react36.createElement)(
-    "div",
-    { className: "bt-connector-setting bt-connector-remove" },
-    removeAsk ? (0, import_react36.createElement)(
-      "div",
-      { className: "bt-connector-remove-ask" },
-      (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Remove this instance")),
-      (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Removing this instance disconnects it and deletes its authorization. The project itself is not changed.")),
-      (0, import_react36.createElement)(
-        "div",
-        { className: "bt-connector-form-row" },
-        (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => setRemoveAsk(false) }, t("Cancel")),
-        (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm bt-danger", disabled: busy, onClick: removeInstance }, busy ? t("Removing…") : t("Remove"))
-      )
-    ) : (0, import_react36.createElement)("button", {
-      type: "button",
-      className: "bt-connector-link bt-connector-link-btn bt-danger",
-      disabled: busy || lastInstance,
-      onClick: () => setRemoveAsk(true)
-    }, t("Remove this instance")),
-    lastInstance ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Keep at least one connection.")) : null
-  ) : null;
-  const panelBody = isInstance ? (0, import_react36.createElement)(
-    "div",
-    { className: "bt-connector-instance-grid" },
-    (0, import_react36.createElement)("div", { className: "bt-connector-action-title bt-connector-instance-title" }, t("Instance settings")),
-    settings.map(fieldNode),
-    levelBlock,
-    (0, import_react36.createElement)(
-      "div",
-      { className: "bt-connector-instance-save" },
-      saveSettingsRow,
-      labelField !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("The name changes only this card; the connection and its tools stay the same.")) : null
-    )
-  ) : null;
   const row = (0, import_react36.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
   const mark = (0, import_react36.createElement)("span", { className: "bt-connector-mark" }, Mark ? (0, import_react36.createElement)(Mark) : null);
   const text = (0, import_react36.createElement)(
     "span",
     { className: "bt-connector-text" },
-    // A long instance name is cut with an ellipsis on a phone; the title keeps it complete.
     (0, import_react36.createElement)("span", { className: "bt-connector-name", title: connector.name }, connector.name),
     (0, import_react36.createElement)("span", { className: "bt-connector-status" }, statusText2(connector))
   );
@@ -14762,8 +14709,7 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
       className: "bt-connector",
       "data-state": connector.state,
       "data-open": details || void 0,
-      "data-notify": notify || void 0,
-      "data-instance": isInstance || void 0
+      "data-notify": notify || void 0
     },
     (0, import_react36.createElement)(
       "div",
@@ -14857,15 +14803,13 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
     ) : null,
     hasOptions && details ? (0, import_react36.createElement)(
       "div",
-      { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings"), "data-instance": isInstance || void 0 },
+      { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings") },
       (0, import_react36.createElement)(
         "div",
         { className: "bt-connector-panel-inner" },
-        isInstance ? panelBody : settingsBlock,
-        isInstance ? null : levelBlock,
+        levelBlock,
         permissionsNode,
-        capabilitiesNode,
-        isInstance ? removeNode : null
+        capabilitiesNode
       )
     ) : null,
     !oauth && !on && form ? (0, import_react36.createElement)(
@@ -14963,40 +14907,495 @@ function ConnectorRow({ connector, actions, readOnly = null, instanceCount = 1 }
     error ? (0, import_react36.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
   );
 }
-function AddInstanceRow({ base, count, max, actions }) {
+function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded = false, onToggle }) {
   const [busy, setBusy] = (0, import_react36.useState)(false);
   const [error, setError] = (0, import_react36.useState)(null);
-  const atCap = typeof max === "number" && count >= max;
-  const add = () => {
-    if (busy || atCap) return;
+  const [settingDraft, setSettingDraft] = (0, import_react36.useState)(null);
+  const [removeAsk, setRemoveAsk] = (0, import_react36.useState)(false);
+  const [levelDraft, setLevelDraft] = (0, import_react36.useState)(null);
+  const [authorizeUrl, setAuthorizeUrl] = (0, import_react36.useState)(null);
+  const oauth = connector.oauth === true;
+  const instance = instanceOf(connector);
+  const declared = declaredSettingsOf(connector);
+  const labelField = instance !== null && !declared.some((field) => field.name === "label") ? { name: "label", label: t("Name"), value: instance.label, placeholder: connector.name } : null;
+  const fields = labelField === null ? declared : [labelField, ...declared];
+  const settingValue = (field) => {
+    if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name];
+    return typeof field.value === "string" ? field.value : "";
+  };
+  const settingsChanged = fields.some((field) => settingValue(field) !== (typeof field.value === "string" ? field.value : ""));
+  const run = (task, after) => {
     setBusy(true);
     setError(null);
-    void actions.connectorCreateInstance(base).catch((failure) => setError(failure?.message ?? String(failure))).finally(() => setBusy(false));
+    return task.then(() => {
+      after?.();
+    }, (failure) => setError(failure?.message ?? String(failure))).finally(() => setBusy(false));
   };
+  const saveSettings = () => {
+    if (busy || !settingsChanged) return;
+    const values = Object.fromEntries(fields.map((field) => [field.name, settingValue(field).trim()]));
+    void run(actions.connectorSetSettings(connector.id, values), () => setSettingDraft(null));
+  };
+  const on = connector.state !== "off";
+  const levels = levelsOfConnector(connector);
+  const currentLevel = typeof connector.level === "string" ? connector.level : null;
+  const writesLocked = typeof readOnly === "string" && readOnly !== "";
+  const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === "object" ? connector.levelNotes : {};
+  const storedSetting = (field) => (typeof field.value === "string" ? field.value : "").trim();
+  const settingsEmpty = declared.some((field) => field.name !== "label" && storedSetting(field) === "");
+  const levelBlocked = (id) => {
+    const note = typeof levelNotes[id] === "string" && levelNotes[id] !== "" ? levelNotes[id] : null;
+    if (note !== null) return note;
+    if (settingsEmpty && /write|full/i.test(id)) return t("Fill in the settings before switching to this level.");
+    return null;
+  };
+  const shownLevel = oauth ? levelDraft ?? currentLevel : currentLevel;
+  const chooseLevel = (id) => {
+    if (oauth && !on) {
+      setLevelDraft(id);
+      return;
+    }
+    setLevelDraft(null);
+    void run(actions.connectorSetLevel(connector.id, id));
+  };
+  const startAuthorization = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const tab = window.open("about:blank", "_blank");
+    try {
+      const level = typeof shownLevel === "string" && shownLevel !== "" ? shownLevel : void 0;
+      const result = await actions.connectorOauthStart(connector.id, level);
+      const url = typeof result?.authorizeUrl === "string" ? result.authorizeUrl : "";
+      if (url === "") throw new Error(t("The authorization page could not be opened"));
+      setAuthorizeUrl(url);
+      if (tab !== null) {
+        try {
+          tab.location.href = url;
+        } catch {
+        }
+        tab.focus?.();
+      }
+    } catch (failure) {
+      try {
+        tab?.close?.();
+      } catch {
+      }
+      setError(failure?.message ?? String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = () => {
+    if (busy) return;
+    void run(actions.connectorDeleteInstance(connector.id), () => setRemoveAsk(false));
+  };
+  const fieldNode = (field) => (0, import_react36.createElement)(
+    "label",
+    { key: field.name, className: "bt-connector-field" },
+    (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, typeof field.label === "string" && field.label !== "" ? field.label : field.name),
+    (0, import_react36.createElement)("div", { className: "bt-q-field" }, (0, import_react36.createElement)("input", {
+      className: "bt-connector-input",
+      value: settingValue(field),
+      placeholder: field.placeholder ?? (typeof field.label === "string" && field.label !== "" ? field.label : field.name),
+      "aria-label": field.label ?? field.name,
+      autoComplete: "off",
+      spellCheck: false,
+      disabled: busy,
+      onChange: (event) => setSettingDraft((previous) => ({ ...previous, [field.name]: event.target.value })),
+      onKeyDown: (event) => {
+        if (event.key === "Enter") saveSettings();
+      }
+    }))
+  );
+  const levelBlock = levels.length > 0 ? (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-setting" },
+    (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
+    (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-levels", role: "radiogroup", "aria-label": t("Access level") },
+      levels.map((entry) => {
+        const item = levelItem(entry);
+        const current = item.id === shownLevel;
+        const blocked = current ? null : levelBlocked(item.id);
+        return (0, import_react36.createElement)(
+          "div",
+          { key: item.id, className: "bt-connector-level-wrap" },
+          (0, import_react36.createElement)(
+            "button",
+            {
+              type: "button",
+              role: "radio",
+              "aria-checked": current,
+              className: "bt-connector-level",
+              "data-current": current || void 0,
+              disabled: busy || writesLocked && item.write === true || blocked !== null,
+              onClick: () => {
+                if (!current && blocked === null) chooseLevel(item.id);
+              }
+            },
+            (0, import_react36.createElement)("span", { className: "bt-connector-level-title" }, item.title),
+            item.description !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-level-note" }, item.description) : null
+          ),
+          blocked !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-level-blocked" }, blocked) : null
+        );
+      })
+    ),
+    (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization."))
+  ) : null;
+  const removeBlock = (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-setting bt-connector-remove" },
+    removeAsk ? (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-remove-ask" },
+      (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Remove project authorization")),
+      (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Removing this authorization deletes its Neon grant. The project itself is not changed.")),
+      (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-form-row" },
+        (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => setRemoveAsk(false) }, t("Cancel")),
+        (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm bt-danger", disabled: busy, onClick: remove }, busy ? t("Removing…") : t("Remove"))
+      )
+    ) : (0, import_react36.createElement)("button", {
+      type: "button",
+      className: "bt-connector-link bt-connector-link-btn bt-danger",
+      disabled: busy,
+      onClick: () => setRemoveAsk(true)
+    }, t("Remove project authorization"))
+  );
+  const connectAction = oauth && connector.state === "error" ? (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+    event.stopPropagation();
+    void startAuthorization();
+  } }, t("Connect again")) : on && connector.state !== "connecting" ? (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+    event.stopPropagation();
+    void run(actions.connectorDisconnect(connector.id));
+  } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+    event.stopPropagation();
+    void startAuthorization();
+  } }, t("Connect")) : null;
   return (0, import_react36.createElement)(
     "div",
-    { className: "bt-connector-add" },
+    {
+      className: "bt-connector-project",
+      "data-state": connector.state,
+      "data-open": expanded || void 0,
+      "data-project-id": connector.id
+    },
     (0, import_react36.createElement)(
-      "button",
-      {
-        type: "button",
-        className: "bt-connector-add-btn",
-        disabled: busy || atCap,
-        onClick: add
-      },
+      "div",
+      { className: "bt-connector-project-head" },
       (0, import_react36.createElement)(
-        "span",
-        { className: "bt-connector-add-plus", "aria-hidden": true },
+        "button",
+        { type: "button", className: "bt-connector-project-main", "aria-expanded": expanded, onClick: onToggle },
         (0, import_react36.createElement)(
-          "svg",
-          { width: 14, height: 14, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" },
-          (0, import_react36.createElement)("path", { d: "M10 4.5v11M4.5 10h11" })
+          "span",
+          { className: "bt-connector-project-text" },
+          (0, import_react36.createElement)("span", { className: "bt-connector-project-name", title: connector.name }, connector.name),
+          (0, import_react36.createElement)("span", { className: "bt-connector-project-status" }, authorizationStatus(connector))
+        ),
+        (0, import_react36.createElement)("span", { className: "bt-connector-chevron", "aria-hidden": true }, (0, import_react36.createElement)(ChevronRightIcon))
+      ),
+      (0, import_react36.createElement)("span", { className: "bt-connector-actions" }, connectAction)
+    ),
+    expanded ? (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-project-body" },
+      (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-instance-grid" },
+        fields.map(fieldNode),
+        levelBlock,
+        (0, import_react36.createElement)(
+          "div",
+          { className: "bt-connector-instance-save" },
+          (0, import_react36.createElement)(
+            "div",
+            { className: "bt-connector-form-row" },
+            (0, import_react36.createElement)("button", {
+              type: "button",
+              className: "bt-soft bt-soft-sm",
+              disabled: busy || !settingsChanged,
+              onClick: saveSettings
+            }, t("Save settings"))
+          ),
+          (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("The name changes only this authorization; its connection and tools stay the same."))
         )
       ),
-      (0, import_react36.createElement)("span", null, busy ? t("Adding…") : instanceAddText(base))
+      removeBlock
+    ) : null,
+    authorizeUrl !== null && !on ? (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-form-row" },
+      (0, import_react36.createElement)("a", { className: "bt-connector-link", href: authorizeUrl, target: "_blank", rel: "noopener noreferrer" }, t("Open the authorization page"))
+    ) : null,
+    error ? (0, import_react36.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
+  );
+}
+function AddProjectForm({ base, baseId, existingIds, actions, onCreated, onCancel }) {
+  const declared = declaredSettingsOf(base);
+  const valueFields = declared.filter((field) => field.name !== "label");
+  const levels = levelsOfConnector(base);
+  const firstLevel = levels.length > 0 ? levelItem(levels[0]).id : "read";
+  const [values, setValues] = (0, import_react36.useState)({});
+  const [level, setLevel] = (0, import_react36.useState)(firstLevel);
+  const [busy, setBusy] = (0, import_react36.useState)(false);
+  const [error, setError] = (0, import_react36.useState)(null);
+  const given = (name) => (values[name] ?? "").trim();
+  const roleField = valueFields.find((field) => field.name === "roleName");
+  const projectField = valueFields.find((field) => field.name === "projectId");
+  const ready = (projectField === void 0 || given("projectId") !== "") && !(level === "write" && roleField !== void 0 && given("roleName") === "");
+  const add = async () => {
+    if (busy || !ready) return;
+    setBusy(true);
+    setError(null);
+    let created = null;
+    try {
+      const before = new Set(existingIds);
+      const view = await actions.connectorCreateInstance(baseId);
+      created = Array.isArray(view) ? view.find((row) => instanceOf(row)?.base === baseId && !before.has(row.id)) : void 0;
+      if (created === void 0) throw new Error(t("The project authorization could not be created."));
+      const settings = {};
+      for (const field of valueFields) settings[field.name] = given(field.name);
+      if (given("label") !== "") settings.label = given("label");
+      await actions.connectorSetSettings(created.id, settings);
+      if (level !== firstLevel) await actions.connectorSetLevel(created.id, level);
+      const id = created.id;
+      onCreated(id);
+    } catch (failure) {
+      if (created !== null) await actions.connectorDeleteInstance(created.id).catch(() => {
+      });
+      setError(failure?.message ?? String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const fieldInput = (name, label, placeholder) => (0, import_react36.createElement)(
+    "label",
+    { key: name, className: "bt-connector-field" },
+    (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, label),
+    (0, import_react36.createElement)("div", { className: "bt-q-field" }, (0, import_react36.createElement)("input", {
+      className: "bt-connector-input",
+      value: values[name] ?? "",
+      placeholder,
+      "aria-label": label,
+      autoComplete: "off",
+      spellCheck: false,
+      disabled: busy,
+      onChange: (event) => setValues((previous) => ({ ...previous, [name]: event.target.value })),
+      onKeyDown: (event) => {
+        if (event.key === "Enter" && ready) void add();
+      }
+    }))
+  );
+  return (0, import_react36.createElement)(
+    "div",
+    { className: "bt-connector-add-form" },
+    fieldInput("label", t("Name (optional)"), t("The project name, if you want a different card name")),
+    valueFields.map((field) => fieldInput(field.name, typeof field.label === "string" && field.label !== "" ? field.label : field.name, field.label ?? field.name)),
+    levels.length > 0 ? (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-setting" },
+      (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
+      (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-levels", role: "radiogroup", "aria-label": t("Access level") },
+        levels.map((entry) => {
+          const item = levelItem(entry);
+          const current = item.id === level;
+          const blocked = current ? null : item.write && given("projectId") === "" ? t("Fill in the project ID first.") : item.write && roleField !== void 0 && given("roleName") === "" ? t("Fill in the SQL role first.") : null;
+          return (0, import_react36.createElement)(
+            "div",
+            { key: item.id, className: "bt-connector-level-wrap" },
+            (0, import_react36.createElement)(
+              "button",
+              {
+                type: "button",
+                role: "radio",
+                "aria-checked": current,
+                className: "bt-connector-level",
+                "data-current": current || void 0,
+                disabled: busy || blocked !== null,
+                onClick: () => {
+                  if (!current && blocked === null) setLevel(item.id);
+                }
+              },
+              (0, import_react36.createElement)("span", { className: "bt-connector-level-title" }, item.title)
+            ),
+            blocked !== null ? (0, import_react36.createElement)("span", { className: "bt-connector-level-blocked" }, blocked) : null
+          );
+        })
+      )
+    ) : null,
+    (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("After adding, connect the authorization from its row.")),
+    (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-form-row" },
+      (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: onCancel }, t("Cancel")),
+      (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy || !ready, onClick: () => void add() }, busy ? t("Adding…") : t("Add project"))
     ),
-    atCap ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("You can connect up to {max} instances.", { max })) : null,
     error !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
+  );
+}
+function GroupCard({ rows, actions, readOnly = null }) {
+  const base = rows.find((row) => row.id === instanceOf(row)?.base) ?? rows[0];
+  const projects = rows.filter((row) => row !== base);
+  const instance = instanceOf(base);
+  const baseId = instance?.base ?? base.id;
+  const max = instance === null ? null : instanceMax(instance);
+  const projectMax = max === null ? null : Math.max(0, max - 1);
+  const [details, setDetails] = (0, import_react36.useState)(false);
+  const [busy, setBusy] = (0, import_react36.useState)(false);
+  const [error, setError] = (0, import_react36.useState)(null);
+  const [authorizeUrl, setAuthorizeUrl] = (0, import_react36.useState)(null);
+  const [openProject, setOpenProject] = (0, import_react36.useState)(null);
+  const [adding, setAdding] = (0, import_react36.useState)(false);
+  const oauth = base.oauth === true;
+  const on = base.state !== "off";
+  const atCap = typeof max === "number" && rows.length >= max;
+  const Mark = CARD_GLYPHS[base.card?.glyph] ?? CARD_GLYPHS[base.id] ?? GenericMark;
+  const docsUrl = typeof base.card?.docsUrl === "string" && base.card.docsUrl !== "" ? base.card.docsUrl : TOKEN_URLS[base.id];
+  const levelNote = typeof base.levelNote === "string" && base.levelNote !== "" ? base.levelNote : null;
+  const needsReauth = base.needsReauth === true;
+  const run = (task, after) => {
+    setBusy(true);
+    setError(null);
+    return task.then(() => {
+      after?.();
+    }, (failure) => setError(failure?.message ?? String(failure))).finally(() => setBusy(false));
+  };
+  const startAuthorization = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const tab = window.open("about:blank", "_blank");
+    try {
+      const result = await actions.connectorOauthStart(base.id, "read");
+      const url = typeof result?.authorizeUrl === "string" ? result.authorizeUrl : "";
+      if (url === "") throw new Error(t("The authorization page could not be opened"));
+      setAuthorizeUrl(url);
+      if (tab !== null) {
+        try {
+          tab.location.href = url;
+        } catch {
+        }
+        tab.focus?.();
+      }
+    } catch (failure) {
+      try {
+        tab?.close?.();
+      } catch {
+      }
+      setError(failure?.message ?? String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const connectAction = oauth && base.state === "error" ? (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+    event.stopPropagation();
+    void startAuthorization();
+  } }, t("Connect again")) : on && base.state !== "connecting" ? (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+    event.stopPropagation();
+    void run(actions.connectorDisconnect(base.id));
+  } }, t("Disconnect")) : base.state === "connecting" ? (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? (0, import_react36.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+    event.stopPropagation();
+    void startAuthorization();
+  } }, t("Connect")) : null;
+  const text = (0, import_react36.createElement)(
+    "span",
+    { className: "bt-connector-text" },
+    (0, import_react36.createElement)("span", { className: "bt-connector-name", title: base.name }, base.name),
+    (0, import_react36.createElement)("span", { className: "bt-connector-status" }, groupStatusText(base, projects.length))
+  );
+  const mark = (0, import_react36.createElement)("span", { className: "bt-connector-mark" }, Mark ? (0, import_react36.createElement)(Mark) : null);
+  const plus = (0, import_react36.createElement)(
+    "span",
+    { className: "bt-connector-add-plus", "aria-hidden": true },
+    (0, import_react36.createElement)(
+      "svg",
+      { width: 14, height: 14, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" },
+      (0, import_react36.createElement)("path", { d: "M10 4.5v11M4.5 10h11" })
+    )
+  );
+  return (0, import_react36.createElement)(
+    "div",
+    {
+      className: "bt-connector",
+      "data-group": baseId,
+      "data-state": base.state,
+      "data-open": details || void 0
+    },
+    (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-head" },
+      (0, import_react36.createElement)("button", {
+        type: "button",
+        className: "bt-connector-main",
+        "aria-expanded": details,
+        onClick: () => setDetails((value) => !value)
+      }, mark, text, (0, import_react36.createElement)("span", { className: "bt-connector-chevron", "aria-hidden": true }, (0, import_react36.createElement)(ChevronRightIcon))),
+      (0, import_react36.createElement)("span", { className: "bt-connector-actions" }, connectAction)
+    ),
+    error !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null,
+    oauth && !on && authorizeUrl !== null && base.state !== "connecting" ? (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-form-row" },
+      (0, import_react36.createElement)("a", { className: "bt-connector-link", href: authorizeUrl, target: "_blank", rel: "noopener noreferrer" }, t("Open the authorization page"))
+    ) : null,
+    details ? (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-panel", role: "group", "aria-label": t("Connector settings") },
+      (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-panel-inner" },
+        (0, import_react36.createElement)(
+          "div",
+          { className: "bt-connector-setting bt-connector-base" },
+          (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Base connection")),
+          (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Read-only access covers all projects. Writing needs a project authorization.")),
+          base.account ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Connected as {account}", { account: base.account })) : null,
+          levelNote !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, levelNote) : null,
+          needsReauth ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("Click Connect to authorize with this access level again.")) : null,
+          oauth && docsUrl !== void 0 ? (0, import_react36.createElement)(
+            "div",
+            { className: "bt-connector-docs" },
+            (0, import_react36.createElement)("a", { className: "bt-connector-link", href: docsUrl, target: "_blank", rel: "noopener noreferrer" }, t("Documentation"))
+          ) : null
+        ),
+        (0, import_react36.createElement)(
+          "div",
+          { className: "bt-connector-setting bt-connector-projects" },
+          (0, import_react36.createElement)("div", { className: "bt-connector-action-title" }, t("Project authorizations")),
+          projects.length === 0 ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("No project authorizations yet. Add one to run write tools against a project.")) : (0, import_react36.createElement)("div", { className: "bt-connector-project-list" }, projects.map((row) => (0, import_react36.createElement)(ProjectAuthorizationRow, {
+            key: row.id,
+            connector: row,
+            actions,
+            readOnly,
+            expanded: openProject === row.id,
+            onToggle: () => setOpenProject((current) => current === row.id ? null : row.id)
+          }))),
+          adding ? (0, import_react36.createElement)(AddProjectForm, {
+            key: "add-project",
+            base,
+            baseId,
+            existingIds: rows.map((row) => row.id),
+            actions,
+            onCreated: (id) => {
+              setAdding(false);
+              setOpenProject(id);
+            },
+            onCancel: () => setAdding(false)
+          }) : (0, import_react36.createElement)("button", {
+            type: "button",
+            className: "bt-connector-add-btn",
+            disabled: atCap,
+            onClick: () => setAdding(true)
+          }, plus, (0, import_react36.createElement)("span", null, t("Add a project"))),
+          atCap ? (0, import_react36.createElement)("div", { className: "bt-connector-hint" }, t("You can add up to {max} project authorizations.", { max: projectMax })) : null
+        )
+      )
+    ) : null
   );
 }
 function connectorGroups(list) {
@@ -15029,17 +15428,7 @@ function ConnectorsPage({ roster, actions }) {
       rows.push((0, import_react36.createElement)(ConnectorRow, { key: connector.id, connector, actions, readOnly }));
       continue;
     }
-    for (const connector of group.rows) {
-      rows.push((0, import_react36.createElement)(ConnectorRow, { key: connector.id, connector, actions, readOnly, instanceCount: group.rows.length }));
-    }
-    const first = instanceOf(group.rows[0]);
-    rows.push((0, import_react36.createElement)(AddInstanceRow, {
-      key: `${group.base}-add`,
-      base: group.base,
-      count: group.rows.length,
-      max: first === null ? null : instanceMax(first),
-      actions
-    }));
+    rows.push((0, import_react36.createElement)(GroupCard, { key: `${group.base}-group`, rows: group.rows, actions, readOnly }));
   }
   return (0, import_react36.createElement)(
     "section",
