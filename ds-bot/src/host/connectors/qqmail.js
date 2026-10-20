@@ -74,6 +74,7 @@ export default {
   imap: { write: true },
   capabilities: [
     { key: 'read', title: 'Read mail', description: 'List folders, search mail and read a message without marking it.', risk: 'read' },
+    { key: 'read_attachments', title: 'Read attachments', description: "List a message's attachments and read one text attachment, up to 20000 characters; binary files are named by type and size only.", risk: 'read' },
     { key: 'mark_read', title: 'Mark read or unread', description: 'Change the read state of messages.', risk: 'write' },
     { key: 'move_delete', title: 'Move or delete messages', description: 'Move messages between folders or to Trash.', risk: 'write' },
     { key: 'save_draft', title: 'Save a draft', description: 'Write a draft in the Drafts folder; nothing is sent.', risk: 'write' },
@@ -84,7 +85,7 @@ export default {
   card: {
     glyph: 'qqmail',
     about: 'Read your QQ Mail inbox over IMAP: list folders, search, and read messages. Sending is not part of this connector.',
-    readOnlyNote: 'Read-only: opens the mailbox with EXAMINE and fetches bodies with BODY.PEEK, so reading a mail here never marks it as read. It never sends, deletes or moves a message.',
+    readOnlyNote: 'At the default read level nothing changes in the mailbox. Full capabilities adds mark, move, delete and draft tools; every change asks for your approval first.',
     docsUrl: 'https://service.mail.qq.com/',
   },
   // Checked once, when the card saves the credentials: a login that opens INBOX read-only.
