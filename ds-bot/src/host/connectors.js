@@ -387,24 +387,34 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     }
     return summarise(answer, defaultApprovalLine(tool, args))
   }
-  const requireActionApproval = async (id, tool, args, exec, client) => {
-    await requireApproval(options[id], tool, exec, await approvalOf(id, tool, args, client))
+  // The name a card and the diagnostics line use: an instance carries its id, so two cards
+  // that share a label are still told apart, and a rename never touches the id or the tool
+  // prefix. The audit lines record the outcome, never the call arguments or a token.
+  const titleOf = (id) => {
+    const connector = options[id]
+    return connector.baseId === undefined ? connector.displayName : `${connector.displayName} (${id})`
   }
-  const requireApproval = async (connector, tool, exec, summary) => {
+  const requireActionApproval = async (id, tool, args, exec, client) => {
+    await requireApproval(id, tool, exec, await approvalOf(id, tool, args, client))
+  }
+  const requireApproval = async (id, tool, exec, summary) => {
+    const connector = options[id]
+    if (connector === undefined) throw new Error('No such connector')
+    const title = titleOf(id)
     const readOnly = rt.readOnly()
     if (readOnly !== undefined) throw new Error(`DS Bot is read-only: ${readOnly}`)
     const outcome = await approval.approve({
       sessionId: exec?.agent?.id,
-      connector: connector.displayName,
+      connector: title,
       tool,
       signal: exec?.signal,
       ...(summary === undefined ? {} : { summary }),
     })
     if (outcome === 'allow') return
-    if (outcome === 'timeout') throw new Error(`The user did not answer in time, so ${connector.displayName}'s ${tool} was not run.`)
-    if (outcome === 'cancelled') throw new Error(`The approval was cancelled, so ${connector.displayName}'s ${tool} was not run.`)
-    if (outcome === 'unavailable') throw new Error(`${connector.displayName}'s ${tool} needs your approval, but the approval card could not be shown; nothing was sent.`)
-    throw new Error(`The user denied ${connector.displayName}'s ${tool}; nothing was sent.`)
+    if (outcome === 'timeout') throw new Error(`The user did not answer in time, so ${title}'s ${tool} was not run.`)
+    if (outcome === 'cancelled') throw new Error(`The approval was cancelled, so ${title}'s ${tool} was not run.`)
+    if (outcome === 'unavailable') throw new Error(`${title}'s ${tool} needs your approval, but the approval card could not be shown; nothing was sent.`)
+    throw new Error(`The user denied ${title}'s ${tool}; nothing was sent.`)
   }
   const insecure = id => [options[id].url, options[id].api]
     .filter(address => address !== undefined)
@@ -652,7 +662,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     // action: the module names the call, the framework redacts it and addresses the card
     // to the Session running the tool. A read level simply never offers a write helper.
     const approve = async ({ tool, line, danger, change, reversible, target, exec } = {}) => {
-      await requireApproval(connector, tool, exec, summarise(
+      await requireApproval(id, tool, exec, summarise(
         { line, danger, change, reversible, target },
         defaultApprovalLine(tool, undefined),
       ))
@@ -730,7 +740,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       redact: rt.redactSecrets,
       approve: async ({ text, exec }) => {
         if (automatic()) return
-        await requireApproval(connector, toolName, exec, {
+        await requireApproval(id, toolName, exec, {
           line: `Send a ${connector.displayName} message to chat ${chatIdOf(state, id) ?? '?'}: "${String(text).slice(0, 120)}"`,
         })
       },
@@ -1098,9 +1108,12 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     queue = result.then(() => {}, () => {})
     return result
   }
-  // `force` connects again even when the token is the same.
-  const sync = (id, force = false) => serialise(() => reconcile(id, force))
+  // A mount asked for by a change that already holds the queue runs inline: queueing it
+  // again would wait behind the change itself forever.
+  const refresh = (id, force = false) => reconcile(id, force)
     .catch(error => { rt.warn('ds-bot: connectors: %s', reason(error)) })
+  // `force` connects again even when the token is the same.
+  const sync = (id, force = false) => serialise(() => refresh(id, force))
 
   // A token connector shows the account signIn read; an OAuth connector shows what its
   // own account tool answered after the mount.
@@ -1241,7 +1254,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
           }
         }
         await rt.save()
-        await sync(body.id, true)
+        await refresh(body.id, true)
         return connectorsView()
       }
       if (token === '') throw new Error('Paste a token first')
@@ -1260,7 +1273,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
         throw error
       }
       await rt.save()
-      await sync(body.id)
+      await refresh(body.id)
       return connectorsView()
     },
     // The browser half of an OAuth connect: DS Bot answers with the provider's authorize
@@ -1281,9 +1294,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       const note = (typeof connector.unavailable === 'string' && connector.unavailable !== '' ? connector.unavailable : undefined)
         ?? readinessFor(body.id, level, settingsOf(body.id))
       if (note !== undefined) throw new Error(note)
-      // An authorization starts in the same queue as a mount or a removal: a browser that
-      // comes back after the user removed the instance cannot mount it again.
-      return await serialise(() => oauth.start(body.id, { origin: meta.origin, level, settings: settingsOf(body.id) }))
+      // The endpoint is queued like every change: a browser that comes back after the user
+      // removed the instance cannot mount it again.
+      return await oauth.start(body.id, { origin: meta.origin, level, settings: settingsOf(body.id) })
     },
     async 'connector-disconnect'(body, meta) {
       known(body.id)
@@ -1291,7 +1304,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       // Who took a connector away, and from where: a connector entry disappearing is the
       // one change a user may need to trace later. No token or secret is recorded.
       rt.diagnostics?.record?.({
-        source: 'connector-disconnect',
+        source: 'connector-disconnected',
         text: `${connector.displayName} (${body.id}) disconnected from ${typeof meta?.origin === 'string' && meta.origin !== '' ? meta.origin : 'an unknown origin'}`,
       })
       // The settings and the chosen level describe the connector, not the grant: a
@@ -1309,7 +1322,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
         if (Object.keys(remaining).length > 0) state.connectors = { ...state.connectors, [body.id]: remaining }
         else if (state.connectors?.[body.id] !== undefined) delete state.connectors[body.id]
         await rt.save()
-        await sync(body.id, true)
+        await refresh(body.id, true)
         return connectorsView()
       }
       await rt.loadSecrets()
@@ -1321,7 +1334,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       if (Object.keys(remaining).length > 0) state.connectors = { ...state.connectors, [body.id]: remaining }
       else if (state.connectors?.[body.id] !== undefined) delete state.connectors[body.id]
       await rt.save()
-      await sync(body.id)
+      await refresh(body.id)
       return connectorsView()
     },
     // The access level the user chose. An authorized OAuth connector has to authorize
@@ -1354,7 +1367,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
         state.connectors = { ...state.connectors, [body.id]: { ...prior, level } }
       }
       await rt.save()
-      await sync(body.id, true)
+      await refresh(body.id, true)
       return connectorsView()
     },
     // Plain configuration a connector needs (a project id, a role). It is not a secret, so
@@ -1387,7 +1400,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       // endpoint, and the approval cards of this instance use the new name too.
       if (connector.baseId !== undefined) connector.displayName = instanceNameOf(connector.baseId, body.id)
       await rt.save()
-      await sync(body.id, true)
+      await refresh(body.id, true)
       return connectorsView()
     },
     // One more card for a multi-instance connector: the state key is written, the row shows
@@ -1398,74 +1411,69 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       if (definition === undefined) throw new Error('No such connector')
       if (definition.instances === undefined) throw new Error(`${definition.displayName} does not support more than one instance`)
       if (rt.config[base] === false) throw new Error(`${definition.displayName} is turned off in the profile`)
-      return await serialise(async () => {
-        const existing = instanceIdsOf(base)
-        if (existing.length >= definition.instances.max) {
-          throw new Error(`${definition.displayName} supports at most ${definition.instances.max} instances`)
-        }
-        const { id, next } = allocateInstanceId(base, existing)
-        if (rt.config[id] === false) throw new Error(`${id} is turned off in the profile`)
-        // The first instance is implied while it has no state key; once a second one is
-        // added, write it too, so a restart still lists both instead of dropping it. A base
-        // instance the user already removed is not brought back by adding another one.
-        const keepBase = existing.includes(base) && state.connectors?.[base] === undefined
-          ? { [base]: { level: 'read', settings: {} } }
-          : {}
-        state.connectors = { ...state.connectors, ...keepBase, [id]: { level: 'read', settings: {} } }
-        state.connectorInstances = { ...(state.connectorInstances ?? {}), [base]: { next } }
-        options[id] = buildOption(base, id)
-        statuses.set(id, { state: 'off' })
-        await rt.save()
-        rt.diagnostics?.record?.({
-          source: 'connector-create-instance',
-          text: `${definition.displayName} instance ${id} added as "${instanceNameOf(base, id)}"`,
-        })
-        return connectorsView()
+      const existing = instanceIdsOf(base)
+      if (existing.length >= definition.instances.max) {
+        throw new Error(`${definition.displayName} supports at most ${definition.instances.max} instances (${existing.length} already exist); remove one before adding another`)
+      }
+      const { id, next } = allocateInstanceId(base, existing)
+      if (rt.config[id] === false) throw new Error(`${id} is turned off in the profile`)
+      // The first instance is implied while it has no state key; once a second one is
+      // added, write it too, so a restart still lists both instead of dropping it. A base
+      // instance the user already removed is not brought back by adding another one.
+      const keepBase = existing.includes(base) && state.connectors?.[base] === undefined
+        ? { [base]: { level: 'read', settings: {} } }
+        : {}
+      state.connectors = { ...state.connectors, ...keepBase, [id]: { level: 'read', settings: {} } }
+      state.connectorInstances = { ...(state.connectorInstances ?? {}), [base]: { next } }
+      options[id] = buildOption(base, id)
+      statuses.set(id, { state: 'off' })
+      await rt.save()
+      rt.diagnostics?.record?.({
+        source: 'connector-created',
+        text: `${definition.displayName} instance ${id} added as "${instanceNameOf(base, id)}"`,
       })
+      return connectorsView()
     },
     // Remove one instance: its tools, its authorization and its state key go; every other
     // instance keeps its own. The provider grant is revoked best effort — a failed revoke
     // is a warning and does not leave the removal half done locally. The last instance stays.
     async 'connector-delete-instance'(body, meta) {
       const id = typeof body.id === 'string' ? body.id : ''
+      // A parallel removal may have taken this one between the endpoint call and the queue.
       const connector = options[id]
       if (connector === undefined) throw new Error('No such connector')
       const base = connector.baseId
       const definition = base === undefined ? undefined : definitionOf(base)
       if (definition === undefined || definition.instances === undefined) throw new Error(`${connector.displayName} has a single instance and cannot be removed`)
-      return await serialise(async () => {
-        // Checked again inside the queue: a parallel removal may have taken one already.
-        if (options[id] === undefined) throw new Error('No such connector')
-        if (instanceIdsOf(base).length <= definition.instances.min) {
-          throw new Error(`${definition.displayName} keeps at least ${definition.instances.min} instance${definition.instances.min === 1 ? '' : 's'}`)
+      if (instanceIdsOf(base).length <= definition.instances.min) {
+        throw new Error(`${definition.displayName} keeps at least ${definition.instances.min} instance${definition.instances.min === 1 ? '' : 's'}`)
+      }
+      const label = instanceNameOf(base, id)
+      storeAttempts.delete(id)
+      await unmount(id)
+      if (connector.mode === 'oauth-mcp' && oauth !== undefined) {
+        try {
+          await oauth.disconnect(id)
+        } catch (error) {
+          rt.warn('ds-bot: could not clear the %s authorization of %s: %s', definition.displayName, id, reason(error))
         }
-        const label = instanceNameOf(base, id)
-        storeAttempts.delete(id)
-        await unmount(id)
-        if (connector.mode === 'oauth-mcp' && oauth !== undefined) {
-          try {
-            await oauth.disconnect(id)
-          } catch (error) {
-            rt.warn('ds-bot: could not clear the %s authorization of %s: %s', definition.displayName, id, reason(error))
-          }
-        }
-        if (state.connectors?.[id] !== undefined) delete state.connectors[id]
-        delete options[id]
-        statuses.delete(id)
-        mounts.delete(id)
-        await rt.save()
-        const origin = typeof meta?.origin === 'string' && meta.origin !== '' ? ` from ${meta.origin}` : ''
-        rt.diagnostics?.record?.({
-          source: 'connector-delete-instance',
-          text: `${definition.displayName} instance ${id} ("${label}") removed${origin}`,
-        })
-        return connectorsView()
+      }
+      if (state.connectors?.[id] !== undefined) delete state.connectors[id]
+      delete options[id]
+      statuses.delete(id)
+      mounts.delete(id)
+      await rt.save()
+      const origin = typeof meta?.origin === 'string' && meta.origin !== '' ? ` from ${meta.origin}` : ''
+      rt.diagnostics?.record?.({
+        source: 'connector-deleted',
+        text: `${definition.displayName} instance ${id} ("${label}") removed${origin}`,
       })
+      return connectorsView()
     },
     async 'connector-retry'(body) {
       known(body.id)
       await rt.loadSecrets()
-      await sync(body.id, true)
+      await refresh(body.id, true)
       return connectorsView()
     },
     // One test message through the module's real send path. The token is good, so a
@@ -1491,7 +1499,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
         if (Array.isArray(found.candidates)) return tested(connector.notify.multipleChatsText ?? 'Several chats are available: type the chat id you want.')
         if (!rememberChat(body.id, found)) return tested(connector.notify.missingChatText ?? 'Message the bot first, then press Test again.')
         await rt.save()
-        await sync(body.id, true)
+        await refresh(body.id, true)
       }
       try {
         const text = typeof connector.notify.testText === 'string' && connector.notify.testText !== '' ? connector.notify.testText : NOTIFY_TEST_TEXT
@@ -1512,7 +1520,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       else prior.chatId = chatId
       state.connectors = { ...state.connectors, [body.id]: prior }
       await rt.save()
-      await sync(body.id, true)
+      await refresh(body.id, true)
       return connectorsView()
     },
     // Automatic sends for one notification connector: the user turns this on once, and
@@ -1524,12 +1532,14 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       const enabled = body.enabled === true
       state.connectors = { ...state.connectors, [body.id]: { ...state.connectors?.[body.id], autoPush: enabled } }
       await rt.save()
-      await sync(body.id, true)
+      await refresh(body.id, true)
       return connectorsView()
     },
   }
 
-  const connectorEndpoint = (endpoint, body, meta) => endpoints[endpoint](body ?? {}, meta ?? {})
+  // Every endpoint that changes a connector runs in the host queue, whether it mounts,
+  // authorizes, adds, removes or reconfigures: no two changes ever interleave.
+  const connectorEndpoint = (endpoint, body, meta) => serialise(() => endpoints[endpoint](body ?? {}, meta ?? {}))
 
   ctx.effect(() => {
     stopped = false
