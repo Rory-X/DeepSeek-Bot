@@ -17,6 +17,34 @@ export const CONNECTOR_LEVELS = ['read', 'write']
 // This file and test-only helpers stay out of the registry.
 const NOT_A_CONNECTOR = /^(registry\.js|_.*|.*\.test\.js)$/
 const LEVEL_HOOKS = ['authorize', 'toolsOf', 'readiness', 'normalizeSettings', 'actionApproval']
+const CAPABILITY_RISKS = ['read', 'write', 'destructive']
+
+// Display-only additions: what the connector can do, and one line about the grant it asks
+// for. Missing pieces hide that block on the card; nothing here enables a tool.
+const checkDisplay = (file, id, connector) => {
+  if (connector.capabilities !== undefined) {
+    if (!Array.isArray(connector.capabilities)) throw new Error(`Connector module ${file} ("${id}") capabilities must be a list`)
+    for (const entry of connector.capabilities) {
+      if (entry === null || typeof entry !== 'object' || typeof entry.key !== 'string' || entry.key === ''
+        || typeof entry.title !== 'string' || entry.title === '' || !CAPABILITY_RISKS.includes(entry.risk)) {
+        throw new Error(`Connector module ${file} ("${id}") capabilities need a key, a title and a risk of ${CAPABILITY_RISKS.join(', ')}`)
+      }
+      if (entry.preview !== undefined && (entry.preview === null || typeof entry.preview !== 'object')) {
+        throw new Error(`Connector module ${file} ("${id}") capability "${entry.key}" preview must be an object`)
+      }
+    }
+  }
+  if (connector.permissions !== undefined) {
+    if (connector.permissions === null || typeof connector.permissions !== 'object'
+      || typeof connector.permissions.summary !== 'string' || connector.permissions.summary === '') {
+      throw new Error(`Connector module ${file} ("${id}") permissions need a summary`)
+    }
+    if (connector.permissions.scopes !== undefined
+      && (!Array.isArray(connector.permissions.scopes) || connector.permissions.scopes.some(scope => typeof scope !== 'string'))) {
+      throw new Error(`Connector module ${file} ("${id}") permissions scopes must be strings`)
+    }
+  }
+}
 
 // The level-aware part of the shape: the levels, the compatibility default, and the hooks
 // that take a level. A wrong default or a non-function hook is a configuration error.
@@ -74,6 +102,7 @@ export async function loadConnectorModules(dir = CONNECTOR_DIR) {
       throw new Error(`Connector module ${file} ("${id}") needs a mode: ${CONNECTOR_MODES.join(', ')}`)
     }
     checkLevels(file, id, connector)
+    checkDisplay(file, id, connector)
     const { id: key, ...definition } = connector
     loaded[key] = definition
   }

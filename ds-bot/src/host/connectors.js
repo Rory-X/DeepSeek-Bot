@@ -892,6 +892,10 @@ export function install(rt) {
           }
         : {}),
       ...(connector.card === undefined ? {} : { card: connector.card }),
+      // Display data only: what the connector can do and what its grant asks for. A client
+      // renders what it knows and hides a block whose fields are missing.
+      ...(connector.capabilities === undefined ? {} : { capabilities: connector.capabilities }),
+      ...(connector.permissions === undefined ? {} : { permissions: connector.permissions }),
       ...Object.fromEntries(['readOnly', 'readOnlyNote', 'glyph', 'about', 'docsUrl']
         .filter(key => connector[key] !== undefined)
         .map(key => [key, connector[key]])),
