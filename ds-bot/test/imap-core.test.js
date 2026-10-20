@@ -1,12 +1,121 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { createImapTools, searchCriteria } from '../src/host/connectors/_imap.js'
+import { createImapTools, createImapWriteTools, searchCriteria } from '../src/host/connectors/_imap.js'
 
+const CRLF = '\r\n'
 const source = readFileSync(fileURLToPath(new URL('../src/host/connectors/_imap.js', import.meta.url)), 'utf8')
 // Comments may name the commands they promise not to send; only code counts.
 const code = source.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(line => !line.trim().startsWith('//')).join('\n')
+
+const tagOf = line => line.slice(0, line.indexOf(' '))
+const ok = (socket, line, text = 'completed') => socket.send(`${tagOf(line)} OK ${text}${CRLF}`)
+
+// One fake IMAP server: it answers the lines the client writes and keeps what it received,
+// so a test can assert the exact command list — and that a refused write sends nothing.
+class FakeSocket extends EventEmitter {
+  constructor(onLine) {
+    super()
+    this.onLine = onLine
+    this.buffer = Buffer.alloc(0)
+    this.pending = undefined
+    this.destroyed = false
+    setImmediate(() => {
+      this.emit('connect')
+      this.send(`* OK [CAPABILITY IMAP4rev1] ready${CRLF}`)
+    })
+  }
+
+  write(text) {
+    this.feed(Buffer.isBuffer(text) ? text : Buffer.from(String(text), 'utf8'))
+  }
+
+  feed(chunk) {
+    this.buffer = Buffer.concat([this.buffer, chunk])
+    for (;;) {
+      if (this.pending !== undefined) {
+        const { line, size } = this.pending
+        if (this.buffer.length < size) return
+        const literal = this.buffer.subarray(0, size)
+        this.buffer = this.buffer.subarray(size)
+        this.pending = undefined
+        this.onLine(line, this, literal)
+        continue
+      }
+      const at = this.buffer.indexOf(CRLF)
+      if (at === -1) return
+      const line = this.buffer.subarray(0, at).toString('utf8')
+      this.buffer = this.buffer.subarray(at + 2)
+      const marker = /\{(\d+)\}$/.exec(line)
+      if (marker !== null) {
+        this.pending = { line, size: Number(marker[1]) }
+        continue
+      }
+      this.onLine(line, this)
+    }
+  }
+
+  send(text) {
+    if (!this.destroyed) this.emit('data', Buffer.from(text, 'utf8'))
+  }
+
+  end() {}
+
+  destroy() {
+    if (this.destroyed) return
+    this.destroyed = true
+    this.emit('close')
+  }
+}
+
+function imapServer({ capabilities = ['IMAP4rev1'], folders = [{ name: 'INBOX' }], onLine } = {}) {
+  const commands = []
+  const literals = []
+  const sockets = []
+  const listing = folders
+    .map(folder => `* LIST (${folder.flags ?? '\\HasNoChildren'}) "/" "${folder.name}"`)
+    .join(CRLF)
+  const connect = () => {
+    const socket = new FakeSocket((line, current, literal) => {
+      commands.push(line)
+      if (literal !== undefined) {
+        literals.push(literal.toString('utf8'))
+        ok(current, line, 'APPEND completed')
+        return
+      }
+      if (onLine?.(line, current) === true) return
+      if (/^A\d+ CAPABILITY/.test(line)) return current.send(`* CAPABILITY ${capabilities.join(' ')}${CRLF}${tagOf(line)} OK CAPABILITY completed${CRLF}`)
+      if (/^A\d+ LOGIN /.test(line)) return ok(current, line, '[CAPABILITY IMAP4rev1] LOGIN completed')
+      if (/^A\d+ ID /.test(line)) return current.send(`${tagOf(line)} BAD Unknown command${CRLF}`)
+      if (/^A\d+ (SELECT|EXAMINE) /.test(line)) return current.send(`* 3 EXISTS${CRLF}${tagOf(line)} OK completed${CRLF}`)
+      if (/^A\d+ LIST /.test(line)) return current.send(`${listing}${CRLF}${tagOf(line)} OK LIST completed${CRLF}`)
+      if (/^A\d+ UID SEARCH/.test(line)) return current.send(`* SEARCH 1 2 3${CRLF}${tagOf(line)} OK SEARCH completed${CRLF}`)
+      if (/^A\d+ UID (STORE|MOVE|COPY|EXPUNGE)/.test(line)) return ok(current, line)
+      return current.send(`${tagOf(line)} BAD Unknown command${CRLF}`)
+    })
+    sockets.push(socket)
+    return socket
+  }
+  return { connect, commands, literals, sockets }
+}
+
+const sent = server => server.commands.map(line => line.replace(/^A\d+ /, ''))
+
+const writeTools = ({ server, approve = async () => {}, redact } = {}) => createImapWriteTools({
+  id: 'qq',
+  displayName: 'QQ Mail',
+  credential: 'user@example.com:secret-code',
+  account: { mailbox: 'user@example.com' },
+  connect: server.connect,
+  approve,
+  redact,
+  timeoutMs: 1_000,
+  connectTimeoutMs: 500,
+})
+
+const tool = (tools, name) => tools.find(entry => entry.name === `qq_${name}`)
 
 test('IMAP search keeps the standard criteria and only nests Gmail syntax when asked', () => {
   assert.equal(searchCriteria({}), 'ALL')
@@ -29,8 +138,162 @@ test('only the Gmail connector offers the raw query parameter', () => {
   assert.equal(make(false).tools.find(tool => tool.name === 'mail_search').parameters.properties.query, undefined)
 })
 
-test('the shared IMAP core carries no write command', () => {
-  for (const command of ['STORE', 'APPEND', 'COPY', 'MOVE', 'EXPUNGE', 'SELECT']) {
-    assert.equal(new RegExp(`\\b${command}\\b`).test(code), false, command)
+test('the core sends a permanent delete only as UID EXPUNGE', () => {
+  for (const line of code.split('\n')) {
+    if (/\bEXPUNGE\b/.test(line)) assert.match(line, /UID EXPUNGE/)
   }
+})
+
+test('a connector without an approval step gets no write tools', () => {
+  assert.throws(() => createImapWriteTools({
+    id: 'qq', displayName: 'QQ Mail', credential: 'name@example.com:code', account: { mailbox: 'name@example.com' },
+  }), /without an approval step/)
+})
+
+test('the read tools keep EXAMINE and BODY.PEEK after the write session exists', async () => {
+  const server = imapServer()
+  const read = createImapTools({
+    id: 'qq', displayName: 'QQ Mail', credential: 'user@example.com:secret-code', account: { mailbox: 'user@example.com' },
+    connect: server.connect, timeoutMs: 1_000,
+  })
+  try {
+    await read.tools[0].execute()
+    await read.tools[1].execute({ unseen: true })
+  } finally {
+    await read.close()
+  }
+  const text = server.commands.join('\n')
+  for (const command of ['STORE', 'APPEND', 'COPY', 'MOVE', 'EXPUNGE', 'SELECT']) {
+    assert.equal(new RegExp(`\\b${command}\\b`).test(text), false, command)
+  }
+  assert.match(text, /EXAMINE "INBOX"/)
+})
+
+test('a refused write asks first and sends no command at all', async () => {
+  const server = imapServer()
+  let asked
+  const tools = writeTools({ server, approve: async (request) => { asked = request; throw new Error('The user denied it; nothing changed.') } })
+  await assert.rejects(tool(tools, 'mark_read').execute({ uids: [12, 13] }), /The user denied it/)
+  assert.equal(asked.tool, 'qq_mark_read')
+  assert.match(asked.line, /Mark 2 message\(s\) in "INBOX" as read \(UID 12,13\)/)
+  assert.equal(server.sockets.length, 0)
+})
+
+test('mark_read opens the folder for writing and stores the flag', async () => {
+  const server = imapServer()
+  const tools = writeTools({ server })
+  const text = await tool(tools, 'mark_read').execute({ folder: 'Archive', uids: [12, 13] })
+  assert.equal(text, 'Marked 2 message(s) in "Archive" as read.')
+  assert.deepEqual(sent(server).filter(line => /^(SELECT|UID STORE)/.test(line)), [
+    'SELECT "Archive"',
+    'UID STORE 12,13 +FLAGS.SILENT (\\Seen)',
+  ])
+  assert.equal(/\bEXAMINE\b/.test(server.commands.join('\n')), false)
+})
+
+test('move uses MOVE when the server advertises it', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1', 'MOVE'] })
+  const tools = writeTools({ server })
+  await tool(tools, 'move_messages').execute({ to: 'Archive', uids: [4] })
+  assert.ok(sent(server).includes('UID MOVE 4 "Archive"'))
+  assert.equal(sent(server).some(line => line.startsWith('UID COPY')), false)
+})
+
+test('without MOVE a move copies and flags, and never expunges', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1'] })
+  const tools = writeTools({ server })
+  await tool(tools, 'move_messages').execute({ to: 'Archive', uids: [4] })
+  assert.ok(sent(server).includes('UID COPY 4 "Archive"'))
+  assert.ok(sent(server).includes('UID STORE 4 +FLAGS.SILENT (\\Deleted)'))
+  assert.equal(/EXPUNGE/.test(server.commands.join('\n')), false)
+})
+
+test('delete moves to Trash by default', async () => {
+  const server = imapServer({
+    capabilities: ['IMAP4rev1', 'MOVE'],
+    folders: [{ name: 'INBOX' }, { name: 'Trash', flags: '\\Trash \\HasNoChildren' }],
+  })
+  let asked
+  const tools = writeTools({ server, approve: async (request) => { asked = request } })
+  const text = await tool(tools, 'delete_messages').execute({ uids: [9] })
+  assert.match(text, /to Trash/)
+  assert.match(asked.line, /from "INBOX" to Trash/)
+  assert.equal(asked.danger, undefined)
+  assert.ok(sent(server).includes('UID MOVE 9 "Trash"'))
+})
+
+test('a permanent delete is refused when the server has no UIDPLUS', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1'] })
+  let asked
+  const tools = writeTools({ server, approve: async (request) => { asked = request } })
+  await assert.rejects(tool(tools, 'delete_messages').execute({ uids: [9], permanent: true }), /cannot permanently delete/)
+  assert.equal(asked.danger, true)
+  assert.match(asked.line, /cannot be undone/)
+  assert.equal(sent(server).some(line => /^(UID STORE|UID EXPUNGE)/.test(line)), false)
+})
+
+test('a permanent delete on a UIDPLUS server flags then expunges by UID', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1', 'UIDPLUS'] })
+  const tools = writeTools({ server })
+  await tool(tools, 'delete_messages').execute({ uids: [9], permanent: true })
+  assert.deepEqual(sent(server).filter(line => /^(UID STORE|EXPUNGE|UID EXPUNGE)/.test(line)), [
+    'UID STORE 9 +FLAGS.SILENT (\\Deleted)',
+    'UID EXPUNGE 9',
+  ])
+  assert.deepEqual(server.commands.filter(line => /\bEXPUNGE\b/.test(line) && !/UID EXPUNGE/.test(line)), [])
+})
+
+test('too many UIDs and a line break are refused before anything is asked or sent', async () => {
+  const server = imapServer()
+  let asks = 0
+  const tools = writeTools({ server, approve: async () => { asks += 1 } })
+  await assert.rejects(tool(tools, 'mark_read').execute({ uids: Array.from({ length: 101 }, (_, index) => index + 1) }), /At most 100 messages/)
+  await assert.rejects(tool(tools, 'mark_read').execute({}), /at least one message UID/)
+  await assert.rejects(tool(tools, 'move_messages').execute({ uids: [1], to: 'x\r\nSTORE 1 +FLAGS (\\Deleted)' }), /line break/)
+  await assert.rejects(tool(tools, 'mark_read').execute({ uids: [0] }), /positive whole number/)
+  assert.equal(asks, 0)
+  assert.equal(server.sockets.length, 0)
+})
+
+test('a folder with a quote is escaped, not injected', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1', 'MOVE'] })
+  const tools = writeTools({ server })
+  await tool(tools, 'move_messages').execute({ uids: [1], to: 'A"B' })
+  assert.ok(sent(server).some(line => line.includes('UID MOVE 1 "A\\"B"')))
+})
+
+test('save_draft appends a draft, keeps the body in the body and sends no mail', async () => {
+  const server = imapServer({ folders: [{ name: 'INBOX' }, { name: 'Drafts', flags: '\\Drafts \\HasNoChildren' }] })
+  const tools = writeTools({ server })
+  const text = await tool(tools, 'save_draft').execute({
+    to: 'ann@example.com',
+    subject: '周报',
+    body: 'line one\nBcc: evil@example.com\nline three',
+  })
+  assert.match(text, /Saved a draft in "Drafts"/)
+  const append = sent(server).find(line => line.startsWith('APPEND'))
+  assert.match(append, /^APPEND "Drafts" \(\\Draft\) "[^"]+" \{\d+\}$/)
+  const literal = server.literals[0]
+  assert.match(literal, /^From: user@example\.com$/m)
+  assert.match(literal, /^To: ann@example\.com$/m)
+  assert.match(literal, /^Subject: =\?UTF-8\?B\?/m)
+  assert.match(literal, /^Content-Transfer-Encoding: base64$/m)
+  const body = Buffer.from(literal.split(`${CRLF}${CRLF}`)[1].replace(/\r\n/g, ''), 'base64').toString('utf8')
+  assert.equal(body, 'line one\nBcc: evil@example.com\nline three')
+  assert.equal(server.commands.some(line => /SMTP|MAIL FROM|RCPT TO/.test(line)), false)
+})
+
+test('a failing write names no credential', async () => {
+  const server = imapServer({
+    onLine: (line, socket) => {
+      if (!/^A\d+ LOGIN /.test(line)) return false
+      socket.send(`${tagOf(line)} NO [AUTHENTICATIONFAILED] Authentication failed${CRLF}`)
+      return true
+    },
+  })
+  const tools = writeTools({ server, redact: text => String(text).replaceAll('secret-code', '[redacted]') })
+  await assert.rejects(tool(tools, 'mark_read').execute({ uids: [1] }), (error) => {
+    assert.ok(!error.message.includes('secret-code'))
+    return true
+  })
 })
