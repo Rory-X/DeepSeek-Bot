@@ -127,7 +127,14 @@ test('Telegram connects, finds the one private chat and sends from the tool and 
   assert.ok(!savedText.includes(TELEGRAM_TOKEN))
   assert.ok(!JSON.stringify(await call(ctx, 'state', {})).includes(TELEGRAM_TOKEN))
 
-  assert.equal(await ctx.registeredTools.get('notify_telegram').execute({ text: ' deploy done ' }), 'Sent.')
+  // A send is a write: the card names the chat and the message first.
+  const sending = ctx.registeredTools.get('notify_telegram').execute({ text: ' deploy done ' }, { agent: { id: 'm1' } })
+  const card = await until(async () => (await call(ctx, 'state', {})).value.questions.m1, 'the send approval card')
+  assert.equal(card.kind, 'connector-approval')
+  assert.match(card.detail, /deploy done/)
+  assert.ok(!JSON.stringify(card).includes(TELEGRAM_TOKEN))
+  assert.equal((await call(ctx, 'answer-question', { sessionId: 'm1', questionId: card.id, answer: { selected: ['Allow once'] } })).ok, true)
+  assert.equal(await sending, 'Sent.')
   assert.deepEqual(bench.calls.at(-1).body, { chat_id: '4242', text: 'deploy done', disable_web_page_preview: true })
 
   const tested = await call(ctx, 'connector-test', { id: 'telegram' })
@@ -139,6 +146,35 @@ test('Telegram connects, finds the one private chat and sends from the tool and 
   const disconnected = await call(ctx, 'connector-disconnect', { id: 'telegram' })
   assert.deepEqual([cardOf(disconnected).state, cardOf(disconnected).chatId, cardOf(disconnected).canTest, cardOf(disconnected).account], ['off', null, false, null])
   assert.deepEqual(disposed.filter(name => name === 'notify_telegram'), ['notify_telegram'])
+})
+
+test('automatic sends skip the card and leave one audit entry, never the message', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = telegramBench({ chats: [4242] })
+  globalThis.fetch = bench.fetch
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const connected = await call(ctx, 'connector-connect', { id: 'telegram', token: TELEGRAM_TOKEN })
+  assert.equal(connected.ok, true)
+  assert.equal(cardOf(connected).autoPush, false)
+  const enabled = await call(ctx, 'connector-set-auto-push', { id: 'telegram', enabled: true })
+  assert.equal(enabled.ok, true, JSON.stringify(enabled))
+  assert.equal(cardOf(enabled).autoPush, true)
+
+  // No session and no card: the user allowed automatic sends for this connector.
+  assert.equal(await ctx.registeredTools.get('notify_telegram').execute({ text: 'auto done' }, {}), 'Sent.')
+  assert.equal(bench.calls.at(-1).body.text, 'auto done')
+  const saved = await until(async () => {
+    const telegram = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors.telegram
+    return Array.isArray(telegram.audit) ? telegram : undefined
+  }, 'the automatic-send audit entry')
+  assert.deepEqual(saved.audit.map(entry => entry.result), ['sent'])
+  assert.ok(!JSON.stringify(saved.audit).includes('auto done'))
+
+  const disabled = await call(ctx, 'connector-set-auto-push', { id: 'telegram', enabled: false })
+  assert.equal(cardOf(disabled).autoPush, false)
 })
 
 test('Telegram without a chat says what to do, and Test looks again after the user writes the bot', async (t) => {

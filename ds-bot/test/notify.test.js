@@ -30,6 +30,27 @@ test('a notify tool refuses an empty message and one past its limit', async () =
   assert.deepEqual(sent, [])
 })
 
+test('a notify tool asks the approval hook before it sends', async () => {
+  const sent = []
+  let asked
+  const built = tool({
+    send: async text => { sent.push(text) },
+    approve: async request => { asked = request },
+  })
+  assert.equal(await built.execute({ text: 'hello' }, { agent: { id: 'm1' } }), 'Sent.')
+  assert.deepEqual(sent, ['hello'])
+  assert.equal(asked.text, 'hello')
+  assert.equal(asked.exec.agent.id, 'm1')
+  assert.equal(asked.tool, 'notify_demo')
+
+  const refused = tool({
+    send: async () => { sent.push('must not') },
+    approve: async () => { throw new Error('The user denied it; nothing was sent.') },
+  })
+  await assert.rejects(refused.execute({ text: 'nope' }, {}), /denied/)
+  assert.ok(!sent.includes('must not'))
+})
+
 test('a notify tool redacts and shortens what the service said', async () => {
   const built = tool({
     send: async () => { throw new Error(`Telegram answered 401 for bot SECRET_TOKEN ${'x'.repeat(500)}`) },

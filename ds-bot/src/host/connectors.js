@@ -155,6 +155,19 @@ const BUILTIN_CONNECTORS = {
     mcpUrl: 'https://mcp.cloudflare.com/mcp?codemode=false',
     readTools: CLOUDFLARE_READ_TOOLS,
     oauth: { scopes: CLOUDFLARE_READ_SCOPES },
+    // A write target is named on the card: the zone (or account) it acts on, and a delete
+    // says it cannot be undone.
+    actionApproval(name, args) {
+      const target = typeof args?.zone_id === 'string' && args.zone_id !== '' ? `zone ${args.zone_id}`
+        : typeof args?.account_id === 'string' && args.account_id !== '' ? `account ${args.account_id}`
+          : typeof args?.id === 'string' && args.id !== '' ? `id ${args.id}` : undefined
+      const destructive = typeof name === 'string' && name.startsWith('delete_')
+      return {
+        line: `${String(name)}${target === undefined ? '' : ` on ${target}`}`,
+        ...(target === undefined ? {} : { target }),
+        ...(destructive ? { danger: true, reversible: false, change: `${String(name)} cannot be undone` } : {}),
+      }
+    },
     toolbox: true,
     toolboxKind: 'cloudflare',
     accountTool: 'whoami',
@@ -245,12 +258,60 @@ export function install(rt) {
       : {}),
   })
   // A connector write asks first and throws (a model-visible error) unless allowed.
-  const requireApproval = async (connector, tool, exec) => {
+  // One line and the optional preview fields a card shows for this call. The module hook
+  // may be async (it can read a name through the mounted client); a slow or broken hook
+  // must never hold the card back, so it gets three seconds and falls back to the call.
+  const withTimeout = async (work, ms) => {
+    let timer
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(undefined), ms)
+      timer.unref?.()
+    })
+    try {
+      return await Promise.race([work, timeout])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  const defaultApprovalLine = (tool, args) => {
+    const shown = rt.redactSecrets(JSON.stringify(args ?? {})).slice(0, 160)
+    return shown === '{}' ? String(tool) : `${tool} ${shown}`
+  }
+  const summarise = (summary, fallback) => {
+    const line = typeof summary === 'string' ? summary : summary?.line
+    return {
+      line: typeof line === 'string' && line.trim() !== ''
+        ? rt.redactSecrets(line.trim()).slice(0, 200)
+        : fallback,
+      ...(typeof summary?.change === 'string' && summary.change !== '' ? { change: rt.redactSecrets(summary.change).slice(0, 200) } : {}),
+      ...(typeof summary?.target === 'string' && summary.target !== '' ? { target: rt.redactSecrets(summary.target).slice(0, 120) } : {}),
+      ...(typeof summary?.reversible === 'boolean' ? { reversible: summary.reversible } : {}),
+      ...(summary?.danger === true ? { danger: true } : {}),
+    }
+  }
+  const approvalOf = async (connector, tool, args, exec, client) => {
+    let answer
+    if (typeof connector.actionApproval === 'function') {
+      try {
+        answer = await withTimeout(Promise.resolve(connector.actionApproval(tool, args ?? {}, { client })), 3_000)
+      } catch {
+        answer = undefined
+      }
+    }
+    return summarise(answer, defaultApprovalLine(tool, args))
+  }
+  const requireActionApproval = async (connector, tool, args, exec, client) => {
+    await requireApproval(connector, tool, exec, await approvalOf(connector, tool, args, exec, client))
+  }
+  const requireApproval = async (connector, tool, exec, summary) => {
+    const readOnly = rt.readOnly()
+    if (readOnly !== undefined) throw new Error(`DS Bot is read-only: ${readOnly}`)
     const outcome = await approval.approve({
       sessionId: exec?.agent?.id,
       connector: connector.displayName,
       tool,
       signal: exec?.signal,
+      ...(summary === undefined ? {} : { summary }),
     })
     if (outcome === 'allow') return
     if (outcome === 'timeout') throw new Error(`The user did not answer in time, so ${connector.displayName}'s ${tool} was not run.`)
@@ -515,19 +576,43 @@ export function install(rt) {
     if (typeof connector.notify?.send !== 'function') throw new Error(`${connector.displayName} has no send hook`)
     if (levelOf(id) !== 'write') return { token: credentialKeyOf(connector), dispose: [] }
     if (connector.needsChatId === true && chatIdOf(state, id) === undefined) return { token: credentialKeyOf(connector), dispose: [] }
+    const toolName = connector.notify.toolName ?? `notify_${id}`
+    const automatic = () => state.connectors?.[id]?.autoPush === true
+    // An automatic send skips the card; it still leaves one audit entry, never the message.
+    const recordAutomatic = (result) => {
+      const prior = state.connectors?.[id] ?? {}
+      const audit = [...(Array.isArray(prior.audit) ? prior.audit : []), { at: Date.now(), source: 'auto-push', result }].slice(-50)
+      state.connectors = { ...state.connectors, [id]: { ...prior, audit } }
+      void rt.save().catch(() => {})
+    }
     const dispose = [ctx.tools.register(createNotifyTool({
-      name: connector.notify.toolName ?? `notify_${id}`,
+      name: toolName,
       description: connector.notify.toolDescription ?? `Send a message through ${connector.displayName}. Use it for notifications the user asked for.`,
       maxText: connector.notify.maxText,
       output,
       redact: rt.redactSecrets,
-      send: text => connector.notify.send({
-        token: rt.secretValue(tokenName),
-        chatId: chatIdOf(state, id),
-        text,
-        secrets: secretMapOf(connector),
-        api: connector.api,
-      }),
+      approve: async ({ text, exec }) => {
+        if (automatic()) return
+        await requireApproval(connector, toolName, exec, {
+          line: `Send a ${connector.displayName} message to chat ${chatIdOf(state, id) ?? '?'}: "${String(text).slice(0, 120)}"`,
+        })
+      },
+      send: async (text) => {
+        try {
+          const sent = await connector.notify.send({
+            token: rt.secretValue(tokenName),
+            chatId: chatIdOf(state, id),
+            text,
+            secrets: secretMapOf(connector),
+            api: connector.api,
+          })
+          if (automatic()) recordAutomatic('sent')
+          return sent
+        } catch (error) {
+          if (automatic()) recordAutomatic('failed')
+          throw error
+        }
+      },
     }))]
     return { token: credentialKeyOf(connector), dispose }
   }
@@ -556,7 +641,7 @@ export function install(rt) {
       parameters,
       output,
       async execute(args, exec) {
-        if (approve !== undefined) await approve(exec)
+        if (approve !== undefined) await approve(args, exec)
         const call = { ...args }
         // The default team of the token's account answers the calls that need one; an
         // explicit argument wins.
@@ -679,7 +764,9 @@ export function install(rt) {
       const dispose = []
       try {
         for (const tool of picked) {
-          const approve = actionNames.has(tool.name) ? exec => requireApproval(connector, tool.name, exec) : undefined
+          const approve = actionNames.has(tool.name)
+            ? (args, exec) => requireActionApproval(connector, tool.name, args, exec, client)
+            : undefined
           dispose.push(ctx.tools.register(readOnlyTool(id, tool, { client, teamId, approve, defaults })))
         }
         if (index !== undefined) {
@@ -692,7 +779,7 @@ export function install(rt) {
               output,
               redact: rt.redactSecrets,
               accountId: currentAccountId,
-              approve: (name, exec) => requireApproval(connector, name, exec),
+              approve: (name, args, exec) => requireActionApproval(connector, name, args, exec, client),
             })))
             toolboxes.set(CLOUDFLARE_TOOLBOX_TOOLS[1], { id, connector, blocked, kind: 'cloudflare' })
           } else {
@@ -703,7 +790,7 @@ export function install(rt) {
               output,
               redact: rt.redactSecrets,
               teamId,
-              approve: (name, exec) => requireApproval(connector, name, exec),
+              approve: (name, args, exec) => requireActionApproval(connector, name, args, exec, client),
             })))
             const blocked = new Set(index.filter(entry => entry.class === 'blocked').map(entry => entry.name))
             toolboxes.set('vercel_call', { id, connector, blocked, kind: 'vercel' })
@@ -919,6 +1006,7 @@ export function install(rt) {
             mode: 'notify',
             chatId: connector.needsChatId === true ? chatIdOf(state, id) ?? null : null,
             canTest: notifyTokenOf(connector) !== undefined,
+            autoPush: state.connectors?.[id]?.autoPush === true,
             inputs: credentialFields(connector),
           }
         : {}),
@@ -1169,6 +1257,18 @@ export function install(rt) {
       if (chatId === undefined) delete prior.chatId
       else prior.chatId = chatId
       state.connectors = { ...state.connectors, [body.id]: prior }
+      await rt.save()
+      await sync(body.id, true)
+      return connectorsView()
+    },
+    // Automatic sends for one notification connector: the user turns this on once, and
+    // each later send is audited instead of asking on a card.
+    async 'connector-set-auto-push'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (connector.mode !== 'notify') throw new Error('This connector does not send messages')
+      const enabled = body.enabled === true
+      state.connectors = { ...state.connectors, [body.id]: { ...state.connectors?.[body.id], autoPush: enabled } }
       await rt.save()
       await sync(body.id, true)
       return connectorsView()

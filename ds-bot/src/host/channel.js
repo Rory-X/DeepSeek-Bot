@@ -319,6 +319,7 @@ export function install(rt) {
         case 'connector-set-settings':
         case 'connector-test':
         case 'connector-set-chat':
+        case 'connector-set-auto-push':
         case 'connector-oauth-start':
           await rt.load()
           return ok(await rt.connectorEndpoint(endpoint, body, meta))

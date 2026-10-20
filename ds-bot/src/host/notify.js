@@ -12,7 +12,7 @@ const trim = text => (typeof text === 'string' ? text.trim() : '')
 // One tool per notification connector, registered only while there is a chat to send to.
 // `send` throws on a failed send; the message never contains the token, and whatever it
 // does say is redacted and short.
-export function createNotifyTool({ name, description, maxText, output, redact = text => String(text), send }) {
+export function createNotifyTool({ name, description, maxText, output, redact = text => String(text), send, approve }) {
   return {
     name,
     description,
@@ -23,12 +23,15 @@ export function createNotifyTool({ name, description, maxText, output, redact = 
       additionalProperties: false,
     },
     output,
-    async execute(args) {
+    async execute(args, exec) {
       const text = trim(args?.text)
       if (text === '') throw new Error('Write the message to send first.')
       if (Number.isFinite(maxText) && text.length > maxText) throw new Error(`Messages are limited to ${maxText} characters.`)
       try {
-        await send(text)
+        // A send is a write: the framework's approve hook asks on the card first, unless
+        // the user turned on automatic sends for this connector.
+        if (typeof approve === 'function') await approve({ tool: name, text, exec })
+        await send(text, exec)
       } catch (error) {
         throw new Error(String(redact(String(error?.message ?? error))).slice(0, NOTIFY_ERROR_MAX))
       }
