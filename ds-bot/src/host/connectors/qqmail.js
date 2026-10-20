@@ -14,7 +14,7 @@ export const QQMAIL_ID = 'qqmail'
 export const QQMAIL_HOST = 'imap.qq.com'
 export const QQMAIL_ADDRESS_SECRET = 'QQMAIL_ADDRESS'
 export const QQMAIL_SECRET = 'QQMAIL_AUTH_CODE'
-export const QQMAIL_TOOLS = ['qqmail_list_folders', 'qqmail_search', 'qqmail_list_messages', 'qqmail_get_message']
+export const QQMAIL_TOOLS = ['qqmail_list_folders', 'qqmail_search', 'qqmail_list_messages', 'qqmail_get_message', 'qqmail_list_attachments', 'qqmail_read_attachment']
 
 // `signInQQMail` accepts both shapes: one `address:code` string (the card's older form) or
 // a stored code beside the stored address (what the two credential fields keep). The code
@@ -51,6 +51,8 @@ export function createQQMailTools({ credential, account, redact, connect, timeou
     connect,
     timeoutMs,
     connectTimeoutMs,
+    // Reading an attachment is still a read: EXAMINE plus BODY.PEEK, no approval needed.
+    attachments: true,
   })
 }
 
