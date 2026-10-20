@@ -606,6 +606,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-setting{display:flex;flex-direction:column;gap:6px}
 /* Write access as declared: the level buttons and the capability list, nothing to toggle. */
 .bt-connector-levels{display:flex;flex-wrap:wrap;gap:6px}
+.bt-connector-level-wrap{display:flex;flex-direction:column;gap:3px;min-width:0}
+.bt-connector-level-blocked{font-size:12px;line-height:16px;color:var(--bt-ink-3);max-width:260px;overflow-wrap:anywhere}
 .bt-connector-level{display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:8px 12px;border-radius:10px;border:.5px solid var(--bt-line-2);background:none;color:inherit;font:inherit;font-size:12px;line-height:16px;text-align:left;cursor:pointer}
 .bt-connector-level[data-current]{border-color:color-mix(in srgb,var(--bt-accent) 60%,transparent);background:color-mix(in srgb,var(--bt-accent) 8%,transparent)}
 .bt-connector-level:disabled{opacity:.5;cursor:default}

@@ -93,7 +93,12 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, tur
     // A level change asks the host for a new grant: an OAuth connector goes back to off and
     // asks to authorize again, a token connector remounts with the new level.
     connectorSetLevel: (id, level) => after(call('connector-set-level', { id, level })),
-    connectorOauthStart: id => after(call('connector-oauth-start', { id })),
+    // Settings are plain values (a project id, a role name), saved in one request; the view
+    // comes back with what the host normalized.
+    connectorSetSettings: (id, values) => after(call('connector-set-settings', { id, values })),
+    // The chosen level travels with the authorization request, so the grant is asked for the
+    // level the reader sees.
+    connectorOauthStart: (id, level) => after(call('connector-oauth-start', { id, ...(typeof level === 'string' && level !== '' ? { level } : {}) })),
     connectorOauthApp: (id, clientId, clientSecret) => after(call('connector-oauth-app', { id, clientId, clientSecret })),
     saveCapability: capability => after(call('capability-save', capability)),
     deleteCapability: name => after(call('capability-delete', { name })),
