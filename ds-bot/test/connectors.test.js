@@ -1054,3 +1054,55 @@ test('an OAuth grant records the chosen level, and a level change asks for a new
   assert.equal(changed.state, 'off')
   assert.equal(credentials.records.has('ds-bot/connector-cloudflare'), false)
 })
+
+
+test('switching to a level that is not ready is refused before the authorization is touched', async (t) => {
+  const credentials = fakeCredentials()
+  const state = { ...TEAM, connectors: { neon: { level: 'read', authorizedAt: 1, account: 'acme', settings: {} } } }
+  const { ctx, home } = setup({ state, services: { credentials } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  credentials.records.set('ds-bot/connector-neon', { kind: 'grant', payload: { version: 1 } })
+
+  const refused = await call(ctx, 'connector-set-level', { id: 'neon', level: 'write' })
+  assert.equal(refused.ok, false)
+  assert.match(refused.error.message, /project ID/)
+  const saved = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8')).connectors.neon
+  assert.deepEqual([saved.level, saved.authorizedAt], ['read', 1])
+  assert.ok(credentials.records.has('ds-bot/connector-neon'))
+})
+
+test('a connector that is not ready for a level says why before the user switches', async (t) => {
+  const { ctx, home } = setup({ state: { ...TEAM, connectors: { neon: { level: 'read', settings: {} } } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const row = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'neon')
+  assert.equal(row.levelNote, undefined)
+  assert.match(row.levelNotes.write, /project ID/)
+  assert.equal(row.levelNotes.read, undefined)
+
+  const filled = await call(ctx, 'connector-set-settings', {
+    id: 'neon',
+    values: { projectId: 'spring-brook-12345678', roleName: 'neondb_owner' },
+  })
+  assert.equal(filled.ok, true, JSON.stringify(filled))
+  assert.equal(filled.value.find(connector => connector.id === 'neon').levelNotes, undefined)
+})
+
+test('a level that is ready can be chosen and is stored', async (t) => {
+  const state = { ...TEAM, connectors: { neon: { level: 'read', settings: { projectId: 'spring-brook-12345678', roleName: 'neondb_owner' } } } }
+  const { ctx, home } = setup({ state })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const raised = await call(ctx, 'connector-set-level', { id: 'neon', level: 'write' })
+  assert.equal(raised.ok, true, JSON.stringify(raised))
+  assert.equal(raised.value.find(connector => connector.id === 'neon').level, 'write')
+})
+
+test('an authorization for a level that is not ready does not start', async (t) => {
+  const { ctx, home } = setup({ state: { ...TEAM, connectors: { neon: { level: 'read', settings: {} } } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const refused = await call(ctx, 'connector-oauth-start', { id: 'neon', level: 'write' }, { origin: 'https://dsh.test' })
+  assert.equal(refused.ok, false)
+  assert.match(refused.error.message, /project ID/)
+})
