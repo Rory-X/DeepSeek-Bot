@@ -109,6 +109,9 @@ const neon = {
   accountTool: 'list_organizations',
   accountOf: neonAccount,
   card: NEON_CARD,
+  // The registry keeps the fields of the default export, so the hook has to be one of them;
+  // connectors.js calls it with the profile override.
+  configure,
 }
 
 export default neon

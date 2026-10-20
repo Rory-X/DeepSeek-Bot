@@ -99,6 +99,8 @@ test('a configured Neon address cannot turn read-only off', () => {
 })
 
 test('the framework merge of a profile override keeps the read-only grant', () => {
+  // The registry copies the fields of the default export, so the hook must be one of them.
+  assert.equal(typeof neon.configure, 'function')
   // What connectors.js does: merge the definition and the override, then merge configure()'s
   // answer over both, and mount from that.
   const override = { url: 'https://mcp.neon.tech/mcp?readonly=false&projectId=proj-9' }
