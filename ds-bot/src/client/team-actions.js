@@ -81,6 +81,9 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, tur
     secretUpdate: (name, scope) => after(call('secret-update', { name, scope })),
     secretDelete: name => after(call('secret-delete', { name })),
     connectorConnect: (id, token) => after(call('connector-connect', { id, token })),
+    // A connector whose card declares several credential fields sends them together, by the
+    // secret name the host named each field with.
+    connectorConnectValues: (id, values) => after(call('connector-connect', { id, values })),
     connectorDisconnect: id => after(call('connector-disconnect', { id })),
     connectorRetry: id => after(call('connector-retry', { id })),
     connectorSetActions: (id, enabled) => after(call('connector-set-actions', { id, enabled })),

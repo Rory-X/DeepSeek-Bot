@@ -2075,6 +2075,9 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     secretUpdate: (name, scope) => after(call2("secret-update", { name, scope })),
     secretDelete: (name) => after(call2("secret-delete", { name })),
     connectorConnect: (id, token) => after(call2("connector-connect", { id, token })),
+    // A connector whose card declares several credential fields sends them together, by the
+    // secret name the host named each field with.
+    connectorConnectValues: (id, values) => after(call2("connector-connect", { id, values })),
     connectorDisconnect: (id) => after(call2("connector-disconnect", { id })),
     connectorRetry: (id) => after(call2("connector-retry", { id })),
     connectorSetActions: (id, enabled) => after(call2("connector-set-actions", { id, enabled })),
@@ -13541,11 +13544,20 @@ function statusText2(connector) {
 }
 function ConnectorRow({ connector, actions }) {
   const [form, setForm] = (0, import_react32.useState)(false);
-  const [token, setToken] = (0, import_react32.useState)("");
+  const [values, setValues] = (0, import_react32.useState)({});
   const [busy, setBusy] = (0, import_react32.useState)(false);
   const [error, setError] = (0, import_react32.useState)(null);
   const oauth = connector.oauth === true;
   const manual = oauth && connector.manualClient === true;
+  const tokenFieldLabel = cardText(connector, "tokenLabel") ?? tokenLabel(connector.id);
+  const tokenFieldPlaceholder = cardText(connector, "tokenPlaceholder") ?? void 0;
+  const declared = Array.isArray(connector.inputs) ? connector.inputs.filter((input) => input !== null && typeof input?.name === "string" && input.name !== "") : [];
+  const fields = declared.length > 0 ? declared.map((input) => ({
+    name: input.name,
+    label: input.label ?? (declared.length === 1 ? tokenFieldLabel : input.name),
+    required: input.required !== false
+  })) : [{ name: "token", label: tokenFieldLabel, required: true }];
+  const given = (field) => (values[field.name] ?? "").trim();
   const consent = oauth && connector.state === "off" ? cardConsent(connector) : null;
   const consentGate = consent !== null && consent.acknowledge !== null;
   const [consentAck, setConsentAck] = (0, import_react32.useState)(false);
@@ -13603,12 +13615,19 @@ function ConnectorRow({ connector, actions }) {
       after?.();
     }, (failure) => setError(failure?.message ?? String(failure))).finally(() => setBusy(false));
   };
+  const complete = () => fields.every((field) => !field.required || given(field) !== "");
   const connect = () => {
-    if (busy || token.trim() === "") return;
-    void run(actions.connectorConnect(connector.id, token), () => {
-      setToken("");
+    if (busy || !complete()) return;
+    const filled = {};
+    for (const field of fields) {
+      const value = given(field);
+      if (value !== "") filled[field.name] = value;
+    }
+    const done = () => {
+      setValues({});
       setForm(false);
-    });
+    };
+    void run(declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token), done);
   };
   const on = connector.state !== "off";
   const actionsOn = connector.actions === true;
@@ -13623,8 +13642,6 @@ function ConnectorRow({ connector, actions }) {
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id];
   const readOnlyNote = cardText(connector, "readOnlyNote");
   const docsUrl = typeof connector.card?.docsUrl === "string" && connector.card.docsUrl !== "" ? connector.card.docsUrl : TOKEN_URLS[connector.id];
-  const tokenFieldLabel = cardText(connector, "tokenLabel") ?? tokenLabel(connector.id);
-  const tokenFieldPlaceholder = cardText(connector, "tokenPlaceholder") ?? void 0;
   const row = (0, import_react32.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
   const mark = (0, import_react32.createElement)("span", { className: "bt-connector-mark" }, Mark ? (0, import_react32.createElement)(Mark) : null);
@@ -13737,17 +13754,24 @@ function ConnectorRow({ connector, actions }) {
     !oauth && !on && form ? (0, import_react32.createElement)(
       "div",
       { className: "bt-connector-form" },
-      (0, import_react32.createElement)("label", { className: "bt-q-field bt-secret-field" }, (0, import_react32.createElement)(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenFieldLabel, placeholder: tokenFieldPlaceholder, autoFocus: true })),
+      fields.map((field, index) => (0, import_react32.createElement)("label", { key: field.name, className: "bt-q-field bt-secret-field" }, (0, import_react32.createElement)(MaskedInput, {
+        value: values[field.name] ?? "",
+        onChange: (next) => setValues((previous) => ({ ...previous, [field.name]: next })),
+        onEnter: connect,
+        label: field.label,
+        placeholder: declared.length === 0 ? tokenFieldPlaceholder : void 0,
+        autoFocus: index === 0
+      }))),
       (0, import_react32.createElement)(
         "div",
         { className: "bt-connector-form-row" },
         docsUrl ? (0, import_react32.createElement)("a", { className: "bt-connector-link", href: docsUrl, target: "_blank", rel: "noopener noreferrer" }, tokenCreate(connector.id)) : null,
         (0, import_react32.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => {
           setForm(false);
-          setToken("");
+          setValues({});
           setError(null);
         } }, t("Cancel")),
-        (0, import_react32.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy || token.trim() === "", onClick: connect }, busy ? t("Connecting…") : t("Connect"))
+        (0, import_react32.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy || !complete(), onClick: connect }, busy ? t("Connecting…") : t("Connect"))
       )
     ) : null,
     // Slack has no dynamic registration: its app id and secret are typed here first, with the

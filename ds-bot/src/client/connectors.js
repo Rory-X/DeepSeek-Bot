@@ -119,13 +119,29 @@ function statusText(connector) {
 
 function ConnectorRow({ connector, actions }) {
   const [form, setForm] = useState(false)
-  const [token, setToken] = useState('')
+  // The credential values, by the secret name the host declared; a form with one field is
+  // the token field the cards always had.
+  const [values, setValues] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   // OAuth connectors: the browser tab that finishes the sign-in, and the app fields a
   // service without dynamic registration asks for first.
   const oauth = connector.oauth === true
   const manual = oauth && connector.manualClient === true
+  // The fields a connector declares (`credentials` on the host): the card draws one masked
+  // input per field and sends them together as `values`. A host that declares none keeps the
+  // single token field, labelled for its service.
+  const tokenFieldLabel = cardText(connector, 'tokenLabel') ?? tokenLabel(connector.id)
+  const tokenFieldPlaceholder = cardText(connector, 'tokenPlaceholder') ?? undefined
+  const declared = Array.isArray(connector.inputs) ? connector.inputs.filter(input => input !== null && typeof input?.name === 'string' && input.name !== '') : []
+  const fields = declared.length > 0
+    ? declared.map(input => ({
+        name: input.name,
+        label: input.label ?? (declared.length === 1 ? tokenFieldLabel : input.name),
+        required: input.required !== false,
+      }))
+    : [{ name: 'token', label: tokenFieldLabel, required: true }]
+  const given = field => (values[field.name] ?? '').trim()
   // A connector that declares a consent shows its own wording before the browser leaves;
   // one that does not keeps the generic wording and its acknowledgement.
   const consent = oauth && connector.state === 'off' ? cardConsent(connector) : null
@@ -178,9 +194,17 @@ function ConnectorRow({ connector, actions }) {
     setError(null)
     return task.then(() => { after?.() }, failure => setError(failure?.message ?? String(failure))).finally(() => setBusy(false))
   }
+  const complete = () => fields.every(field => !field.required || given(field) !== '')
   const connect = () => {
-    if (busy || token.trim() === '') return
-    void run(actions.connectorConnect(connector.id, token), () => { setToken(''); setForm(false) })
+    if (busy || !complete()) return
+    const filled = {}
+    for (const field of fields) {
+      const value = given(field)
+      if (value !== '') filled[field.name] = value
+    }
+    const done = () => { setValues({}); setForm(false) }
+    // A host that declares its fields takes them as `values`; an older one takes the token.
+    void run(declared.length > 0 ? actions.connectorConnectValues(connector.id, filled) : actions.connectorConnect(connector.id, filled.token), done)
   }
   const on = connector.state !== 'off'
   // `actions` is absent for a connector without write actions; a boolean says whether the
@@ -209,10 +233,6 @@ function ConnectorRow({ connector, actions }) {
   // read-only grant means.
   const readOnlyNote = cardText(connector, 'readOnlyNote')
   const docsUrl = typeof connector.card?.docsUrl === 'string' && connector.card.docsUrl !== '' ? connector.card.docsUrl : TOKEN_URLS[connector.id]
-  // A key that is not a bare token carries its own words: "Gmail address and app password",
-  // or an example of the `clientId:apiKey` pair the service expects.
-  const tokenFieldLabel = cardText(connector, 'tokenLabel') ?? tokenLabel(connector.id)
-  const tokenFieldPlaceholder = cardText(connector, 'tokenPlaceholder') ?? undefined
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
   const mark = h('span', { className: 'bt-connector-mark' }, Mark ? h(Mark) : null)
@@ -298,11 +318,18 @@ function ConnectorRow({ connector, actions }) {
           : null)
       : null,
     !oauth && !on && form ? h('div', { className: 'bt-connector-form' },
-      h('label', { className: 'bt-q-field bt-secret-field' }, h(MaskedInput, { value: token, onChange: setToken, onEnter: connect, label: tokenFieldLabel, placeholder: tokenFieldPlaceholder, autoFocus: true })),
+      fields.map((field, index) => h('label', { key: field.name, className: 'bt-q-field bt-secret-field' }, h(MaskedInput, {
+        value: values[field.name] ?? '',
+        onChange: (next) => setValues(previous => ({ ...previous, [field.name]: next })),
+        onEnter: connect,
+        label: field.label,
+        placeholder: declared.length === 0 ? tokenFieldPlaceholder : undefined,
+        autoFocus: index === 0,
+      }))),
       h('div', { className: 'bt-connector-form-row' },
         docsUrl ? h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, tokenCreate(connector.id)) : null,
-        h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => { setForm(false); setToken(''); setError(null) } }, t('Cancel')),
-        h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || token.trim() === '', onClick: connect }, busy ? t('Connecting…') : t('Connect')))) : null,
+        h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => { setForm(false); setValues({}); setError(null) } }, t('Cancel')),
+        h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || !complete(), onClick: connect }, busy ? t('Connecting…') : t('Connect')))) : null,
     // Slack has no dynamic registration: its app id and secret are typed here first, with the
     // redirect URL the app has to carry.
     manual && !on && (!configured || appForm) ? h('div', { className: 'bt-connector-form' },
