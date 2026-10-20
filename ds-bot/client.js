@@ -3336,6 +3336,9 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* What a connector says about itself: a quiet panel for a read-only grant, and a docs link. */
 .bt-connector-readonly{padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-accent) 6%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 22%,transparent);font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
 .bt-connector-docs{padding-left:48px;font-size:12px;line-height:16px}
+/* A form with several credentials names each field above its masked box. */
+.bt-connector-field{display:flex;flex-direction:column;gap:4px}
+.bt-connector-field-name{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the
    shell offers them and CSS-module name suffixes elsewhere. */
@@ -13583,6 +13586,7 @@ function ConnectorRow({ connector, actions }) {
   const fields = declared.length > 0 ? declared.map((input) => ({
     name: input.name,
     label: input.label ?? (declared.length === 1 ? tokenFieldLabel : input.name),
+    placeholder: typeof input.placeholder === "string" && input.placeholder !== "" ? input.placeholder : void 0,
     required: input.required !== false
   })) : [{ name: "token", label: tokenFieldLabel, required: true }];
   const given = (field) => (values[field.name] ?? "").trim();
@@ -13782,14 +13786,22 @@ function ConnectorRow({ connector, actions }) {
     !oauth && !on && form ? (0, import_react32.createElement)(
       "div",
       { className: "bt-connector-form" },
-      fields.map((field, index) => (0, import_react32.createElement)("label", { key: field.name, className: "bt-q-field bt-secret-field" }, (0, import_react32.createElement)(MaskedInput, {
-        value: values[field.name] ?? "",
-        onChange: (next) => setValues((previous) => ({ ...previous, [field.name]: next })),
-        onEnter: connect,
-        label: field.label,
-        placeholder: declared.length === 0 ? tokenFieldPlaceholder : void 0,
-        autoFocus: index === 0
-      }))),
+      fields.map((field, index) => {
+        const input = (0, import_react32.createElement)(MaskedInput, {
+          value: values[field.name] ?? "",
+          onChange: (next) => setValues((previous) => ({ ...previous, [field.name]: next })),
+          onEnter: connect,
+          label: field.label,
+          placeholder: field.placeholder ?? (declared.length === 0 ? tokenFieldPlaceholder : void 0),
+          autoFocus: index === 0
+        });
+        return declared.length === 0 ? (0, import_react32.createElement)("label", { key: field.name, className: "bt-q-field bt-secret-field" }, input) : (0, import_react32.createElement)(
+          "label",
+          { key: field.name, className: "bt-connector-field" },
+          (0, import_react32.createElement)("span", { className: "bt-connector-field-name" }, field.label),
+          (0, import_react32.createElement)("div", { className: "bt-q-field bt-secret-field" }, input)
+        );
+      }),
       (0, import_react32.createElement)(
         "div",
         { className: "bt-connector-form-row" },

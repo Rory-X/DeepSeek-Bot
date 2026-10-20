@@ -160,6 +160,7 @@ function ConnectorRow({ connector, actions }) {
     ? declared.map(input => ({
         name: input.name,
         label: input.label ?? (declared.length === 1 ? tokenFieldLabel : input.name),
+        placeholder: typeof input.placeholder === 'string' && input.placeholder !== '' ? input.placeholder : undefined,
         required: input.required !== false,
       }))
     : [{ name: 'token', label: tokenFieldLabel, required: true }]
@@ -340,14 +341,22 @@ function ConnectorRow({ connector, actions }) {
           : null)
       : null,
     !oauth && !on && form ? h('div', { className: 'bt-connector-form' },
-      fields.map((field, index) => h('label', { key: field.name, className: 'bt-q-field bt-secret-field' }, h(MaskedInput, {
-        value: values[field.name] ?? '',
-        onChange: (next) => setValues(previous => ({ ...previous, [field.name]: next })),
-        onEnter: connect,
-        label: field.label,
-        placeholder: declared.length === 0 ? tokenFieldPlaceholder : undefined,
-        autoFocus: index === 0,
-      }))),
+      fields.map((field, index) => {
+        const input = h(MaskedInput, {
+          value: values[field.name] ?? '',
+          onChange: (next) => setValues(previous => ({ ...previous, [field.name]: next })),
+          onEnter: connect,
+          label: field.label,
+          placeholder: field.placeholder ?? (declared.length === 0 ? tokenFieldPlaceholder : undefined),
+          autoFocus: index === 0,
+        })
+        // Several fields have to be told apart at a glance; one field is the token box it was.
+        return declared.length === 0
+          ? h('label', { key: field.name, className: 'bt-q-field bt-secret-field' }, input)
+          : h('label', { key: field.name, className: 'bt-connector-field' },
+            h('span', { className: 'bt-connector-field-name' }, field.label),
+            h('div', { className: 'bt-q-field bt-secret-field' }, input))
+      }),
       h('div', { className: 'bt-connector-form-row' },
         docsUrl ? h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, tokenCreate(connector.id)) : null,
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => { setForm(false); setValues({}); setError(null) } }, t('Cancel')),
