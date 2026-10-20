@@ -92,7 +92,8 @@ test('the connector is one read-only IMAP module the registry can load', async (
   assert.deepEqual(Object.keys(qqmail.card).sort(), ['about', 'docsUrl', 'glyph', 'readOnlyNote'])
   assert.equal(qqmail.card.glyph, 'qqmail')
   assert.match(qqmail.card.about, /Read your QQ Mail inbox over IMAP/)
-  assert.match(qqmail.card.readOnlyNote, /Read-only/)
+  assert.match(qqmail.card.readOnlyNote, /default read level/)
+  assert.doesNotMatch(qqmail.card.readOnlyNote, /never sends, deletes or moves/)
   assert.match(qqmail.card.docsUrl, /^https:\/\/service\.mail\.qq\.com\//)
   for (const field of ['glyph', 'about', 'readOnlyNote', 'docsUrl']) assert.equal(qqmail[field], undefined)
   // The two fields are checked before anything is saved: a missing code is refused at once.
@@ -110,6 +111,12 @@ test('the connector is one read-only IMAP module the registry can load', async (
   assert.deepEqual(qqmail.levels, ['read', 'write'])
   assert.equal(qqmail.defaultLevel, 'read')
   assert.deepEqual(qqmail.imap, { write: true })
+  const keys = qqmail.capabilities.map(capability => capability.key)
+  assert.deepEqual(keys, ['read', 'read_attachments', 'mark_read', 'move_delete', 'save_draft'])
+  // Every capability names something this connector mounts; nothing it cannot do is listed.
+  assert.ok(qqmail.capabilities.some(capability => capability.key === 'read_attachments' && capability.risk === 'read'))
+  assert.match(qqmail.capabilities.find(capability => capability.key === 'read_attachments').description, /20000 characters/)
+  assert.equal(keys.includes('send'), false)
   assert.ok(qqmail.capabilities.some(capability => capability.risk === 'write'))
   assert.equal(typeof qqmail.permissions.summary, 'string')
   // At read level, or at write level without the framework's approve hook, only read tools.
