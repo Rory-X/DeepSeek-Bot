@@ -280,6 +280,8 @@ test('delete moves to Trash by default', async () => {
   assert.match(text, /to Trash/)
   assert.match(asked.line, /from "INBOX" to Trash/)
   assert.equal(asked.danger, undefined)
+  assert.equal(asked.reversible, undefined)
+  assert.equal(asked.change, undefined)
   assert.ok(sent(server).includes('UID MOVE 9 "Trash"'))
 })
 
@@ -289,6 +291,8 @@ test('a permanent delete is refused when the server has no UIDPLUS', async () =>
   const tools = writeTools({ server, approve: async (request) => { asked = request } })
   await assert.rejects(tool(tools, 'delete_messages').execute({ uids: [9], permanent: true }), /cannot permanently delete/)
   assert.equal(asked.danger, true)
+  assert.equal(asked.reversible, false)
+  assert.equal(asked.change, 'Permanently removes messages from the mailbox')
   assert.match(asked.line, /cannot be undone/)
   assert.equal(sent(server).some(line => /^(UID STORE|UID EXPUNGE)/.test(line)), false)
 })
