@@ -245,7 +245,7 @@ export function createCloudflareCallTool({ client, index, output, redact = text 
         if (!matchesType(call[name], type)) throw new Error(`"${requested}" expects "${name}" to be ${type}.`)
       }
       // A write asks on the connector's own approval card before anything reaches Cloudflare.
-      if (entry.class === 'write' && typeof approve === 'function') await approve(requested, exec)
+      if (entry.class === 'write' && typeof approve === 'function') await approve(requested, call, exec)
       try {
         return cut(mcpResultText(await client.callTool(requested, call)))
       } catch (error) {

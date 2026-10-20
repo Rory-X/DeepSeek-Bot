@@ -57,13 +57,19 @@ export function createApprovalDesk({ rt, timeoutMs = APPROVAL_TIMEOUT_MS }) {
     return outcome
   }
 
-  function ask({ sessionId, connector, tool, signal }) {
+  function ask({ sessionId, connector, tool, signal, summary }) {
     return new Promise((resolve) => {
       const question = {
         id: randomUUID(),
         kind: APPROVAL_KIND,
         question: `Allow ${botNameOf(sessionId)} to run ${connector}'s ${tool}?`,
-        detail: 'It changes something outside DS Bot. Nothing is sent unless you allow it.',
+        detail: typeof summary?.line === 'string' && summary.line !== ''
+          ? summary.line
+          : 'It changes something outside DS Bot. Nothing is sent unless you allow it.',
+        ...(typeof summary?.target === 'string' && summary.target !== '' ? { target: summary.target } : {}),
+        ...(typeof summary?.change === 'string' && summary.change !== '' ? { change: summary.change } : {}),
+        ...(typeof summary?.reversible === 'boolean' ? { reversible: summary.reversible } : {}),
+        ...(summary?.danger === true ? { danger: true } : {}),
         options: [
           { label: APPROVAL_ALLOW, description: 'Run this one call' },
           { label: APPROVAL_DENY, description: 'Do not run it' },
@@ -95,13 +101,13 @@ export function createApprovalDesk({ rt, timeoutMs = APPROVAL_TIMEOUT_MS }) {
   }
 
   // One decision for one tool call: 'allow', 'deny', 'timeout' or 'unavailable'.
-  async function approve({ sessionId, connector, tool, signal }) {
+  async function approve({ sessionId, connector, tool, signal, summary }) {
     if (typeof sessionId !== 'string' || sessionId === '') return 'unavailable'
     const deadline = Date.now() + timeoutMs
     const run = (queues.get(sessionId) ?? Promise.resolve())
       .then(async () => {
         const slot = await waitForSlot(sessionId, deadline, signal)
-        return slot === 'free' ? await ask({ sessionId, connector, tool, signal }) : slot
+        return slot === 'free' ? await ask({ sessionId, connector, tool, signal, summary }) : slot
       })
     const tail = run.then(() => undefined, () => undefined)
     queues.set(sessionId, tail)

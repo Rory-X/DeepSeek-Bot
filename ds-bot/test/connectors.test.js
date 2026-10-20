@@ -480,7 +480,9 @@ test('vercel_call asks on the approval card for a write target; blocked targets 
   const pending = ctx.registeredTools.get('vercel_call').execute({ tool: 'create_deployment', args: { project: 'shh-do-not-show' } }, { agent: { id: 'm1' } })
   const card = await until(() => approvalCard(ctx), 'the approval card')
   assert.ok(card.question.includes('create_deployment'))
-  assert.ok(!JSON.stringify(card).includes('shh-do-not-show'))
+  // No module hook here, so the default summary names the call and shows the arguments.
+  assert.match(card.detail, /create_deployment/)
+  assert.match(card.detail, /shh-do-not-show/)
   assert.equal(bench.calls.filter(entry => entry.method === 'tools/call').length, 0)
   await answerCard(ctx, card.id, ['Allow once'])
   assert.equal(await pending, 'called create_deployment')
@@ -489,6 +491,9 @@ test('vercel_call asks on the approval card for a write target; blocked targets 
   // A read target runs with no card.
   assert.equal(await ctx.registeredTools.get('vercel_call').execute({ tool: 'list_projects' }, { agent: { id: 'm1' } }), 'called list_projects')
   assert.equal(await approvalCard(ctx), undefined)
+  // The card may show arguments; the diagnostics log still keeps them out.
+  const log = (await call(ctx, 'diagnostics-log')).value
+  assert.ok(!log.includes('shh-do-not-show'))
 })
 
 test('an older team with the switches on reads as a write level', async (t) => {
@@ -941,6 +946,10 @@ test('the Cloudflare toolbox runs reads directly, asks for each write and never 
   const pending = tool.execute({ tool: 'post_zones_dns_records', args: { zone_id: 'z1', body: { marker: 'CARD-MUST-NOT-SHOW' } } }, { agent: { id: 'm1' } })
   const card = await until(() => approvalCard(ctx), 'the write approval card')
   assert.match(card.question, /Cloudflare's post_zones_dns_records/)
+  // The card names the write target, and the request body is not printed.
+  assert.match(card.detail, /post_zones_dns_records on zone z1/)
+  assert.equal(card.target, 'zone z1')
+  assert.equal(card.danger, undefined)
   assert.ok(!JSON.stringify(card).includes('CARD-MUST-NOT-SHOW'))
   assert.equal(mcpCalls.length, callsBefore)
   assert.equal((await answerCard(ctx, card.id, ['Allow once'])).ok, true)
@@ -950,6 +959,10 @@ test('the Cloudflare toolbox runs reads directly, asks for each write and never 
   // A denied write never reaches Cloudflare.
   const denied = tool.execute({ tool: 'delete_zones_by_zone_id', args: { zone_id: 'z1' } }, { agent: { id: 'm1' } })
   const second = await until(() => approvalCard(ctx), 'the deny card')
+  assert.match(second.detail, /delete_zones_by_zone_id on zone z1/)
+  assert.equal(second.target, 'zone z1')
+  assert.equal(second.danger, true)
+  assert.equal(second.reversible, false)
   await answerCard(ctx, second.id, ['Deny'])
   await assert.rejects(denied, /denied Cloudflare's delete_zones_by_zone_id/)
   assert.equal(mcpCalls.length, callsBefore + 1)

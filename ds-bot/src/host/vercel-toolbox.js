@@ -201,7 +201,7 @@ export function createCallTool({ client, index, output, redact = text => String(
         if (!matchesType(call[name], type)) throw new Error(`"${requested}" expects "${name}" to be ${type}.`)
       }
       // A write is approved by the user before anything reaches the server.
-      if (entry.class === 'write' && typeof approve === 'function') await approve(requested, exec)
+      if (entry.class === 'write' && typeof approve === 'function') await approve(requested, call, exec)
       try {
         return cut(mcpResultText(await client.callTool(requested, call)))
       } catch (error) {
