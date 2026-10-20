@@ -4,8 +4,8 @@ import { McpHttpClient, mcpResultText } from '../src/host/mcp.js'
 import { createOAuthFlow, OAUTH_PREFIX } from '../src/host/oauth/flow.js'
 import { OAuthError } from '../src/host/oauth/client.js'
 import neon, {
-  configure, neonAccount, neonActionApproval, neonAuthorize, neonReadiness, neonTools, neonToolsOf, neonUrl, neonWriteUrl,
-  normalizeNeonSettings, sqlPreview,
+  NEON_READ_TOOLS, NEON_WRITE_TOOLS, configure, neonAccount, neonActionApproval, neonAuthorize, neonDisplayNameFor,
+  neonInstance, neonReadiness, neonTools, neonToolsOf, neonUrl, neonWriteUrl, normalizeNeonSettings, sqlPreview,
 } from '../src/host/connectors/neon.js'
 import { fakeContext } from './fake-ctx.js'
 import { fakeCredentials, fakeOAuthServer, fakeResponse, fakeWebServer } from './oauth-fakes.js'
@@ -284,7 +284,8 @@ test('the connected account is the organization list Neon answers', () => {
 test('Neon declares both access levels and the settings the full level needs', () => {
   assert.deepEqual(neon.levels, ['read', 'write'])
   assert.equal(neon.defaultLevel, 'read')
-  assert.deepEqual(neon.settings.map(field => field.name), ['projectId', 'roleName'])
+  // The label is the card's own name; the two pins reach the authorization.
+  assert.deepEqual(neon.settings.map(field => field.name), ['label', 'projectId', 'roleName'])
   for (const hook of ['authorize', 'toolsOf', 'readiness', 'normalizeSettings', 'actionApproval']) {
     assert.equal(typeof neon[hook], 'function', hook)
   }
@@ -339,6 +340,27 @@ test('the settings form is trimmed and validated, and an emptied field is droppe
   assert.throws(() => normalizeNeonSettings({ projectId: 'spring-brook-12345678', roleName: 'app-reader' }), /role name/)
 })
 
+test('the card name is trimmed, kept apart from the pins, and never reaches a grant', () => {
+  // Renaming an instance only changes what the card is called; the id, the tool prefix and
+  // the grant stay where they are.
+  assert.deepEqual(normalizeNeonSettings({ label: '  Production DB  ', projectId: 'spring-brook-12345678' }), {
+    label: 'Production DB',
+    projectId: 'spring-brook-12345678',
+  })
+  // Control characters are dropped and a very long name is cut, not refused.
+  assert.equal(normalizeNeonSettings({ label: 'Prod\u0007uct\u001bion' }).label, 'Production')
+  assert.equal(normalizeNeonSettings({ label: 'x'.repeat(200) }).label.length, 60)
+  // An emptied label drops the field, so the card falls back to its default name.
+  assert.deepEqual(normalizeNeonSettings({ label: '   ' }), {})
+  // The label never becomes part of the authorization URL.
+  const grant = neonInstance({ id: 'neon-2' }).authorize({
+    level: 'read',
+    settings: { label: 'Production DB', projectId: 'spring-brook-12345678' },
+  })
+  assert.equal(new URL(grant.url).searchParams.get('label'), null)
+  assert.equal(new URL(grant.url).searchParams.get('projectId'), 'spring-brook-12345678')
+})
+
 test('the level picks the tool surface, and the write tools exist only at write', () => {
   const read = neonToolsOf({ level: 'read' })
   const write = neonToolsOf({ level: 'write' })
@@ -389,17 +411,21 @@ test('the approval line resolves a branch name through the mounted client', asyn
   assert.match(broken.line, /br-1/)
 })
 
-test('a configured address is the base every level builds its grant on', () => {
-  // A self-hosted or test MCP address replaces the host; the grant parameters are rebuilt
-  // per level, so a configured read-only address must not leak into the write grant.
-  const configured = configure({ url: 'https://mcp.test/mcp?readonly=true&category=querying&projectId=old' })
-  assert.equal(new URL(configured.url).searchParams.get('readonly'), 'true')
-  const read = new URL(neonAuthorize({ level: 'read' }).url)
+test('a configured address is the base one instance builds its grants on', () => {
+  // A self-hosted or test MCP address replaces the host for that instance; the grant
+  // parameters are rebuilt per level, so a configured read-only address must not leak into
+  // the write grant. The other cards keep their own address: configure() no longer moves a
+  // module-wide value.
+  const card = configure({ url: 'https://mcp.test/mcp?readonly=true&category=querying&projectId=old' })
+  assert.equal(new URL(card.url).searchParams.get('readonly'), 'true')
+  assert.equal(new URL(card.url).searchParams.get('projectId'), 'old')
+  const read = new URL(card.authorize({ level: 'read' }).url)
   assert.deepEqual([read.origin + read.pathname, read.searchParams.get('readonly'), read.searchParams.getAll('category').length], ['https://mcp.test/mcp', 'true', 5])
-  const write = new URL(neonAuthorize({ level: 'write', settings: { projectId: 'spring-brook-12345678', roleName: 'app_reader' } }).url)
+  const write = new URL(card.authorize({ level: 'write', settings: { projectId: 'spring-brook-12345678', roleName: 'app_reader' } }).url)
   assert.deepEqual([write.searchParams.get('readonly'), write.searchParams.get('projectId')], [null, 'spring-brook-12345678'])
-  // Put the real address back for the tests after this one.
-  configure({})
+  // The default instance still authorizes against Neon itself.
+  const untouched = new URL(neonAuthorize({ level: 'read' }).url)
+  assert.equal(untouched.origin + untouched.pathname, 'https://mcp.neon.tech/mcp')
 })
 
 test('the approval line names the pinned role the mount runs with', async () => {
@@ -412,4 +438,450 @@ test('the approval line names the pinned role the mount runs with', async () => 
   neonToolsOf({ level: 'read' })
   const later = await neonActionApproval('run_sql', { sql: 'select 1' })
   assert.match(later.line, /the pinned role/)
+})
+
+// --- multi-instance ---------------------------------------------------------
+// Every Neon project is its own card: its own id/prefix, grant, address, level and settings.
+// The state these tests pin lived in two module-level singletons (baseAddress and
+// mountedSettings) before the multi-instance work; the first card's mount must never show
+// up on the second card's approval line again.
+
+test('an instance declares its own id, display name, address and hook set', () => {
+  assert.deepEqual(neon.instances, { prefix: 'neon', min: 1, max: 8 })
+  const first = neonInstance({ id: 'neon' })
+  const second = neonInstance({ id: 'neon-2' })
+  const third = neonInstance({ id: 'neon-3', displayName: 'Production' })
+  assert.deepEqual([first.id, second.id, third.id], ['neon', 'neon-2', 'neon-3'])
+  assert.deepEqual([first.displayName, second.displayName, third.displayName], ['Neon', 'Neon 2', 'Production'])
+  assert.equal(neonDisplayNameFor('neon'), 'Neon')
+  assert.equal(neonDisplayNameFor('neon-12'), 'Neon 12')
+  // A user label is the card name; the id and the tool prefix never change.
+  assert.equal(third.id, 'neon-3')
+  // Different instances must not share the mutable half of the definition.
+  assert.notEqual(first.toolsOf, second.toolsOf)
+  assert.notEqual(first.actionApproval, second.actionApproval)
+  assert.notEqual(first.authorize, second.authorize)
+})
+
+test('every instance declares the same read whitelist and its own level settings', () => {
+  for (const id of ['neon', 'neon-2']) {
+    const card = neonInstance({ id })
+    assert.deepEqual(card.readTools, neon.readTools)
+    assert.deepEqual(card.levels, ['read', 'write'])
+    assert.deepEqual(card.settings.map(field => field.name), ['label', 'projectId', 'roleName'])
+    assert.deepEqual(card.oauth.scopes, ['read'])
+    // The first card's address is Neon's own; an instance built without an override gets it
+    // too, so a new card authorizes the same server.
+    assert.equal(new URL(card.url).origin + new URL(card.url).pathname, 'https://mcp.neon.tech/mcp')
+    assert.equal(new URL(card.authorize({ level: 'read' }).url).searchParams.get('readonly'), 'true')
+  }
+  // Only the write level locks the project and role into the grant.
+  const second = neonInstance({ id: 'neon-2' })
+  assert.equal(neonReadiness({ level: 'write', settings: {} }), 'Set the Neon project ID before connecting with full access.')
+  assert.equal(neonReadiness({ level: 'write', settings: { projectId: 'spring-brook-12345678', roleName: 'app_reader' } }), undefined)
+  assert.deepEqual(second.toolsOf({ level: 'read' }).actionTools, [])
+  assert.deepEqual(second.toolsOf({ level: 'write' }).actionTools, ['create_branch', 'run_sql', 'create_snapshot', 'delete_branch'])
+})
+
+test('two mounted instances keep their own pinned project and role on the approval card', async () => {
+  const first = neonInstance({ id: 'neon' })
+  const second = neonInstance({ id: 'neon-2', override: { url: 'https://mcp.test/mcp' } })
+  // Mount A with project A, then mount B with project B — the order the framework mounts
+  // them in must not matter.
+  first.toolsOf({ level: 'write', settings: { projectId: 'proj-a', roleName: 'role_a' } })
+  second.toolsOf({ level: 'write', settings: { projectId: 'proj-b', roleName: 'role_b' } })
+  const cardA = await first.actionApproval('run_sql', { sql: 'select 1' })
+  const cardB = await second.actionApproval('run_sql', { sql: 'select 1' })
+  assert.match(cardA.line, /role_a/)
+  assert.match(cardA.line, /proj-a/)
+  assert.ok(!cardA.line.includes('role_b'))
+  assert.match(cardB.line, /role_b/)
+  assert.match(cardB.line, /proj-b/)
+  assert.ok(!cardB.line.includes('role_a'))
+  // A second mount of A does not reach into B: B still names its own role.
+  first.toolsOf({ level: 'read' })
+  assert.match((await second.actionApproval('run_sql', { sql: 'select 1' })).line, /role_b/)
+  // Each card authorizes on its own address; B's override never moves A.
+  assert.equal(new URL(first.authorize({ level: 'read' }).url).origin, 'https://mcp.neon.tech')
+  assert.equal(new URL(second.authorize({ level: 'read' }).url).origin, 'https://mcp.test')
+})
+
+test('the module export is the first card and no other card writes into it', async () => {
+  // This is the bug the module-level `mountedSettings` caused: mounting neon-2 overwrote the
+  // value neon read back on its approval line.
+  neonToolsOf({ level: 'write', settings: { projectId: 'proj-neon', roleName: 'role_neon' } })
+  const second = neonInstance({ id: 'neon-2' })
+  second.toolsOf({ level: 'write', settings: { projectId: 'proj-two', roleName: 'role_two' } })
+  const first = await neonActionApproval('run_sql', { sql: 'select 1' })
+  assert.match(first.line, /role_neon/)
+  assert.match(first.line, /proj-neon/)
+  assert.ok(!first.line.includes('role_two'))
+  assert.match((await second.actionApproval('run_sql', { sql: 'select 1' })).line, /role_two/)
+})
+
+test('configure() hands each instance its own hook set for the framework merge', async () => {
+  // What a registry that calls configure() once per instance does: merge the module
+  // definition, the instance override and configure()'s answer. The hooks in that answer
+  // must belong to that instance alone.
+  const definition = (id, override = {}) => ({ ...neon, id, displayName: neonDisplayNameFor(id), ...override, ...configure(override) })
+  const a = definition('neon')
+  const b = definition('neon-2', { url: 'https://mcp.test/mcp?projectId=pinned' })
+  assert.notEqual(a.toolsOf, b.toolsOf)
+  a.toolsOf({ level: 'write', settings: { projectId: 'proj-a', roleName: 'role_a' } })
+  b.toolsOf({ level: 'write', settings: { projectId: 'proj-b', roleName: 'role_b' } })
+  assert.match((await a.actionApproval('run_sql', { sql: 'select 1' })).line, /role_a/)
+  assert.match((await b.actionApproval('run_sql', { sql: 'select 1' })).line, /role_b/)
+  // The override moves only b's grant address; a keeps Neon's own server.
+  assert.equal(new URL(a.authorize({ level: 'read' }).url).origin, 'https://mcp.neon.tech')
+  assert.equal(new URL(b.authorize({ level: 'read' }).url).origin, 'https://mcp.test')
+})
+
+test('configure() still refuses an address that cannot carry an https grant', () => {
+  assert.throws(() => configure({ url: 'http://mcp.neon.tech/mcp' }), /plain https:\/\//)
+  assert.throws(() => configure({ url: 'https://user:pass@mcp.neon.tech/mcp' }), /plain https:\/\//)
+  assert.throws(() => neonInstance({ id: 'neon-2', override: { url: 'mcp.neon.tech/mcp' } }), /plain https:\/\//)
+})
+
+test('each Neon card keeps its own grant, and disconnecting one leaves the other', async () => {
+  const neonAuth = fakeOAuthServer({
+    resource: 'https://mcp.neon.tech/mcp',
+    issuer: 'https://mcp.neon.tech',
+    declaredResource: 'https://mcp.neon.tech/mcp',
+    scopes: ['read', 'write'],
+    challengeScope: 'read write',
+  })
+  const testAuth = fakeOAuthServer({
+    resource: 'https://mcp.test/mcp',
+    issuer: 'https://mcp.test',
+    declaredResource: 'https://mcp.test/mcp',
+    scopes: ['read', 'write'],
+    challengeScope: 'read write',
+  })
+  const request = (target, init = {}) => (String(target).startsWith('https://mcp.test') ? testAuth : neonAuth).fetch(target, init)
+  const cards = {
+    neon: neonInstance({ id: 'neon' }),
+    'neon-2': neonInstance({ id: 'neon-2', override: { url: 'https://mcp.test/mcp' } }),
+  }
+  const credentials = fakeCredentials()
+  const webServer = fakeWebServer()
+  const ctx = fakeContext({ services: { credentials, webServer } })
+  const authorized = []
+  const flow = createOAuthFlow({
+    ctx,
+    connectorOf: id => cards[id],
+    request,
+    warn: () => {},
+    redact: text => text,
+    onAuthorized: id => { authorized.push(id) },
+  })
+
+  const start = async (id, level, settings) => {
+    const started = await flow.start(id, { origin: 'https://dsh.test', level, settings })
+    const state = new URL(started.authorizeUrl).searchParams.get('state')
+    const { res, done } = fakeResponse()
+    webServer.routes[0].handler({ method: 'GET', url: `${OAUTH_PREFIX}/${id}?code=code-${id}&state=${encodeURIComponent(state)}` }, res)
+    const page = await done
+    assert.equal(page.statusCode, 200, page.body)
+    return started
+  }
+
+  await start('neon', 'read', {})
+  await start('neon-2', 'write', { projectId: 'spring-brook-12345678', roleName: 'app_reader' })
+  assert.deepEqual(authorized, ['neon', 'neon-2'])
+
+  const first = credentials.records.get('ds-bot/connector-neon').payload
+  const second = credentials.records.get('ds-bot/connector-neon-2').payload
+  // Each grant carries its own address, level and scopes: the write card never inherits the
+  // read card's grant, and the read card never sees the write scope.
+  assert.ok(first.resource.startsWith('https://mcp.neon.tech/mcp?readonly=true&category=projects'))
+  assert.deepEqual([first.level, first.scopes], ['read', ['read']])
+  assert.deepEqual([second.level, second.scopes], ['write', ['read', 'write']])
+  assert.ok(second.resource.startsWith('https://mcp.test/mcp?'))
+  assert.ok(second.resource.includes('projectId=spring-brook-12345678'))
+  assert.equal(second.resource.includes('readonly'), false)
+  // Both records are addressed by instance id, and no token sits in a card definition.
+  assert.equal(JSON.stringify(cards['neon-2']).includes(second.tokens.access), false)
+  assert.equal(JSON.stringify(cards['neon']).includes(first.tokens.access), false)
+
+  // Disconnecting neon-2 revokes its token and clears its record; the first card's grant is
+  // untouched (no cross-instance fallback, no shared cleanup).
+  const neonRequestsBefore = neonAuth.requests.length
+  await flow.disconnect('neon-2')
+  assert.equal(credentials.records.has('ds-bot/connector-neon-2'), false)
+  assert.equal(credentials.records.has('ds-bot/connector-neon'), true)
+  assert.ok(testAuth.requests.some(entry => entry.url === 'https://mcp.test/token' && entry.method === 'POST'
+    && String(entry.body).includes(`token=${second.tokens.refresh}`)), 'neon-2 revoke went to its own server')
+  // The other card's server saw no revoke at all.
+  assert.ok(!neonAuth.requests.slice(neonRequestsBefore).some(entry => entry.method === 'POST' && String(entry.body).includes('token=')))
+})
+
+test('a write level that is not ready never takes the instance grant away', async () => {
+  const oauth = fakeOAuthServer({
+    resource: ADDRESS,
+    issuer: 'https://mcp.neon.tech',
+    declaredResource: 'https://mcp.neon.tech/mcp',
+    scopes: ['read', 'write'],
+    challengeScope: 'read write',
+  })
+  const credentials = fakeCredentials()
+  const webServer = fakeWebServer()
+  const ctx = fakeContext({ services: { credentials, webServer } })
+  const card = neonInstance({ id: 'neon' })
+  const flow = createOAuthFlow({ ctx, connectorOf: () => card, request: oauth.fetch, warn: () => {}, redact: text => text })
+
+  const started = await flow.start('neon', { origin: 'https://dsh.test', level: 'read', settings: {} })
+  const state = new URL(started.authorizeUrl).searchParams.get('state')
+  const { res, done } = fakeResponse()
+  webServer.routes[0].handler({ method: 'GET', url: `${OAUTH_PREFIX}/neon?code=code-neon&state=${encodeURIComponent(state)}` }, res)
+  assert.equal((await done).statusCode, 200)
+  const saved = credentials.records.get('ds-bot/connector-neon')
+
+  // The level switch asks for the write grant first; without a project and role it must
+  // refuse before the read grant is disconnected (3b hotfix invariant, per instance).
+  await assert.rejects(flow.start('neon', { origin: 'https://dsh.test', level: 'write', settings: {} }), /project ID/)
+  assert.deepEqual(credentials.records.get('ds-bot/connector-neon'), saved)
+  assert.equal(new URL(saved.payload.mountUrl).searchParams.get('readonly'), 'true')
+})
+
+// --- multi-instance through the real connector host -------------------------
+// These tests drive the framework the registry loads: two state keys, two grants, two tool
+// prefixes. They are the integration half of the module-level isolation above.
+
+const { apply } = await import('../index.js')
+const { mkdtempSync, readFileSync, rmSync, writeFileSync } = await import('node:fs')
+const { tmpdir } = await import('node:os')
+const { join } = await import('node:path')
+
+const INSTANCE_TEAM = {
+  version: 1,
+  mainBotIds: ['m1'],
+  revision: 1,
+  bots: { m1: { id: 'm1', sessionId: 'm1', name: 'Chief', role: 'Chief of Staff', instructions: '', createdAt: 1 } },
+  rooms: {},
+  exchanges: [],
+  exchangeTurns: {},
+  questions: {},
+}
+
+const NEON_GRANT = (resource, level, scopes, access) => ({
+  kind: 'grant',
+  payload: {
+    version: 1,
+    issuer: new URL(resource).origin,
+    resource,
+    client: { id: `client-${access}`, tokenAuth: 'none', redirectUri: 'https://dsh.test/oauth/ds-bot/neon' },
+    tokens: { access, refresh: `refresh-${access}`, expiresAt: Date.now() + 3_600_000, tokenType: 'Bearer' },
+    scopes,
+    level,
+    mountUrl: resource,
+    authorizedAt: 1,
+  },
+})
+
+// A Neon MCP server behind each grant: initialize, tools/list and tools/call.
+function neonMcpServer() {
+  return async (body) => {
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Neon MCP', version: '1' } })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: [...NEON_READ_TOOLS, ...NEON_WRITE_TOOLS.filter(name => name !== 'run_sql')].map(tool) })
+    if (body.method === 'tools/call') return mcpAnswer(body.id, { content: [{ type: 'text', text: `${body.params.name} answered` }] })
+    throw new Error(`unexpected method ${body.method}`)
+  }
+}
+
+function neonInstanceHost({ state, credentials, config = {} }) {
+  const home = mkdtempSync(join(tmpdir(), 'dsb-neon-instances-'))
+  writeFileSync(join(home, 'state.json'), JSON.stringify(state))
+  const registered = []
+  const disposed = []
+  const webServer = fakeWebServer()
+  const ctx = fakeContext({ services: { credentials, webServer } })
+  const fetchRegister = ctx.connection.fetch.register
+  ctx.connection.fetch.register = (route) => { ctx.route = route; return fetchRegister(route) }
+  const toolRegister = ctx.tools.register
+  ctx.tools.register = (tool) => {
+    registered.push(tool.name)
+    const undo = toolRegister(tool)
+    return () => { disposed.push(tool.name); undo() }
+  }
+  apply(ctx, { home, ...config })
+  registered.length = 0
+  disposed.length = 0
+  return { ctx, home, registered, disposed, webServer }
+}
+
+const callBot = async (ctx, endpoint, payload) => {
+  const response = await ctx.route.fetch(new Request('http://localhost/api/bot', { method: 'POST', body: JSON.stringify({ endpoint, payload }) }))
+  return response.json()
+}
+
+const untilReady = async (ctx, ids) => {
+  for (let count = 0; count < 200; count += 1) {
+    const view = (await callBot(ctx, 'state', {})).value.connectors.filter(item => ids.includes(item.id))
+    if (view.length === ids.length && view.every(item => item.state === 'ready')) return view
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  const everything = (await callBot(ctx, 'state', {})).value.connectors
+  throw new Error(`timed out waiting for ${ids.join(', ')}: ${JSON.stringify(everything.filter(item => ids.includes(item.id)).map(item => [item.id, item.state, item.error]))}`)
+}
+
+test('two Neon cards mount from their own grants, and disconnecting one leaves the other', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const neonAuth = fakeOAuthServer({
+    resource: 'https://mcp.neon.tech/mcp',
+    issuer: 'https://mcp.neon.tech',
+    declaredResource: 'https://mcp.neon.tech/mcp',
+    scopes: ['read', 'write'],
+    challengeScope: 'read write',
+  })
+  const testAuth = fakeOAuthServer({
+    resource: 'https://mcp.test/mcp',
+    issuer: 'https://mcp.test',
+    declaredResource: 'https://mcp.test/mcp',
+    scopes: ['read', 'write'],
+    challengeScope: 'read write',
+  })
+  const neonCalls = []
+  const testCalls = []
+  const neonServe = neonMcpServer()
+  const testServe = neonMcpServer()
+  globalThis.fetch = async (url, init = {}) => {
+    const address = String(url)
+    const isTest = address.startsWith('https://mcp.test/')
+    const isNeon = address.startsWith('https://mcp.neon.tech/')
+    if (!isTest && !isNeon) throw new Error(`unexpected fetch ${address}`)
+    if (init.headers?.authorization === undefined) return (isTest ? testAuth : neonAuth).fetch(url, init)
+    const body = JSON.parse(init.body)
+    ;(isTest ? testCalls : neonCalls).push({ method: body.method, name: body.params?.name, authorization: init.headers.authorization })
+    return (isTest ? testServe : neonServe)(body)
+  }
+
+  const credentials = fakeCredentials()
+  const readUrl = neonInstance({ id: 'neon' }).authorize({ level: 'read', settings: {} }).url
+  credentials.records.set('ds-bot/connector-neon', NEON_GRANT(readUrl, 'read', ['read'], 'access-neon'))
+  const state = { ...INSTANCE_TEAM, connectors: { neon: { level: 'read', settings: {}, authorizedAt: 1 } } }
+  const { ctx, home, registered, disposed, webServer } = neonInstanceHost({
+    state,
+    credentials,
+    config: { 'neon-2': { url: 'https://mcp.test/mcp' } },
+  })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const first = (await untilReady(ctx, ['neon']))[0]
+  assert.deepEqual([first.instance.base, first.instance.id], ['neon', 'neon'])
+  assert.equal(first.level, 'read')
+
+  // A second card is one endpoint call: off, read level, nothing authorized yet.
+  const added = await callBot(ctx, 'connector-create-instance', { base: 'neon' })
+  assert.equal(added.ok, true, JSON.stringify(added))
+  const secondRow = added.value.find(item => item.id === 'neon-2')
+  assert.deepEqual([secondRow.state, secondRow.level, secondRow.instance.base, secondRow.instance.label], ['off', 'read', 'neon', 'Neon 2'])
+
+  // Its own settings, then its own browser authorization at write level. The callback route
+  // is per instance (`/oauth/ds-bot/neon-2`), so the two cards can never swap grants.
+  const settings = { projectId: 'spring-brook-12345678', roleName: 'app_reader' }
+  assert.equal((await callBot(ctx, 'connector-set-settings', { id: 'neon-2', values: settings })).ok, true)
+  const authorize = async (id, level) => {
+    const started = await callBot(ctx, 'connector-oauth-start', { id, level })
+    assert.equal(started.ok, true, JSON.stringify(started))
+    const url = new URL(started.value.authorizeUrl)
+    assert.equal(url.searchParams.get('redirect_uri').endsWith(`/oauth/ds-bot/${id}`), true)
+    const { res, done } = fakeResponse()
+    webServer.routes[0].handler({ method: 'GET', url: `/oauth/ds-bot/${id}?code=code-${id}&state=${encodeURIComponent(url.searchParams.get('state'))}` }, res)
+    assert.equal((await done).statusCode, 200)
+    return url
+  }
+  const writeAuthorize = await authorize('neon-2', 'write')
+  assert.equal(writeAuthorize.searchParams.get('scope'), 'read write')
+  const view = await untilReady(ctx, ['neon', 'neon-2'])
+  assert.deepEqual([view[0].level, view[1].level], ['read', 'write'])
+  assert.deepEqual([view[1].settings.find(field => field.name === 'projectId').value], ['spring-brook-12345678'])
+
+  // Each card mounts its own tools under its own id prefix; the write card alone has writes.
+  assert.ok(registered.includes('neon_list_projects'))
+  assert.ok(registered.includes('neon-2_list_projects'))
+  assert.ok(registered.includes('neon-2_create_branch'))
+  assert.ok(!registered.includes('neon_create_branch'))
+  // Each mount used its own grant: the read card never saw the write token and vice versa.
+  assert.ok(neonCalls.every(entry => entry.authorization === 'Bearer access-neon'))
+  assert.ok(testCalls.every(entry => entry.authorization === 'Bearer access-1'))
+  // The tokens stay in DSH's credential store: not in the team file, not in the view.
+  const savedFile = readFileSync(join(home, 'state.json'), 'utf8')
+  assert.ok(!savedFile.includes('access-neon') && !savedFile.includes('access-1'))
+  assert.ok(!savedFile.includes('refresh-1'))
+  assert.ok(!JSON.stringify(await callBot(ctx, 'state', {})).includes('access-1'))
+
+  // A level switch on the write card revokes that card's grant and asks it to authorize
+  // again; the read card's grant, state and tools are untouched.
+  const switched = await callBot(ctx, 'connector-set-level', { id: 'neon-2', level: 'read' })
+  assert.equal(switched.ok, true, JSON.stringify(switched))
+  assert.equal(credentials.records.has('ds-bot/connector-neon-2'), false)
+  assert.equal(credentials.records.has('ds-bot/connector-neon'), true)
+  assert.equal(switched.value.find(item => item.id === 'neon-2').needsReauth, true)
+  assert.equal(switched.value.find(item => item.id === 'neon').state, 'ready')
+  assert.equal(credentials.records.get('ds-bot/connector-neon').payload.level, 'read')
+
+  // Re-authorizing the second card at read level mounts it again; disconnecting it then
+  // revokes only its own grant.
+  await authorize('neon-2', 'read')
+  await untilReady(ctx, ['neon', 'neon-2'])
+  const disconnected = await callBot(ctx, 'connector-disconnect', { id: 'neon-2' })
+  assert.equal(disconnected.ok, true, JSON.stringify(disconnected))
+  assert.equal(credentials.records.has('ds-bot/connector-neon-2'), false)
+  assert.equal(credentials.records.has('ds-bot/connector-neon'), true)
+  assert.ok(disposed.includes('neon-2_list_projects'))
+  assert.ok(!disposed.includes('neon_list_projects'))
+  const kept = (await callBot(ctx, 'state', {})).value.connectors.find(item => item.id === 'neon')
+  assert.equal(kept.state, 'ready')
+  // Both revokes went to the second card's own authorization server.
+  const revokes = testAuth.tokenRequests().filter(entry => String(entry.body).includes('token=') && !String(entry.body).includes('grant_type'))
+  assert.equal(revokes.length, 2)
+})
+
+test('instances are created and removed without touching the others', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const neonAuth = fakeOAuthServer({ resource: 'https://mcp.neon.tech/mcp', issuer: 'https://mcp.neon.tech', declaredResource: 'https://mcp.neon.tech/mcp' })
+  globalThis.fetch = async (url, init = {}) => {
+    const address = String(url)
+    if (!address.startsWith('https://mcp.neon.tech/')) throw new Error(`unexpected fetch ${address}`)
+    if (init.headers?.authorization === undefined) return neonAuth.fetch(url, init)
+    return neonMcpServer()(JSON.parse(init.body))
+  }
+  const credentials = fakeCredentials()
+  credentials.records.set('ds-bot/connector-neon', NEON_GRANT(neonInstance({ id: 'neon' }).authorize({ level: 'read', settings: {} }).url, 'read', ['read'], 'access-neon'))
+  const state = { ...INSTANCE_TEAM, connectors: { neon: { level: 'read', settings: {}, authorizedAt: 1 } } }
+  const { ctx, home, registered } = neonInstanceHost({ state, credentials })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await untilReady(ctx, ['neon'])
+
+  // Adding a card writes state only: off, read level, no authorization.
+  const added = await callBot(ctx, 'connector-create-instance', { base: 'neon' })
+  assert.equal(added.ok, true, JSON.stringify(added))
+  const off = added.value.find(item => item.id === 'neon-2')
+  assert.deepEqual([off.state, off.level, off.instance.base], ['off', 'read', 'neon'])
+  assert.equal(credentials.records.has('ds-bot/connector-neon-2'), false)
+  // The new card has a label, and a rename changes only the label, not the id or the tools.
+  const renamed = await callBot(ctx, 'connector-set-settings', { id: 'neon-2', values: { label: 'Staging DB' } })
+  assert.equal(renamed.ok, true, JSON.stringify(renamed))
+  const labeled = renamed.value.find(item => item.id === 'neon-2')
+  assert.equal(labeled.instance.label, 'Staging DB')
+
+  // A deleted instance never returns with its old id; the next card takes the next number.
+  const removed = await callBot(ctx, 'connector-delete-instance', { id: 'neon-2' })
+  assert.equal(removed.ok, true, JSON.stringify(removed))
+  assert.equal(removed.value.some(item => item.id === 'neon-2'), false)
+  const again = await callBot(ctx, 'connector-create-instance', { base: 'neon' })
+  assert.equal(again.value.some(item => item.id === 'neon-3'), true)
+  assert.equal(again.value.some(item => item.id === 'neon-2'), false)
+
+  // The last card cannot be removed; the first card still mounts.
+  const removedAgain = await callBot(ctx, 'connector-delete-instance', { id: 'neon-3' })
+  assert.equal(removedAgain.ok, true, JSON.stringify(removedAgain))
+  const last = await callBot(ctx, 'connector-delete-instance', { id: 'neon' })
+  assert.equal(last.ok, false)
+  assert.match(last.error.message, /keeps at least 1 instance/)
+  assert.equal((await callBot(ctx, 'state', {})).value.connectors.find(item => item.id === 'neon').state, 'ready')
+  assert.ok(registered.includes('neon_list_projects'))
 })
