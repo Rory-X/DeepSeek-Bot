@@ -476,12 +476,12 @@ export const IMA_WRITE_TOOLS = [
 // Display only: the client draws this list and the one permission sentence. It never
 // registers a tool; the mounted tools are still `restTools`.
 export const IMA_CAPABILITIES = [
-  { key: 'read_notes', title: 'Read notes and knowledge bases', description: 'Search, list and read your notes, and search inside knowledge bases.', risk: 'read' },
+  { key: 'read_notes', title: 'Read notes and knowledge bases', description: 'Search, list and read your notes, search inside knowledge bases, and list the ones you can add to.', risk: 'read' },
   { key: 'read_media', title: 'Read original files', description: 'Get the download entry for an item in a knowledge base.', risk: 'read' },
-  { key: 'create_note', title: 'Create a note', description: 'Write a new note from Markdown.', risk: 'write', preview: { change: 'creates a new note', reversible: false } },
-  { key: 'append_note', title: 'Append to a note', description: 'Add text to the end of an existing note.', risk: 'write', preview: { change: 'appends to an existing note', reversible: false } },
-  { key: 'add_note_to_kb', title: 'Add a note to a knowledge base', description: 'File one of your notes into a knowledge base.', risk: 'write', preview: { change: 'adds a note to a knowledge base', reversible: false } },
-  { key: 'import_url', title: 'Import web pages', description: 'Save web pages or WeChat articles into a knowledge base.', risk: 'write', preview: { change: 'imports web pages into a knowledge base', reversible: false } },
+  { key: 'create_note', title: 'Create a note', description: 'Write a new note from Markdown. It cannot be undone through the API.', risk: 'write', preview: { change: 'creates a new note', reversible: false } },
+  { key: 'append_note', title: 'Append to a note', description: 'Add text to the end of an existing note. It cannot be undone through the API.', risk: 'write', preview: { change: 'appends to an existing note', reversible: false } },
+  { key: 'add_note_to_kb', title: 'Add a note to a knowledge base', description: 'File one of your notes into a knowledge base. It cannot be undone through the API.', risk: 'write', preview: { change: 'adds a note to a knowledge base', reversible: false } },
+  { key: 'import_url', title: 'Import web pages', description: 'Save web pages or WeChat articles into a knowledge base. It cannot be undone through the API.', risk: 'write', preview: { change: 'imports web pages into a knowledge base', reversible: false } },
 ]
 
 export const IMA_PERMISSIONS = {
@@ -506,9 +506,9 @@ export const connector = {
   permissions: IMA_PERMISSIONS,
   card: {
     glyph: 'ima',
-    about: 'Read your ima notes and knowledge bases.',
+    about: 'Read your ima notes and knowledge bases; with Full capabilities it can create and append notes and add items to a knowledge base.',
     docsUrl: 'https://ima.qq.com/agent-interface',
-    readOnlyNote: 'All tools send POST requests, but they only read: nothing in ima is changed.',
+    readOnlyNote: 'At the default read level nothing is changed; Full capabilities adds four write tools, each asks first, and none can be undone through the API.',
   },
 }
 

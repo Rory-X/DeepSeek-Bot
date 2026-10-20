@@ -184,8 +184,11 @@ test('the card copy lives under card, where the client reads it', () => {
   // so a top-level glyph/about/docsUrl/readOnlyNote would never reach the card.
   assert.equal(connector.card.glyph, 'ima')
   assert.match(connector.card.about, /notes and knowledge bases/)
+  // The copy names the write level: it would contradict the four write tools otherwise.
+  assert.match(connector.card.about, /Full capabilities/)
   assert.match(connector.card.docsUrl, /^https:\/\/ima\.qq\.com\//)
-  assert.match(connector.card.readOnlyNote, /only read/)
+  assert.match(connector.card.readOnlyNote, /read level nothing is changed/)
+  assert.match(connector.card.readOnlyNote, /none can be undone/)
   for (const key of ['glyph', 'about', 'docsUrl', 'readOnlyNote']) assert.equal(connector[key], undefined, key)
   assert.equal(connector.actions, undefined)
   assert.equal(connector.toolbox, undefined)
@@ -421,6 +424,7 @@ test('imaError covers the notes table as well as the reference table', () => {
 test('capabilities describe the write batch without registering a tool', () => {
   assert.deepEqual(connector.capabilities, IMA_CAPABILITIES)
   assert.equal(connector.permissions, IMA_PERMISSIONS)
+  for (const item of IMA_CAPABILITIES.filter(entry => entry.risk === 'write')) assert.match(item.description, /cannot be undone/, item.key)
   const risks = new Set(IMA_CAPABILITIES.map(item => item.risk))
   assert.deepEqual([...risks].sort(), ['read', 'write'])
   for (const item of IMA_CAPABILITIES) {
