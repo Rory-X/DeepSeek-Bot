@@ -105,7 +105,7 @@ test('the connector is one read-only IMAP module the registry can load', async (
   assert.equal(mounted.mailbox, 'user@qq.com')
   assert.deepEqual(mounted.tools.map(tool => tool.name), QQMAIL_TOOLS)
   await mounted.close()
-  assert.deepEqual(QQMAIL_TOOLS, ['qqmail_list_folders', 'qqmail_search', 'qqmail_list_messages', 'qqmail_get_message'])
+  assert.deepEqual(QQMAIL_TOOLS, ['qqmail_list_folders', 'qqmail_search', 'qqmail_list_messages', 'qqmail_get_message', 'qqmail_list_attachments', 'qqmail_read_attachment'])
   // Write tools are opt-in: the module declares both levels and the IMAP write capability.
   assert.deepEqual(qqmail.levels, ['read', 'write'])
   assert.equal(qqmail.defaultLevel, 'read')
@@ -397,6 +397,107 @@ test('get_message reads headers and text with BODY.PEEK, split across packets', 
     for (const line of fetches) assert.match(line, /BODY\.PEEK\[/)
   } finally {
     await session.close()
+  }
+})
+
+const ATTACH_STRUCTURE = '(("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "7BIT" 41 2 NIL NIL NIL NIL)("TEXT" "CSV" ("CHARSET" "utf-8") NIL NIL "7BIT" 18 1 NIL ("ATTACHMENT" ("FILENAME" "report.csv")) NIL NIL)("APPLICATION" "PDF" ("NAME" "report.pdf") NIL NIL "BASE64" 2048 NIL ("ATTACHMENT" ("FILENAME" "report.pdf")) NIL NIL))'
+
+// A message whose BODYSTRUCTURE names a text body, a CSV attachment and a PDF one.
+function attachmentServer({ structure = ATTACH_STRUCTURE, parts = {} } = {}) {
+  return imapServer({
+    onLine: (line, socket) => {
+      if (/^A\d+ UID FETCH \d+ \(UID BODYSTRUCTURE\)/.test(line)) {
+        socket.send(`* 1 FETCH (UID 42 BODYSTRUCTURE ${structure})\r\n${tagOf(line)} OK FETCH completed\r\n`)
+        return true
+      }
+      const section = /BODY\.PEEK\[([^\]]+)\]/.exec(line)
+      if (section !== null) {
+        const body = parts[section[1]]
+        if (body === undefined) {
+          socket.send(`${tagOf(line)} NO no such part\r\n`)
+          return true
+        }
+        socket.send(`* 1 FETCH (UID 42 BODY[${section[1]}] {${Buffer.byteLength(body)}}\r\n${body})\r\n${tagOf(line)} OK FETCH completed\r\n`)
+        return true
+      }
+      return false
+    },
+  })
+}
+
+const attachmentRead = (server) => createQQMailTools({
+  credential: 'user@qq.com:code',
+  account: { mailbox: 'user@qq.com' },
+  connect: server.connect,
+  timeoutMs: 2_000,
+})
+
+test('lists attachments and reads a text one without changing the mailbox', async () => {
+  const server = attachmentServer({ parts: { 2: 'name,score\nann,10\n' } })
+  const read = attachmentRead(server)
+  try {
+    const listed = await read.tools.find(tool => tool.name === 'qqmail_list_attachments').execute({ uid: 42 })
+    assert.match(listed, /2 attachment\(s\) in message UID 42:/)
+    assert.match(listed, /\[1\] report\.csv \(TEXT\/CSV, 18 bytes\)/)
+    assert.match(listed, /\[2\] report\.pdf \(APPLICATION\/PDF, 2048 bytes\)/)
+    const text = await read.tools.find(tool => tool.name === 'qqmail_read_attachment').execute({ uid: 42, index: 1 })
+    assert.equal(text, 'name,score\nann,10\n')
+  } finally {
+    await read.close()
+  }
+  const commands = server.commands.map(plain)
+  assert.ok(commands.some(line => /UID FETCH 42 \(UID BODYSTRUCTURE\)/.test(line)))
+  assert.ok(commands.some(line => /UID FETCH 42 \(UID BODY\.PEEK\[2\]<0\.2097152>\)/.test(line)))
+  assert.equal(/\b(SELECT|STORE|APPEND|EXPUNGE|COPY|MOVE)\b/.test(commands.join('\n')), false)
+  assert.equal(/\bBODY\[/.test(commands.join('\n')), false)
+})
+
+test('a non-text attachment is refused with its type and size, and its body is never fetched', async () => {
+  const server = attachmentServer()
+  const read = attachmentRead(server)
+  try {
+    await assert.rejects(
+      read.tools.find(tool => tool.name === 'qqmail_read_attachment').execute({ uid: 42, index: 2 }),
+      /is APPLICATION\/PDF, 2048 bytes; only text attachments can be read/,
+    )
+  } finally {
+    await read.close()
+  }
+  assert.equal(server.commands.some(line => /BODY\.PEEK\[/.test(line)), false)
+})
+
+test('an attachment index is checked before the folder is touched', async () => {
+  const server = attachmentServer()
+  const read = attachmentRead(server)
+  try {
+    await assert.rejects(read.tools.find(tool => tool.name === 'qqmail_read_attachment').execute({ uid: 42, index: 0 }), /positive number/)
+    assert.equal(server.commands.some(line => /EXAMINE/.test(line)), false)
+    await assert.rejects(read.tools.find(tool => tool.name === 'qqmail_read_attachment').execute({ uid: 42, index: 5 }), /no attachment 5/)
+  } finally {
+    await read.close()
+  }
+  assert.equal(server.commands.some(line => /BODY\.PEEK\[/.test(line)), false)
+})
+
+test('a long text attachment is cut and an oversized one is refused', async () => {
+  const long = 'x'.repeat(20_050)
+  const structure = '(("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "7BIT" 100 5 NIL NIL NIL NIL)("TEXT" "CSV" ("CHARSET" "utf-8") NIL NIL "7BIT" 20050 1 NIL ("ATTACHMENT" ("FILENAME" "big.csv")) NIL NIL))'
+  const server = attachmentServer({ structure, parts: { 2: long } })
+  const read = attachmentRead(server)
+  try {
+    const text = await read.tools.find(tool => tool.name === 'qqmail_read_attachment').execute({ uid: 42, index: 1 })
+    assert.equal(text.length, 20_000 + '\n… (attachment cut: 20050 characters in all)'.length)
+    assert.match(text, /… \(attachment cut: 20050 characters in all\)$/)
+  } finally {
+    await read.close()
+  }
+  const huge = '(("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "7BIT" 100 5 NIL NIL NIL NIL)("APPLICATION" "ZIP" ("NAME" "huge.zip") NIL NIL "BASE64" 3000000 NIL ("ATTACHMENT" ("FILENAME" "huge.zip")) NIL NIL))'
+  const second = attachmentServer({ structure: huge })
+  const readHuge = attachmentRead(second)
+  try {
+    await assert.rejects(readHuge.tools.find(tool => tool.name === 'qqmail_read_attachment').execute({ uid: 42, index: 1 }), /only text attachments can be read|over the 2097152-byte limit/)
+  } finally {
+    await readHuge.close()
   }
 })
 
