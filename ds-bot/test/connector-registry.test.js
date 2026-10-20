@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { CONNECTOR_ID, CONNECTOR_MODES, externalConnectors, loadConnectorModules } from '../src/host/connectors/registry.js'
+import { CONNECTOR_ID, CONNECTOR_MODES, INSTANCE_LIMIT, externalConnectors, loadConnectorModules } from '../src/host/connectors/registry.js'
 
 // Each case writes its own directory: a module URL is cached for the process, so a reused
 // path would hand back the first module even after the file changed.
@@ -100,6 +100,70 @@ test('two modules may not claim the same id', async () => {
   })
   try {
     await assert.rejects(loadConnectorModules(dir), /repeats the id "same"/)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a multi-instance declaration is kept and defaulted', async () => {
+  const { dir, cleanup } = withModules({
+    'neon.js': `export default { id: 'neon', displayName: 'Neon', mode: 'oauth-mcp', instances: { prefix: 'neon', min: 1, max: 8 }, mcpUrl: 'https://neon.test/mcp', oauth: { scopes: ['read'] } }\n`,
+    'bare.js': `export default { id: 'bare', displayName: 'Bare', mode: 'oauth-mcp', instances: {}, mcpUrl: 'https://bare.test/mcp', oauth: { scopes: ['read'] } }\n`,
+    'plain.js': `export default { id: 'plain', displayName: 'Plain', mode: 'oauth-mcp', mcpUrl: 'https://plain.test/mcp', oauth: { scopes: ['read'] } }\n`,
+  })
+  try {
+    const loaded = await loadConnectorModules(dir)
+    assert.deepEqual(loaded.neon.instances, { prefix: 'neon', min: 1, max: 8 })
+    assert.deepEqual(loaded.bare.instances, { prefix: 'bare', min: 1, max: 8 })
+    // A module without the declaration is one instance, and keeps no instances field.
+    assert.equal('instances' in loaded.plain, false)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a broken multi-instance declaration fails at load with the file name', async () => {
+  const cases = [
+    [`instances: 'all'`, /instances must be an object/],
+    [`instances: { prefix: 'other' }`, /prefix must be the module id/],
+    [`instances: { prefix: 'Bad Prefix' }`, /prefix matching/],
+    [`instances: { min: 0 }`, /min of at least 1/],
+    [`instances: { min: 3, max: 2 }`, /max from 3 to/],
+    [`instances: { max: ${INSTANCE_LIMIT + 1} }`, /max from 1 to/],
+    [`instances: { max: 2.5 }`, /max from 1 to/],
+    [`id: 'a'.repeat(39), instances: {}`, /short enough for a "-2" instance/],
+  ]
+  for (const [fragment, pattern] of cases) {
+    const source = fragment.startsWith('instances:')
+      ? `export default { id: 'demo', displayName: 'Demo', mode: 'oauth-mcp', mcpUrl: 'https://demo.test/mcp', oauth: { scopes: ['read'] }, ${fragment} }\n`
+      : `export default { displayName: 'Demo', mode: 'oauth-mcp', mcpUrl: 'https://demo.test/mcp', oauth: { scopes: ['read'] }, ${fragment} }\n`
+    const { dir, cleanup } = withModules({ 'broken.js': source })
+    try {
+      await assert.rejects(loadConnectorModules(dir), pattern, source)
+    } finally {
+      cleanup()
+    }
+  }
+})
+
+test('only OAuth connectors can be instances', async () => {
+  const { dir, cleanup } = withModules({
+    'demo.js': `export default { id: 'demo', displayName: 'Demo', mode: 'rest-tools', api: 'https://demo.test', instances: {} }\n`,
+  })
+  try {
+    await assert.rejects(loadConnectorModules(dir), /per-instance credentials: oauth-mcp/)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a module id may not take the id another module reserves for an instance', async () => {
+  const { dir, cleanup } = withModules({
+    'neon.js': `export default { id: 'neon', displayName: 'Neon', mode: 'oauth-mcp', instances: { prefix: 'neon', min: 1, max: 8 }, mcpUrl: 'https://neon.test/mcp', oauth: { scopes: ['read'] } }\n`,
+    'second.js': `export default { id: 'neon-2', displayName: 'Second', mode: 'oauth-mcp', mcpUrl: 'https://second.test/mcp', oauth: { scopes: ['read'] } }\n`,
+  })
+  try {
+    await assert.rejects(loadConnectorModules(dir), /"neon-2" is reserved for instances of "neon"/)
   } finally {
     cleanup()
   }
