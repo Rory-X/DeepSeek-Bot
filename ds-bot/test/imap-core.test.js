@@ -115,7 +115,20 @@ const writeTools = ({ server, approve = async () => {}, redact } = {}) => create
   connectTimeoutMs: 500,
 })
 
+const gmailWriteTools = ({ server, approve = async () => {} } = {}) => createImapWriteTools({
+  id: 'gmail',
+  displayName: 'Gmail',
+  credential: 'user@example.com:secret-code',
+  account: { mailbox: 'user@example.com' },
+  connect: server.connect,
+  approve,
+  gmailLabels: true,
+  timeoutMs: 1_000,
+  connectTimeoutMs: 500,
+})
+
 const tool = (tools, name) => tools.find(entry => entry.name === `qq_${name}`)
+const gmailTool = (tools, name) => tools.find(entry => entry.name === `gmail_${name}`)
 
 test('IMAP search keeps the standard criteria and only nests Gmail syntax when asked', () => {
   assert.equal(searchCriteria({}), 'ALL')
@@ -344,4 +357,41 @@ test('a failing write names no credential', async () => {
     assert.ok(!error.message.includes('secret-code'))
     return true
   })
+})
+
+
+test('Gmail label tools are opt-in, ask first and quote labels on the wire', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1', 'X-GM-EXT-1'] })
+  const asked = []
+  const tools = gmailWriteTools({ server, approve: async (request) => { asked.push(request) } })
+  assert.deepEqual(
+    tools.map(entry => entry.name).filter(name => /labels|archive/.test(name)),
+    ['gmail_add_labels', 'gmail_remove_labels', 'gmail_archive'],
+  )
+
+  const added = await gmailTool(tools, 'add_labels').execute({ uids: [1, 2], labels: ['Work', '\\Starred'] }, { agent: { id: 'm1' } })
+  assert.match(added, /Added 2 label\(s\) to 2 message\(s\)/)
+  assert.match(asked[0].line, /Add 2 label\(s\) to 2 message\(s\) in "INBOX" \(UID 1,2\)/)
+  assert.equal(asked[0].exec.agent.id, 'm1')
+  assert.ok(sent(server).includes('UID STORE 1,2 +X-GM-LABELS ("Work" "\\\\Starred")'))
+
+  await gmailTool(tools, 'remove_labels').execute({ uids: [3], labels: ['Work'] }, { agent: { id: 'm1' } })
+  assert.ok(sent(server).includes('UID STORE 3 -X-GM-LABELS ("Work")'))
+
+  // Archive keeps every other label and only takes the message out of the Inbox.
+  await gmailTool(tools, 'archive').execute({ uids: [4] }, { agent: { id: 'm1' } })
+  assert.ok(sent(server).includes('UID STORE 4 -X-GM-LABELS ("\\\\Inbox")'))
+  assert.match(asked.at(-1).line, /Archive 1 message\(s\)/)
+})
+
+test('a label write on a server without X-GM-EXT-1 fails before any write command', async () => {
+  const server = imapServer({ capabilities: ['IMAP4rev1'] })
+  const tools = gmailWriteTools({ server })
+  await assert.rejects(gmailTool(tools, 'archive').execute({ uids: [1] }), /does not support Gmail labels/)
+  assert.equal(server.commands.some(line => /X-GM-LABELS|UID STORE/.test(line)), false)
+})
+
+test('a plain mail connector gets no label tools, and an unknown tool name stays absent', () => {
+  const tools = writeTools({ server: imapServer() })
+  assert.deepEqual(tools.filter(entry => /labels|archive/.test(entry.name)), [])
 })

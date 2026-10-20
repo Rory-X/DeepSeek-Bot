@@ -27,6 +27,7 @@ const COMMAND_TIMEOUT_MS = 20_000
 const FOLDER_MAX = 200
 const UID_MAX = 200
 const WRITE_UID_MAX = 100
+const WRITE_LABEL_MAX = 20
 const BODY_MAX = 20_000
 const CRLF = Buffer.from('\r\n')
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -614,6 +615,20 @@ export class ImapClient {
     for (const change of changes) await this.#command(`UID STORE ${list} ${change}`)
   }
 
+  // Gmail labels: system labels such as \Inbox and user labels. Only a server that speaks
+  // X-GM-EXT-1 gets the command, and this method refuses before a write when it does not.
+  async storeLabels(uids, { add = [], remove = [] } = {}) {
+    const list = uidList(uids)
+    const additions = labelNames(add)
+    const removals = labelNames(remove)
+    if (additions.length === 0 && removals.length === 0) throw new Error('Name at least one label.')
+    if (!(await this.capabilities()).has('X-GM-EXT-1')) {
+      throw new Error('This mail server does not support Gmail labels; labelling and archiving are unavailable.')
+    }
+    if (additions.length > 0) await this.#command(`UID STORE ${list} +X-GM-LABELS (${additions.map(quote).join(' ')})`)
+    if (removals.length > 0) await this.#command(`UID STORE ${list} -X-GM-LABELS (${removals.map(quote).join(' ')})`)
+  }
+
   // MOVE when the server advertises it; otherwise copy and mark deleted, which is what a
   // client without MOVE does. Nothing is expunged here: without MOVE the messages stay in
   // the source folder, flagged, until the user empties it.
@@ -912,6 +927,18 @@ const flagsOf = flags => flags.map((flag) => {
   return text
 }).join(' ')
 
+// Gmail label names: plain text, quoted when they reach the wire; \Inbox and the other
+// system labels keep their backslash.
+const labelNames = (value) => {
+  const items = Array.isArray(value) ? value : []
+  const labels = items.map(item => String(item ?? '').trim()).filter(text => text !== '')
+  if (labels.length > WRITE_LABEL_MAX) throw new Error(`At most ${WRITE_LABEL_MAX} labels can be changed at once.`)
+  for (const label of labels) {
+    if (label.length > 200 || /[\r\n]/.test(label)) throw new Error('A label cannot contain a line break or be that long.')
+  }
+  return [...new Set(labels)]
+}
+
 const requiredFolder = (value, label) => {
   const text = typeof value === 'string' ? value.trim() : ''
   if (text === '') throw new Error(`${label} is required.`)
@@ -959,7 +986,7 @@ const buildDraft = ({ from, to, subject, body, date = new Date() }) => {
 // opens a connection, so a refused or cancelled call sends no command at all; the approval
 // line names the folder, the number of messages, the UIDs and, for a permanent delete, that
 // it cannot be undone. A connector that hands in no approval step gets no write tools.
-export function createImapWriteTools({ id, displayName, credential, account, host, port = IMAP_PORT, connect, redact = String, timeoutMs, connectTimeoutMs, approve } = {}) {
+export function createImapWriteTools({ id, displayName, credential, account, host, port = IMAP_PORT, connect, redact = String, timeoutMs, connectTimeoutMs, approve, gmailLabels = false } = {}) {
   const { mailbox, secret } = credentialParts(credential, account)
   if (typeof approve !== 'function') throw new Error(`${displayName} cannot offer write tools without an approval step.`)
   let chain = Promise.resolve()
@@ -995,6 +1022,13 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
     description: `Message UIDs, at most ${WRITE_UID_MAX}`,
   }
   const folderParam = { type: 'string', description: 'Folder name; default INBOX' }
+  const labelsParam = {
+    type: 'array',
+    items: { type: 'string' },
+    minItems: 1,
+    maxItems: WRITE_LABEL_MAX,
+    description: `Gmail label names, at most ${WRITE_LABEL_MAX}`,
+  }
 
   return [
     {
@@ -1121,6 +1155,60 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
         })
       },
     },
+    ...(gmailLabels ? [
+      {
+        name: `${id}_add_labels`,
+        description: `Add Gmail labels to messages in a ${displayName} folder (write; the user is asked first).`,
+        parameters: { type: 'object', properties: { folder: folderParam, uids: uidsParam, labels: labelsParam }, required: ['uids', 'labels'] },
+        output,
+        execute: async (args, exec) => {
+          const folder = folderName(args?.folder)
+          const uids = uidList(args?.uids)
+          const labels = labelNames(args?.labels)
+          if (labels.length === 0) throw new Error('Name at least one label.')
+          await allowed(`${id}_add_labels`, `Add ${labels.length} label(s) to ${uids.length} message(s) in "${folder}" (UID ${uids.join(',')})`, exec)
+          return run(async (imap) => {
+            await imap.select(folder)
+            await imap.storeLabels(uids, { add: labels })
+            return `Added ${labels.length} label(s) to ${uids.length} message(s) in "${folder}".`
+          })
+        },
+      },
+      {
+        name: `${id}_remove_labels`,
+        description: `Remove Gmail labels from messages in a ${displayName} folder (write; the user is asked first).`,
+        parameters: { type: 'object', properties: { folder: folderParam, uids: uidsParam, labels: labelsParam }, required: ['uids', 'labels'] },
+        output,
+        execute: async (args, exec) => {
+          const folder = folderName(args?.folder)
+          const uids = uidList(args?.uids)
+          const labels = labelNames(args?.labels)
+          if (labels.length === 0) throw new Error('Name at least one label.')
+          await allowed(`${id}_remove_labels`, `Remove ${labels.length} label(s) from ${uids.length} message(s) in "${folder}" (UID ${uids.join(',')})`, exec)
+          return run(async (imap) => {
+            await imap.select(folder)
+            await imap.storeLabels(uids, { remove: labels })
+            return `Removed ${labels.length} label(s) from ${uids.length} message(s) in "${folder}".`
+          })
+        },
+      },
+      {
+        name: `${id}_archive`,
+        description: `Archive messages by removing the Inbox label, so they stay in All Mail (write; the user is asked first).`,
+        parameters: { type: 'object', properties: { folder: folderParam, uids: uidsParam }, required: ['uids'] },
+        output,
+        execute: async (args, exec) => {
+          const folder = folderName(args?.folder)
+          const uids = uidList(args?.uids)
+          await allowed(`${id}_archive`, `Archive ${uids.length} message(s) from "${folder}" (remove the Inbox label) (UID ${uids.join(',')})`, exec)
+          return run(async (imap) => {
+            await imap.select(folder)
+            await imap.storeLabels(uids, { remove: ['\\Inbox'] })
+            return `Archived ${uids.length} message(s) from "${folder}".`
+          })
+        },
+      },
+    ] : []),
   ]
 }
 
