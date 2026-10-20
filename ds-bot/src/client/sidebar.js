@@ -372,21 +372,31 @@ function useHorizontalScroll(ref, setEdges) {
     }
     const onDown = (event) => {
       if (event.pointerType !== 'mouse' || event.button !== 0) return
-      drag = { x: event.clientX, left: row.scrollLeft, moved: false }
+      // No capture yet: capturing on press retargets the click to this row, and the Bot
+      // tile under the pointer never gets its own click. Capture once the press is a drag.
+      drag = { x: event.clientX, left: row.scrollLeft, moved: false, pointerId: event.pointerId, captured: false }
       row.dataset.dragging = ''
-      row.setPointerCapture?.(event.pointerId)
     }
     const onMove = (event) => {
       if (drag === null) return
       const dx = event.clientX - drag.x
-      if (Math.abs(dx) > 4) drag.moved = true
+      if (!drag.moved && Math.abs(dx) > 4) {
+        drag.moved = true
+        try {
+          row.setPointerCapture(event.pointerId)
+          drag.captured = true
+        } catch { /* the pointer already went away */ }
+      }
       if (drag.moved) row.scrollLeft = drag.left - dx
     }
     const onUp = () => {
       if (drag === null) return
-      const moved = drag.moved
+      const { moved, captured, pointerId } = drag
       drag = null
       delete row.dataset.dragging
+      if (captured) {
+        try { row.releasePointerCapture(pointerId) } catch { /* already released */ }
+      }
       // The press that ended a drag must not open the Bot it ended on.
       if (moved) {
         swallowClick = true

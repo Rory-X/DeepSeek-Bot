@@ -9840,21 +9840,33 @@ function useHorizontalScroll(ref, setEdges) {
     };
     const onDown = (event) => {
       if (event.pointerType !== "mouse" || event.button !== 0) return;
-      drag = { x: event.clientX, left: row.scrollLeft, moved: false };
+      drag = { x: event.clientX, left: row.scrollLeft, moved: false, pointerId: event.pointerId, captured: false };
       row.dataset.dragging = "";
-      row.setPointerCapture?.(event.pointerId);
     };
     const onMove = (event) => {
       if (drag === null) return;
       const dx = event.clientX - drag.x;
-      if (Math.abs(dx) > 4) drag.moved = true;
+      if (!drag.moved && Math.abs(dx) > 4) {
+        drag.moved = true;
+        try {
+          row.setPointerCapture(event.pointerId);
+          drag.captured = true;
+        } catch {
+        }
+      }
       if (drag.moved) row.scrollLeft = drag.left - dx;
     };
     const onUp = () => {
       if (drag === null) return;
-      const moved = drag.moved;
+      const { moved, captured, pointerId } = drag;
       drag = null;
       delete row.dataset.dragging;
+      if (captured) {
+        try {
+          row.releasePointerCapture(pointerId);
+        } catch {
+        }
+      }
       if (moved) {
         swallowClick = true;
         setTimeout(() => {
