@@ -315,8 +315,6 @@ export function install(rt) {
         case 'connector-connect':
         case 'connector-disconnect':
         case 'connector-retry':
-        case 'connector-set-actions':
-        case 'connector-set-toolbox':
         case 'connector-set-level':
         case 'connector-set-settings':
         case 'connector-test':

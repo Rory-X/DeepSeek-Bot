@@ -363,7 +363,7 @@ test('replacing the saved Vercel token re-reads the account and its team', async
   assert.deepEqual(second.calls.filter(entry => entry.method === 'tools/call').at(-1).params.arguments, { projectId: 'p1', teamId: 'team_2' })
 })
 
-test('the action tools stay off until the switch turns them on', async (t) => {
+test('the write level mounts the vendor toolbox, and the read level takes it away', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
   const bench = vercelBench()
@@ -375,74 +375,31 @@ test('the action tools stay off until the switch turns them on', async (t) => {
     const item = (await call(ctx, 'state', {})).value.connectors[1]
     return item?.state === 'ready' ? item : undefined
   }, 'Vercel to connect read-only')
-  assert.equal(ready.actions, false)
-  assert.equal(registered.length, 13)
+  assert.equal(ready.level, 'read')
+  assert.deepEqual([ready.actions, ready.toolbox], [false, false])
   assert.deepEqual([...registered].sort(), vercelNames(VERCEL_READ).sort())
   assert.ok(!registered.includes('vercel_create_deployment'))
 
-  const on = (await call(ctx, 'connector-set-actions', { id: 'vercel', enabled: true })).value
-  assert.equal(on[1].actions, true)
-  const withActions = new Set(registered.slice(-17))
-  assert.equal(withActions.size, 17)
-  assert.deepEqual([...withActions].sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
-  assert.ok(!withActions.has('vercel_create_project'))
+  const raised = (await call(ctx, 'connector-set-level', { id: 'vercel', level: 'write' })).value
+  assert.equal(raised[1].level, 'write')
+  assert.deepEqual([raised[1].actions, raised[1].toolbox], [true, true])
+  await until(async () => (registered.includes('vercel_call') ? true : undefined), 'the toolbox')
+  // 13 read + the two meta tools; no named action tool is registered.
+  assert.deepEqual(registered.slice(-15).sort(), [...vercelNames(VERCEL_READ), 'vercel_search_tools', 'vercel_call'].sort())
+  assert.ok(!registered.includes('vercel_create_deployment'))
 
-  const off = (await call(ctx, 'connector-set-actions', { id: 'vercel', enabled: false })).value
-  assert.equal(off[1].actions, false)
+  const lowered = (await call(ctx, 'connector-set-level', { id: 'vercel', level: 'read' })).value
+  assert.equal(lowered[1].level, 'read')
+  assert.equal(lowered[1].toolbox, false)
   assert.deepEqual(registered.slice(-13).sort(), vercelNames(VERCEL_READ).sort())
   assert.ok(!registered.slice(-13).includes('vercel_create_deployment'))
 })
 
-const actionsState = () => ({ ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', actions: true, connectedAt: 1 } } })
+const writeState = () => ({ ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', level: 'write', connectedAt: 1 } } })
 
 // The approval card a connector write leaves in the dock for the running Bot's session.
 const approvalCard = async (ctx) => (await call(ctx, 'state', {})).value.questions.m1
 const answerCard = (ctx, questionId, selected) => call(ctx, 'answer-question', { sessionId: 'm1', questionId, answer: { selected } })
-
-test('a named action asks on the approval card before it runs, and a read tool does not', async (t) => {
-  const realFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = realFetch })
-  const bench = vercelBench()
-  globalThis.fetch = bench.fetch
-  const { ctx, home } = setup({ state: actionsState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
-    return item?.state === 'ready' && item.actions === true ? item : undefined
-  }, 'Vercel with its actions')
-
-  // A read tool runs with no card and no wait.
-  assert.equal(await ctx.registeredTools.get('vercel_list_projects').execute({}, { agent: { id: 'm1' } }), 'called list_projects')
-  assert.equal(await approvalCard(ctx), undefined)
-
-  // The write waits on the plugin's own card: it has not reached the server.
-  const calls = () => bench.calls.filter(entry => entry.method === 'tools/call').length
-  const pending = ctx.registeredTools.get('vercel_create_deployment').execute({}, { agent: { id: 'm1' } })
-  const card = await until(() => approvalCard(ctx), 'the approval card')
-  assert.equal(card.kind, 'connector-approval')
-  assert.equal(card.question, "Allow Chief to run Vercel's create_deployment?")
-  assert.deepEqual(card.options.map(option => option.label), ['Allow once', 'Deny'])
-  assert.equal(calls(), 1)
-
-  // Allow once: the call goes out and the card goes away.
-  assert.equal((await answerCard(ctx, card.id, ['Allow once'])).ok, true)
-  assert.equal(await pending, 'called create_deployment')
-  assert.equal(calls(), 2)
-  assert.equal(await approvalCard(ctx), undefined)
-
-  // Deny: the call never reaches the server and the model sees why.
-  const refused = ctx.registeredTools.get('vercel_cancel_deployment').execute({}, { agent: { id: 'm1' } })
-  const second = await until(() => approvalCard(ctx), 'the second card')
-  assert.equal((await answerCard(ctx, second.id, ['Deny'])).ok, true)
-  await assert.rejects(refused, /The user denied Vercel's cancel_deployment; nothing was sent/)
-  assert.equal(calls(), 2)
-
-  // Every decision is in diagnostics, and no argument is.
-  const log = (await call(ctx, 'diagnostics-log')).value
-  assert.match(log, /connector-approval/)
-  assert.match(log, /allowed: Vercel's create_deployment/)
-  assert.match(log, /denied: Vercel's cancel_deployment/)
-})
 
 test('an approval card left by an earlier host can still be dismissed', async (t) => {
   const { ctx, home } = setup({
@@ -459,14 +416,14 @@ test('an unanswered approval is refused after the timeout, and nothing is sent',
   t.after(() => { globalThis.fetch = realFetch })
   const bench = vercelBench()
   globalThis.fetch = bench.fetch
-  const { ctx, home } = setup({ state: actionsState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }], config: { connectorApprovalTimeoutMs: 60 } })
+  const { ctx, home } = setup({ state: writeState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }], config: { connectorApprovalTimeoutMs: 60 } })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await until(async () => {
     const item = (await call(ctx, 'state', {})).value.connectors[1]
-    return item?.state === 'ready' && item.actions === true ? item : undefined
-  }, 'Vercel with its actions')
+    return item?.state === 'ready' && item.toolbox === true ? item : undefined
+  }, 'Vercel at its write level')
 
-  const pending = ctx.registeredTools.get('vercel_create_deployment').execute({}, { agent: { id: 'm1' } })
+  const pending = ctx.registeredTools.get('vercel_call').execute({ tool: 'create_deployment' }, { agent: { id: 'm1' } })
   await until(() => approvalCard(ctx), 'the approval card')
   await assert.rejects(pending, /did not answer in time/)
   assert.equal(await approvalCard(ctx), undefined)
@@ -475,62 +432,34 @@ test('an unanswered approval is refused after the timeout, and nothing is sent',
   assert.match(log, /timed out: Vercel's create_deployment/)
 })
 
-test('a saved actions switch survives a restart', async (t) => {
+test('a saved write level survives a restart', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
   const bench = vercelBench()
   globalThis.fetch = bench.fetch
-  const saved = { ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', actions: true, connectedAt: 1 } } }
+  const saved = { ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', level: 'write', connectedAt: 1 } } }
   const { ctx, home, registered } = setup({ state: saved, secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
 
   const ready = await until(async () => {
     const item = (await call(ctx, 'state', {})).value.connectors[1]
-    return item?.state === 'ready' && item.actions === true ? item : undefined
-  }, 'Vercel with actions to connect')
-  assert.equal(ready.actions, true)
+    return item?.state === 'ready' && item.toolbox === true ? item : undefined
+  }, 'Vercel at its saved level')
   assert.equal(ready.level, 'write')
-  assert.deepEqual([...registered].sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
+  assert.deepEqual([ready.actions, ready.toolbox], [true, true])
+  assert.deepEqual([...registered].sort(), [...vercelNames(VERCEL_READ), 'vercel_search_tools', 'vercel_call'].sort())
+  assert.ok(!registered.includes('vercel_create_deployment'))
 })
 
-const toolboxState = () => ({ ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', actions: true, toolbox: true, connectedAt: 1 } } })
-
-test('the toolbox replaces the named actions and comes back off again', async (t) => {
-  const realFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = realFetch })
-  const bench = vercelBench()
-  globalThis.fetch = bench.fetch
-  const saved = { ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', actions: true, connectedAt: 1 } } }
-  const { ctx, home, registered } = setup({ state: saved, secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-
-  const connected = await until(async () => {
-    const item = (await call(ctx, 'state', {})).value.connectors[1]
-    return item?.state === 'ready' ? item : undefined
-  }, 'Vercel with its actions to connect')
-  assert.deepEqual([connected.actions, connected.toolbox], [true, false])
-  assert.deepEqual([...registered].sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
-
-  const on = (await call(ctx, 'connector-set-toolbox', { id: 'vercel', enabled: true })).value
-  assert.deepEqual([on[1].actions, on[1].toolbox], [true, true])
-  // 13 read + the two meta tools; no named action tool is registered.
-  assert.deepEqual(registered.slice(-15).sort(), [...vercelNames(VERCEL_READ), 'vercel_search_tools', 'vercel_call'].sort())
-  // A read tool runs through vercel_call with the default team filled in.
-  const text = await ctx.registeredTools.get('vercel_call').execute({ tool: 'list_projects' }, { agent: { id: 'm1' } })
-  assert.equal(text, 'called list_projects')
-  assert.deepEqual(bench.calls.filter(entry => entry.method === 'tools/call').at(-1).params.arguments, { teamId: 'team_1' })
-
-  const off = (await call(ctx, 'connector-set-toolbox', { id: 'vercel', enabled: false })).value
-  assert.deepEqual([off[1].actions, off[1].toolbox], [true, false])
-  assert.deepEqual(registered.slice(-17).sort(), [...vercelNames(VERCEL_READ), ...vercelNames(VERCEL_ACTIONS)].sort())
-})
+// A team saved before levels: both switches on is a write grant.
+const legacyWriteState = () => ({ ...TEAM, connectors: { vercel: { username: 'acme', teamId: 'team_1', actions: true, toolbox: true, connectedAt: 1 } } })
 
 test('vercel_call asks on the approval card for a write target; blocked targets are still refused outright', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
   const bench = vercelBench()
   globalThis.fetch = bench.fetch
-  const { ctx, home } = setup({ state: toolboxState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
+  const { ctx, home } = setup({ state: writeState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await until(async () => {
     const item = (await call(ctx, 'state', {})).value.connectors[1]
@@ -562,29 +491,21 @@ test('vercel_call asks on the approval card for a write target; blocked targets 
   assert.equal(await approvalCard(ctx), undefined)
 })
 
-test('a saved toolbox switch survives a restart', async (t) => {
+test('an older team with the switches on reads as a write level', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
   const bench = vercelBench()
   globalThis.fetch = bench.fetch
-  const { ctx, home, registered } = setup({ state: toolboxState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
+  const { ctx, home, registered } = setup({ state: legacyWriteState(), secrets: [{ name: 'VERCEL_TOKEN', value: fresh() }] })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
 
   const ready = await until(async () => {
     const item = (await call(ctx, 'state', {})).value.connectors[1]
     return item?.state === 'ready' && item.toolbox === true ? item : undefined
-  }, 'the saved toolbox to connect')
-  assert.deepEqual([ready.actions, ready.toolbox], [true, true])
-  assert.deepEqual([...registered].sort(), [...vercelNames(VERCEL_READ), 'vercel_search_tools', 'vercel_call'].sort())
+  }, 'Vercel at the migrated level')
+  assert.equal(ready.level, 'write')
+  assert.ok(registered.includes('vercel_call'))
   assert.ok(!registered.includes('vercel_create_deployment'))
-})
-
-test('only a connector with a toolbox can switch it', async (t) => {
-  const { ctx, home } = setup()
-  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const result = await call(ctx, 'connector-set-toolbox', { id: 'github', enabled: true })
-  assert.equal(result.ok, false)
-  assert.match(result.error.message, /no toolbox/)
 })
 
 test('a Vercel token that is refused or cannot name the account is not saved', async (t) => {
@@ -983,7 +904,7 @@ test('the Cloudflare toolbox runs reads directly, asks for each write and never 
   const { ctx, home, registered } = setup({ cloudflare: { url: CLOUDFLARE_ADDRESS }, services: { credentials, webServer } })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
 
-  const started = await call(ctx, 'connector-oauth-start', { id: 'cloudflare' }, { origin: 'https://dsh.test' })
+  const started = await call(ctx, 'connector-oauth-start', { id: 'cloudflare', level: 'write' }, { origin: 'https://dsh.test' })
   const authorizeUrl = new URL(started.value.authorizeUrl)
   const { res, done } = fakeResponse()
   webServer.routes[0].handler({ method: 'GET', url: `/oauth/ds-bot/cloudflare?code=auth-code&state=${encodeURIComponent(authorizeUrl.searchParams.get('state'))}` }, res)
@@ -995,11 +916,8 @@ test('the Cloudflare toolbox runs reads directly, asks for each write and never 
   assert.equal(saved.accountId, accountId)
   assert.equal(saved.accountName, 'Acme')
   const ready = (await call(ctx, 'state', {})).value.connectors.find(connector => connector.id === 'cloudflare')
-  assert.deepEqual([ready.toolbox, ready.toolboxCall], [false, 'cloudflare_call'])
-
-  // The switch adds the two meta tools next to the 14 read tools.
-  const on = (await call(ctx, 'connector-set-toolbox', { id: 'cloudflare', enabled: true })).value.find(connector => connector.id === 'cloudflare')
-  assert.equal(on.toolbox, true)
+  // A write grant mounts the 14 read tools and the two meta tools of the vendor toolbox.
+  assert.deepEqual([ready.level, ready.toolbox, ready.toolboxCall], ['write', true, 'cloudflare_call'])
   await until(async () => (registered.includes('cloudflare_search_tools') ? true : undefined), 'the Cloudflare toolbox')
   assert.deepEqual(registered.slice(-16).sort(), [...CLOUDFLARE_READ.map(name => `cloudflare_${name}`), 'cloudflare_search_tools', 'cloudflare_call'].sort())
 

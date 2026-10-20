@@ -200,6 +200,9 @@ const matchesType = (value, type) => {
 }
 
 export function createCloudflareCallTool({ client, index, output, redact = text => String(text), accountId, approve }) {
+  // The account id can land after the mount (the OAuth mount names the account), so it may
+  // be a getter; a value keeps working.
+  const accountIdOf = typeof accountId === 'function' ? accountId : () => accountId
   const cut = (text) => {
     const safe = redact(String(text))
     if (safe.length <= CLOUDFLARE_CALL_RESULT_MAX) return safe
@@ -233,7 +236,8 @@ export function createCloudflareCallTool({ client, index, output, redact = text 
       }
       const call = { ...given }
       // The connected account answers account-scoped calls; an explicit argument wins.
-      if (entry.hasAccountId && call.account_id === undefined && typeof accountId === 'string' && accountId !== '') call.account_id = accountId
+      const currentAccountId = accountIdOf()
+      if (entry.hasAccountId && call.account_id === undefined && typeof currentAccountId === 'string' && currentAccountId !== '') call.account_id = currentAccountId
       const missing = entry.required.filter(name => call[name] === undefined)
       if (missing.length > 0) throw new Error(`"${requested}" needs: ${entry.required.join(', ')}. Missing: ${missing.join(', ')}. cloudflare_search_tools shows its parameters.`)
       for (const [name, type] of Object.entries(entry.types)) {
