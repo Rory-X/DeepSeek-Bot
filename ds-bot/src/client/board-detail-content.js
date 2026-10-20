@@ -1,4 +1,5 @@
-import { createElement as h, useState } from 'react'
+import { createElement as h, useEffect, useRef, useState } from 'react'
+import { call } from './api.js'
 import { Card } from './bot-settings.js'
 import { BotAvatar } from './mark.js'
 import { MarkdownText } from './dsh-primitives.js'
@@ -61,10 +62,41 @@ export function VerificationEvidence({ card }) {
       h(BoardText, { text: item.detail }), item.reference ? h(BoardDisclosure, { title: t('Evidence source'), className: 'bt-board-inline-disclosure' }, h(ArtifactReference, { value: item.reference })) : null))) : null
 }
 
-export function Deliverables({ card }) {
+function DeliverablePreview({ card, item, actions }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [preview, setPreview] = useState(null)
+  const pending = useRef(null)
+  useEffect(() => {
+    setBusy(false); setError(''); setPreview(null)
+    return () => pending.current?.abort()
+  }, [card.id, item.id, item.reference])
+  const open = async target => {
+    pending.current?.abort()
+    const controller = new AbortController(); pending.current = controller
+    setBusy(true); setError('')
+    try {
+      const next = await call('board-artifact-preview', { id: card.id, artifactId: item.id }, controller.signal)
+      if (controller.signal.aborted) return
+      setPreview(next)
+      if (!next.targets.length) throw new Error('This reference contains no previewable file or link.')
+      const selected = target ? next.targets.find(entry => entry.value === target.value && entry.kind === target.kind) : next.targets.length === 1 ? next.targets[0] : null
+      if (selected) await actions.previewBoardArtifact(next, selected, controller.signal)
+      else if (target) throw new Error('This deliverable changed. Choose its current file or link.')
+    } catch (failure) { if (!controller.signal.aborted) setError(failure.message) }
+    finally { if (!controller.signal.aborted) setBusy(false) }
+  }
+  return h('div', null,
+    h('div', { className: 'bt-board-preview-actions' }, h('button', { type: 'button', className: 'bt-soft bt-board-button', disabled: busy, onClick: () => open() }, h(PaperclipIcon), t(busy ? 'Opening preview…' : 'Preview deliverable'))),
+    preview?.targets.length > 1 ? h('ul', { className: 'bt-board-preview-targets' }, preview.targets.map((target, index) => h('li', { key: index },
+      h('button', { type: 'button', className: 'bt-soft bt-board-button', disabled: busy, title: target.value, onClick: () => open(target) }, target.label)))) : null,
+    error ? h('p', { className: 'bt-board-preview-error', role: 'alert' }, t(error)) : null,
+    error && preview ? preview.targets.filter(target => target.kind === 'url').map(target => h('a', { key: target.value, href: target.value, target: '_blank', rel: 'noopener noreferrer', className: 'bt-more' }, t('Open link in new tab'))) : null)
+}
+
+export function Deliverables({ card, actions }) {
   return h(Card, { title: t('Deliverables') }, (card.artifacts ?? []).length
     ? card.artifacts.map(item => h('div', { key: item.id, className: 'bt-board-result bt-board-deliverable' },
       h('div', { className: 'bt-board-item-heading' }, h(PaperclipIcon), h('strong', null, item.title)),
+      item.reference && actions ? h(DeliverablePreview, { card, item, actions }) : null,
       h(BoardText, { text: item.summary }), item.reference ? h(BoardDisclosure, { title: t('File or link'), className: 'bt-board-inline-disclosure' }, h(ArtifactReference, { value: item.reference })) : null))
     : h('p', { className: 'bt-board-prose bt-board-muted' }, t('Deliverables and verification evidence will appear here.')))
 }

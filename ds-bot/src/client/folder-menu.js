@@ -12,7 +12,7 @@ const Tick = ({ on }) => h('span', { className: 'bt-model-tick', 'aria-hidden': 
 // Where a Bot, or every member of a group, works. `value` is the saved folder; without
 // one a Bot works in the team workspace and a group member in its own folder. `onPick`
 // gets the chosen path, or '' for that default.
-export function FolderMenu({ value, group = false, actions, run, onPick, wide = false, placeholder, allowDefault = true }) {
+export function FolderMenu({ value, group = false, team = false, actions, run, onPick, wide = false, placeholder, disabled = false, allowDefault = true }) {
   const { isOpen, shownPlace, leaving, button, menu, open, close } = useAnchoredMenu()
   const [info, setInfo] = useState(null)
   const [view, setView] = useState('list')
@@ -48,7 +48,7 @@ export function FolderMenu({ value, group = false, actions, run, onPick, wide = 
   const known = info?.folders ?? []
   const folders = value && !known.some(folder => folder.path === value) ? [{ path: value, title: folderName(value) }, ...known] : known
   const listView = h('div', { key: 'list', className: 'bt-folder-view' },
-    allowDefault ? h('button', { type: 'button', role: 'menuitemradio', 'aria-checked': !value, title: group ? undefined : info?.team ?? undefined, onClick: () => choose('') },
+    allowDefault && !team ? h('button', { type: 'button', role: 'menuitemradio', 'aria-checked': !value, title: group ? undefined : info?.team ?? undefined, onClick: () => choose('') },
       h('span', { className: 'bt-menu-label' }, fallback), h(Tick, { on: !value })) : null,
     folders.length > 0 ? h('div', { className: 'bt-model-group', role: 'presentation' }, t('Folders')) : null,
     folders.map(folder => h('button', { key: folder.path, type: 'button', role: 'menuitemradio', 'aria-checked': folder.path === value, title: folder.path, onClick: () => choose(folder.path) },
@@ -82,14 +82,14 @@ export function FolderMenu({ value, group = false, actions, run, onPick, wide = 
   return h(Fragment, null,
     h('button', {
       ref: button, type: 'button', className: 'bt-model-trigger', 'data-wide': wide || undefined,
-      'aria-haspopup': 'menu', 'aria-expanded': isOpen, 'aria-label': t('Working folder: {folder}', { folder: value ?? fallback }),
-      title: value, onClick: toggle,
+      'aria-haspopup': 'menu', 'aria-expanded': isOpen, 'aria-label': team ? t('Team workspace: {folder}', { folder: value ?? '' }) : t('Working folder: {folder}', { folder: value ?? fallback }),
+      title: value, onClick: toggle, disabled,
     },
     h('span', { className: 'bt-model-copy' },
       h('span', { className: 'bt-model-name' }, value ? folderName(value) : fallback),
       value ? h('span', { className: 'bt-model-provider' }, value) : null),
     h(Caret)),
-    shownPlace ? createPortal(h('div', { ref: menu, className: `bt-menu bt-model-menu bt-folder-menu${shownPlace.bottom !== undefined ? ' bt-menu-up' : ''}`, role: 'menu', 'aria-label': t('Working folder'), style: shownPlace, 'data-leaving': leaving || undefined },
+    shownPlace ? createPortal(h('div', { ref: menu, className: `bt-menu bt-model-menu bt-folder-menu${shownPlace.bottom !== undefined ? ' bt-menu-up' : ''}`, role: 'menu', 'aria-label': team ? t('Team workspace') : t('Working folder'), style: shownPlace, 'data-leaving': leaving || undefined },
       shownView,
       problem ? h('div', { className: 'bt-folder-error', role: 'alert' }, problem) : null), document.body) : null)
 }
@@ -105,6 +105,7 @@ export const FOLDER_CSS = `
 .bt-folder-input:focus{border-color:var(--bt-accent)}
 .bt-menu .bt-folder-use{justify-content:center;font-weight:500;color:var(--bt-accent)}
 .bt-menu .bt-folder-use:disabled{color:var(--bt-ink-3);cursor:default;background:none}
+.bt-model-trigger:disabled{opacity:.6;cursor:default}
 .bt-folder-error{padding:4px 8px;font-size:12px;line-height:16px;color:var(--bt-danger);overflow-wrap:anywhere}
 @media (prefers-reduced-motion:reduce){.bt-folder-view{animation:none}}
 `

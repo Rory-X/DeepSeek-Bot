@@ -5,11 +5,12 @@ import { Card, Row } from './bot-settings.js'
 import { FolderMenu } from './folder-menu.js'
 import { BotAvatar } from './mark.js'
 import { Caret, modelOf, useAnchoredMenu } from './model-menu.js'
-import { CheckIcon, CloseIcon, FolderIcon, PlusIcon, SearchIcon, KanbanIcon, PaperclipIcon, ChevronLeftIcon, ClockIcon } from './icons.js'
+import { CheckIcon, CloseIcon, FolderIcon, PlusIcon, SearchIcon, KanbanIcon, PaperclipIcon, ChevronLeftIcon, ClockIcon, SidePanelIcon } from './icons.js'
 import { relativeShort } from './text.js'
 import { BoardText, ExecutionSteps, VerificationEvidence, Deliverables, CurrentBackgroundTasks, RequirementContext, RequirementHistory } from './board-detail-content.js'
 import { BOARD_DETAIL_CSS } from './board-detail-styles.js'
 import { StageTracker, STAGE_TITLES, STAGE_TRACKER_CSS } from './board-stage-tracker.js'
+import { useBoardSidebar, BOARD_SIDEBAR_CSS } from './board-sidebar.js'
 import { t } from './i18n.js'
 
 const COLUMNS = [
@@ -37,6 +38,9 @@ export function ProjectBoard({ useUi, useRoster, actions }) {
 }
 
 function BoardPage({ roster, actions }) {
+  const sidebar = useBoardSidebar(actions)
+  // Set the DOM property so this also works with DSH shells using React 18.
+  const boardRef = useCallback(node => { if (node) node.inert = sidebar.fullscreen }, [sidebar.fullscreen])
   const [data, setData] = useState(null)
   const [projectId, setProjectId] = useState(() => readView().projectId ?? '')
   const [queries, setQueries] = useState(() => readView().queries ?? {})
@@ -97,6 +101,7 @@ function BoardPage({ roster, actions }) {
   }, [projectId, Boolean(data)])
   useEffect(() => {
     const close = event => {
+      if (document.body.dataset.btBoardSidebar === 'open') return
       if (event.key !== 'Escape' || event.defaultPrevented || selected || creating || addingProject || queueOpen) return
       event.preventDefault()
       actions.closeBoard()
@@ -108,10 +113,12 @@ function BoardPage({ roster, actions }) {
   const projectCards = (data?.cards ?? []).filter(card => card.projectId === projectId && (showCancelled || card.status !== 'cancelled'))
   const cards = projectCards.filter(card => (card.title + ' #' + card.number).toLocaleLowerCase().includes(query.toLocaleLowerCase()))
   const card = (data?.cards ?? []).find(item => item.id === selected)
-  return h('main', { className: 'bt-board', style: { left }, 'aria-label': t('Project board') },
+  const boardLeft = sidebar.width ? Math.min(left, Math.max(0, window.innerWidth - sidebar.width - 400)) : left
+  return h('main', { ref: boardRef, className: 'bt-board', style: { left: boardLeft, right: sidebar.width }, 'data-preview-open': sidebar.open || undefined, 'aria-label': t('Project board') },
     h('header', { className: 'bt-board-header' },
       h('div', { className: 'bt-board-heading' }, h(KanbanIcon), h('h1', null, t('Project board'))),
       h('div', { className: 'bt-board-header-actions' },
+        actions.hasRightSidebar() ? h('button', { type: 'button', className: 'bt-round', title: t('Right sidebar'), 'aria-label': t('Show or hide the right sidebar'), 'aria-pressed': sidebar.open, onClick: actions.toggleRightSidebar }, h(SidePanelIcon)) : null,
         h('button', { type: 'button', className: 'bt-round', title: t('Back to chats'), 'aria-label': t('Back to chats'), onClick: actions.closeBoard }, h(ChevronLeftIcon)),
         h('button', { type: 'button', className: 'bt-soft bt-board-button', onClick: () => { setSelected(null); setQueueOpen(true) } }, h(ClockIcon), t('Queue'), h('span', { className: 'bt-board-queue-count' }, data?.queue?.length ?? 0)),
         h('button', { type: 'button', className: 'bt-soft bt-board-button bt-board-primary', disabled: !project || Boolean(data?.readOnly), onClick: () => setCreating(true) }, h(PlusIcon), t('New requirement')))),
@@ -190,12 +197,13 @@ function Drawer({ title, onClose, children, footer }) {
     if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); onClose() }
     if (event.key !== 'Tab') return
     const focus = [...ref.current.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),summary,a[href],[tabindex="0"]')].filter(el => el.getClientRects().length)
+    if (document.body.dataset.btBoardSidebar === 'open') return
     const first = focus[0], last = focus.at(-1)
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
   return h('div', { className: 'bt-board-drawer-veil', onClick: event => { if (event.target === event.currentTarget) onClose() } },
-    h('section', { className: 'bt-board-drawer', ref, role: 'dialog', 'aria-modal': true, 'aria-label': title, onKeyDown },
+      h('section', { className: 'bt-board-drawer', ref, role: 'dialog', 'aria-label': title, onKeyDown },
       h('header', { className: 'bt-board-drawer-header' }, h('span', null, title), h('button', { type: 'button', className: 'bt-round', 'aria-label': t('Close'), onClick: onClose }, h(CloseIcon))),
       h('div', { className: 'bt-board-drawer-body' }, children),
       footer ? h('footer', { className: 'bt-board-drawer-foot' }, footer) : null))
@@ -326,7 +334,7 @@ function RequirementDetail({ card, project, roster, actions, queue, onClose, onS
     !(card.steps ?? []).length ? h(RequirementContext, { card }) : null,
     h(ExecutionSteps, { card, roster }),
     h(VerificationEvidence, { card }),
-    h(Deliverables, { card }),
+    h(Deliverables, { card, actions }),
     (card.steps ?? []).length ? h(RequirementContext, { card }) : null,
     h(RequirementHistory, { card, roster }))
 }
@@ -409,4 +417,5 @@ export const BOARD_CSS = [
   '@media(max-width:899px){.bt-board{left:0!important}.bt-board-header{padding:16px;gap:8px}.bt-board h1{font-size:17px}.bt-board-heading{gap:6px}.bt-board-heading>svg{display:none}.bt-board-header-actions{gap:6px}.bt-board-header-actions .bt-board-button{font-size:12px;padding:0 12px}.bt-board-header-actions .bt-board-button>svg{display:none}.bt-board-toolbar{padding:10px 12px 4px;flex-wrap:wrap;gap:8px}.bt-board-project-bar{flex-basis:100%;width:100%}.bt-board-projects{flex:1}.bt-board-add-project{font-size:12px;padding:0 12px}.bt-board-project{padding:7px 10px;font-size:12px}.bt-board-search{width:100%;margin:0;font-size:12px}.bt-board-project-info{padding:6px 16px 12px;font-size:10px}.bt-board-columns{grid-template-columns:repeat(4,minmax(280px,82vw));padding:0 12px 16px;gap:12px;scroll-snap-type:x proximity}.bt-board-column{scroll-snap-align:start}.bt-board-drawer{width:100%;border:0}.bt-board-drawer-body{padding:20px}.bt-board-stages{margin:22px 0}.bt-board-drawer-header{padding:12px 18px}.bt-board-drawer-foot{padding-bottom:calc(14px + env(safe-area-inset-bottom))}}',
   BOARD_DETAIL_CSS,
   STAGE_TRACKER_CSS,
+  BOARD_SIDEBAR_CSS,
 ].join('\n')

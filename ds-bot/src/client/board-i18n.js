@@ -1,4 +1,13 @@
 export const BOARD_ZH = {
+  'Preview deliverable': '预览交付物',
+  'Opening preview…': '正在打开预览…',
+  'Open link in new tab': '在新标签页打开链接',
+  'The DSH preview sidebar is unavailable.': 'DSH 预览侧栏暂不可用。',
+  'Browser preview is not enabled in this DSH profile. Open the link in a new tab.': '此 DSH 配置尚未启用网页预览，可在新标签页打开链接。',
+  'This reference contains no previewable file or link.': '此引用没有可预览的文件或链接，请查看原始说明。',
+  'This deliverable changed. Choose its current file or link.': '交付物已更新，请选择当前文件或链接。',
+  'This deliverable no longer exists. Reopen the requirement.': '交付物已不存在，请重新打开需求。',
+  'The task conversation for this deliverable is unavailable.': '此交付物的任务会话已不可用。',
   'Skipped': '已跳过',
   'Not started': '未开始',
   'No completion or skip has been recorded for this stage.': '此阶段尚无完成或跳过记录。',

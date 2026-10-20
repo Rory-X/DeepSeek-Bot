@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { questionReply } from './parts.js'
+import { boardArtifactPreview } from './board-artifacts.js'
 import { COLORS, EXTRA_COLORS, ROUTE } from './constants.js'
 
 const LANGUAGES = { zh: 'Chinese (简体中文)', en: 'English' }
@@ -86,7 +87,7 @@ export function install(rt) {
   })
   // What a host that only reads the team may still answer.
   // Updates change the dsh profile, not the team, so a reading host may run them too.
-  const READS = new Set(['board-view', 'state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer'])
+  const READS = new Set(['board-view', 'board-artifact-preview', 'state', 'models', 'efforts', 'providers', 'provider-models', 'earlier', 'chat', 'run-stats', 'room-progress', 'exchange', 'exchange-text', 'file-text', 'usage', 'schedules', 'memory-view', 'browser-wait', 'browser-result', 'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'update-check', 'update-install', 'dsh-update-install', 'repo-stars', 'approval-answer', 'thinking'])
 
   function setPrefs(body) {
     if (body.theme !== undefined) {
@@ -116,6 +117,9 @@ export function install(rt) {
         case 'board-view':
           await rt.load()
           return ok(rt.boardView())
+        case 'board-artifact-preview':
+          await rt.load()
+          return ok(boardArtifactPreview(rt, body))
         case 'board-project-add':
           await rt.load()
           return ok(await rt.boardAddProject(body))
@@ -144,6 +148,16 @@ export function install(rt) {
           return ok({ modelsKey: modelsKey() })
         case 'efforts':
           return ok(await rt.reasoningOf(String(body.ref ?? '')) ?? { efforts: [] })
+        // A Turn's exact thinking time, from the timed stream in its events; `ms`
+        // omitted when the stream carries no reasoning records.
+        case 'thinking': {
+          const sessionId = String(body.sessionId ?? '')
+          const turn = Number(body.turn)
+          if (!Number.isFinite(turn) || rt.selfOf(sessionId) === undefined) return ok(null)
+          await rt.load()
+          const ms = await rt.thinkingOf(sessionId, turn)
+          return ok(ms === undefined ? {} : { ms })
+        }
         // Model providers and their keys, for a window without DSH's own Models page.
         case 'providers':
           return ok(await rt.providersView())
@@ -254,6 +268,9 @@ export function install(rt) {
         case 'folder-list':
           await rt.load()
           return ok(await rt.folderEndpoint(endpoint, body, signal))
+        case 'team-workspace':
+          await rt.load()
+          return ok({ team: await rt.setTeamWorkspace(String(body.path ?? '')) })
         case 'add-agent':
           await rt.load()
           return ok(await rt.addAgent())

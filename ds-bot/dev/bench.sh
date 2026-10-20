@@ -88,6 +88,10 @@ write_overlay() {
     case "$NAME" in project-board-queue|project-board-shell) fixture="$PLUGIN/dev/board-queue-bench.mjs" ;; esac
     printf -- '- insert:\n    - id: board-demo\n      name: %s\n' "$fixture" >> "$overlay"
   fi
+  if [ "$NAME" = board-preview ]; then
+    [ "$(cat "$overlay")" != '[]' ] || : > "$overlay"
+    printf -- '- id: ui-sidebar-browser\n  disabled: false\n' >> "$overlay"
+  fi
 }
 
 # Start one command in a session of its own and record the pid of that session's leader. The pid

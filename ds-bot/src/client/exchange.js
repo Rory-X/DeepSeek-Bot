@@ -79,6 +79,10 @@ export function ExchangeDialog({ pair, roster, actions, at }) {
     let stop = false
     let timer
     let seen = null
+    stick.current = true
+    first.current = true
+    aimed.current = at ?? null
+    setEntries(null)
     const load = async () => {
       const result = await actions.exchange(pair[0], pair[1])
       if (stop) return
