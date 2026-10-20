@@ -198,6 +198,9 @@ export function install(rt) {
     const setting = rt.config[id]
     const override = setting !== null && typeof setting === 'object' ? setting : {}
     options[id] = { ...connector, ...override, url: override.url ?? connector.mcpUrl, api: override.api ?? connector.api }
+    // A module that brings its own `configure` re-applies a grant the profile cannot widen:
+    // Neon's read-only master switch survives any `url` override.
+    if (typeof connector.configure === 'function') options[id] = { ...options[id], ...connector.configure(override) }
     // `imap-read` was the name the first IMAP draft used; one IMAP mode serves Gmail and QQ.
     if (options[id].mode === 'imap-read') options[id].mode = 'imap'
   }
@@ -501,9 +504,12 @@ export function install(rt) {
         } catch {
           identity = undefined
         }
-        const account = typeof identity?.email === 'string' && identity.email !== ''
-          ? identity.email
-          : typeof identity?.name === 'string' && identity.name !== '' ? identity.name : undefined
+        const derived = typeof connector.accountOf === 'function' ? connector.accountOf(identity) : undefined
+        const account = typeof derived === 'string' && derived !== ''
+          ? derived
+          : typeof identity?.email === 'string' && identity.email !== ''
+            ? identity.email
+            : typeof identity?.name === 'string' && identity.name !== '' ? identity.name : undefined
         const identityId = typeof identity?.id === 'string' && identity.id !== '' ? identity.id : undefined
         if (account !== undefined) update({ account })
         if (identityId !== undefined && state.connectors?.[id]?.accountId === undefined) update({ accountId: identityId })
