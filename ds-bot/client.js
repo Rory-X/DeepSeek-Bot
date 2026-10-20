@@ -367,6 +367,8 @@ var ZH = {
   Capabilities: "能力",
   "Unavailable on this host.": "这台主机上不可用。",
   Write: "可写",
+  Destructive: "破坏性",
+  "Capabilities that write open after switching to Can write.": "写能力在切换到 Can write 后才会开放。",
   "Chat found": "已找到会话",
   "Chat id": "会话 ID",
   "Chat id (optional)": "会话 ID（可空）",
@@ -3370,6 +3372,9 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-cap-note,.bt-connector-cap-lock{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 /* A capability that changes something says so, quietly. */
 .bt-connector-cap-badge{margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-accent);background:color-mix(in srgb,var(--bt-accent) 12%,transparent)}
+.bt-connector-cap[data-risk=destructive] .bt-connector-cap-badge{color:var(--bt-danger);background:color-mix(in srgb,var(--bt-danger) 12%,transparent)}
+.bt-connector-cap[data-risk=destructive] .bt-connector-cap-title{color:var(--bt-danger)}
+.bt-connector-cap-change{font-size:12px;line-height:16px;color:var(--bt-ink-3);font-style:italic;overflow-wrap:anywhere}
 .bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
@@ -13927,13 +13932,18 @@ var levelItem = (entry) => typeof entry === "string" ? { id: entry, title: level
   description: typeof entry?.description === "string" && entry.description !== "" ? entry.description : null,
   write: entry?.write === true || entry?.danger === true || entry?.id === "write"
 };
-var capabilityItem = (entry, index) => ({
-  key: typeof entry?.key === "string" ? entry.key : `capability-${index}`,
-  title: typeof entry?.title === "string" ? entry.title : typeof entry?.name === "string" ? entry.name : String(entry?.key ?? ""),
-  description: typeof entry?.description === "string" && entry.description !== "" ? entry.description : null,
-  write: entry?.write === true || entry?.danger === true,
-  available: entry?.available !== false
-});
+var capabilityItem = (entry, index) => {
+  const risk = entry?.risk === "destructive" || entry?.danger === true ? "destructive" : entry?.risk === "write" || entry?.write === true ? "write" : "read";
+  return {
+    key: typeof entry?.key === "string" ? entry.key : `capability-${index}`,
+    title: typeof entry?.title === "string" ? entry.title : typeof entry?.name === "string" ? entry.name : String(entry?.key ?? ""),
+    description: typeof entry?.description === "string" && entry.description !== "" ? entry.description : null,
+    // What the write would change, when the module says: drawn under the description.
+    change: typeof entry?.preview?.change === "string" && entry.preview.change !== "" ? entry.preview.change : null,
+    risk,
+    available: entry?.available !== false
+  };
+};
 function statusText2(connector) {
   if (connector.state === "connecting") return connector.oauth === true ? t("Waiting for the browser…") : t("Connecting…");
   if (connector.state === "error" && connector.oauth === true) return connector.error ?? t("Could not connect");
@@ -14048,6 +14058,10 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const levels = Array.isArray(connector.levels) ? connector.levels.filter((entry) => entry !== null) : [];
   const currentLevel = typeof connector.level === "string" ? connector.level : null;
   const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter((entry) => entry !== null && typeof entry === "object") : [];
+  const capWrites = capabilities.some((entry) => {
+    const item = capabilityItem(entry, 0);
+    return item.risk !== "read";
+  });
   const permissions = typeof connector.permissions?.summary === "string" && connector.permissions.summary !== "" ? connector.permissions.summary : null;
   const levelNote = typeof connector.levelNote === "string" && connector.levelNote !== "" ? connector.levelNote : null;
   const needsReauth = connector.needsReauth === true;
@@ -14198,14 +14212,17 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         "div",
         { className: "bt-connector-setting" },
         (0, import_react34.createElement)("div", { className: "bt-connector-action-title" }, t("Capabilities")),
+        capWrites && currentLevel === "read" ? (0, import_react34.createElement)("div", { className: "bt-connector-hint" }, t("Capabilities that write open after switching to Can write.")) : null,
         (0, import_react34.createElement)("ul", { className: "bt-connector-caps" }, capabilities.map((entry, index) => {
           const item = capabilityItem(entry, index);
-          const locked = item.available === false || writesLocked && item.write === true;
+          const locked = item.available === false || writesLocked && item.risk !== "read";
+          const badge = item.risk === "destructive" ? t("Destructive") : item.risk === "write" ? t("Write") : null;
           return (0, import_react34.createElement)(
             "li",
-            { key: item.key, className: "bt-connector-cap", "data-write": item.write || void 0, "data-locked": locked || void 0 },
-            (0, import_react34.createElement)("span", { className: "bt-connector-cap-title" }, item.title, item.write ? (0, import_react34.createElement)("span", { className: "bt-connector-cap-badge" }, t("Write")) : null),
+            { key: item.key, className: "bt-connector-cap", "data-risk": item.risk, "data-locked": locked || void 0 },
+            (0, import_react34.createElement)("span", { className: "bt-connector-cap-title" }, item.title, badge !== null ? (0, import_react34.createElement)("span", { className: "bt-connector-cap-badge" }, badge) : null),
             item.description !== null ? (0, import_react34.createElement)("span", { className: "bt-connector-cap-note" }, item.description) : null,
+            item.change !== null ? (0, import_react34.createElement)("span", { className: "bt-connector-cap-change" }, item.change) : null,
             locked ? (0, import_react34.createElement)("span", { className: "bt-connector-cap-lock" }, t("Unavailable on this host.")) : null
           );
         }))
