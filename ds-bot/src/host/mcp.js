@@ -79,7 +79,18 @@ export class McpHttpClient {
     if (typeof sessionId === 'string' && sessionId !== '') this.sessionId = sessionId
     if (response.status === 202 || response.status === 204) return undefined
     if (!response.ok) throw Object.assign(new Error(`The MCP server answered ${response.status}`), { status: response.status })
-    const text = await response.text()
+    let text
+    try {
+      text = await response.text()
+    } catch {
+      // Headers arrived but the body stopped: the request's timeout fires here, after the
+      // fetch itself resolved. Report it as the server timing out, so the connector mount
+      // retries a transient slow reply instead of treating the grant as broken.
+      throw Object.assign(
+        new Error(`The MCP server did not finish answering within ${Math.round(this.timeoutMs / 1000)}s`),
+        { name: 'TimeoutError', timeout: true },
+      )
+    }
     return responseMessage(text, body.id)
   }
 

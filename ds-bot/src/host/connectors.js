@@ -134,6 +134,9 @@ const BUILTIN_CONNECTORS = {
       },
     },
     mcpUrl: 'https://mcp.cloudflare.com/mcp?codemode=false',
+    // Cloudflare's server sometimes takes longer than the default 20 s to list its tools;
+    // a timed-out mount is retried rather than reported as a broken grant.
+    mcpTimeoutMs: 60_000,
     readTools: CLOUDFLARE_READ_TOOLS,
     oauth: { scopes: CLOUDFLARE_READ_SCOPES },
     // A write target is named on the card: the zone (or account) it acts on, and a delete
@@ -393,6 +396,32 @@ export function install(rt) {
   const reason = (error) => {
     const text = [error, error?.cause].filter(Boolean).map(part => String(part?.message ?? part)).join(': ')
     return rt.redactSecrets(text || 'error').slice(0, 300)
+  }
+
+  // A mount that times out is a transient network problem, not a broken grant: the mount
+  // tries once more directly, and a mount that still fails schedules a few background
+  // retries so a slow server heals without the user pressing Reconnect.
+  const TIMEOUT_HINT = /aborted due to timeout|did not finish answering|timed out|TimeoutError/i
+  const timedOut = error => error?.name === 'TimeoutError' || error?.timeout === true || TIMEOUT_HINT.test(String(error?.message ?? ''))
+  const MOUNT_RETRY_DELAYS = [15_000, 45_000, 120_000]
+  const mountRetries = new Map()
+  const clearMountRetry = (id) => {
+    const entry = mountRetries.get(id)
+    if (entry?.timer !== undefined) clearTimeout(entry.timer)
+    mountRetries.delete(id)
+  }
+  const scheduleMountRetry = (id) => {
+    if (stopped) return
+    const count = mountRetries.get(id)?.count ?? 0
+    if (count >= MOUNT_RETRY_DELAYS.length) return
+    clearMountRetry(id)
+    const timer = setTimeout(() => {
+      mountRetries.delete(id)
+      if (stopped) return
+      void sync(id, true).catch(() => {})
+    }, MOUNT_RETRY_DELAYS[count])
+    timer.unref?.()
+    mountRetries.set(id, { count: count + 1, timer })
   }
 
   // Connectors that are not a single token (REST APIs with two keys, IMAP mailboxes) keep
@@ -772,9 +801,13 @@ export function install(rt) {
     }
   }
 
-  async function mountReadTools(id, token, { refresh, url } = {}) {
+  async function mountReadToolsOnce(id, token, { refresh, url } = {}) {
     const connector = options[id]
-    const client = new McpHttpClient(url ?? connector.url, token, refresh === undefined ? {} : { refresh })
+    const clientOptions = {
+      ...(refresh === undefined ? {} : { refresh }),
+      ...(Number.isFinite(connector.mcpTimeoutMs) && connector.mcpTimeoutMs > 0 ? { timeoutMs: connector.mcpTimeoutMs } : {}),
+    }
+    const client = new McpHttpClient(url ?? connector.url, token, clientOptions)
     try {
       await client.open()
       const listed = await client.listTools()
@@ -839,6 +872,20 @@ export function install(rt) {
     } catch (error) {
       client.close()
       throw error
+    }
+  }
+
+  // One direct retry on a timeout: the first try usually warms a slow OAuth/MCP handshake.
+  async function mountReadTools(id, token, options = {}) {
+    try {
+      return await mountReadToolsOnce(id, token, options)
+    } catch (error) {
+      if (!timedOut(error)) throw error
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, 2_000)
+        timer.unref?.()
+      })
+      return await mountReadToolsOnce(id, token, options)
     }
   }
 
@@ -963,6 +1010,7 @@ export function install(rt) {
           return
         }
         storeAttempts.delete(id)
+        clearMountRetry(id)
         statuses.set(id, { state: 'ready' })
         return
       }
@@ -984,6 +1032,7 @@ export function install(rt) {
       mounts.set(id, { token })
       statuses.set(id, { state: 'error', error: reason(error) })
       rt.warn('ds-bot: %s connector failed: %s', connector.displayName, statuses.get(id).error)
+      if (timedOut(error)) scheduleMountRetry(id)
     }
   }
 
