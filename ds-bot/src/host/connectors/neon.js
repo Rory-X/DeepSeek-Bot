@@ -50,6 +50,9 @@ export const NEON_SETTINGS = [
 // The MCP address every grant is built on. A profile override may move it (a self-hosted
 // Neon MCP or a test server); configure() keeps it here, with the grant parameters removed.
 let baseAddress = NEON_MCP_URL
+// The settings the mounted level runs with, so an approval line can name the pinned project
+// and role even though the card is built from the call's arguments alone.
+let mountedSettings = {}
 
 const PROJECT_ID = /^[a-z0-9-]{1,60}$/
 const ROLE_NAME = /^[A-Za-z_][A-Za-z0-9_$]{0,62}$/
@@ -118,8 +121,11 @@ export function neonTools(listed) {
 }
 
 // The tool surface of one access level. The write tools exist only at the write level, so a
-// read grant cannot reach them even by name.
-export function neonToolsOf({ level } = {}) {
+// read grant cannot reach them even by name. The settings the card needs are kept here too:
+// the approval card is built from the tool call alone, so the pinned project and role have to
+// survive from the mount.
+export function neonToolsOf({ level, settings } = {}) {
+  mountedSettings = settings !== null && typeof settings === 'object' ? { ...settings } : {}
   return {
     readTools: [...NEON_READ_TOOLS],
     actionTools: level === 'write' ? [...NEON_WRITE_TOOLS] : [],
@@ -193,7 +199,8 @@ async function branchNameOf(client, branchId) {
 // data; the branch name is resolved for the reader when the mounted client can answer.
 export async function neonActionApproval(name, args, context = {}) {
   const given = args !== null && typeof args === 'object' ? args : {}
-  const pinned = context.settings !== null && typeof context.settings === 'object' ? context.settings : {}
+  const fromContext = context.settings !== null && typeof context.settings === 'object' ? context.settings : undefined
+  const pinned = fromContext ?? mountedSettings
   const projectId = typeof given.project_id === 'string' && given.project_id !== '' ? given.project_id : pinned.projectId
   const project = typeof projectId === 'string' && projectId !== '' ? projectId : 'the pinned project'
   const branchId = typeof given.branch_id === 'string' ? given.branch_id : ''
