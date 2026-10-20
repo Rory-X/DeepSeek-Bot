@@ -9190,6 +9190,9 @@ function useBoardSidebar(actions) {
 var BOARD_SIDEBAR_CSS = `
 body[data-bt-board-open] [data-rightbar-col]{position:relative;z-index:61}
 body[data-bt-board-open] [class*="_frame"][data-rightbar-fullscreen] [data-rightbar-col]{z-index:61!important}
+/* The settings dialog is portalled beside the frame, so the column raised over the board
+   would paint over it; it stays above that one level. */
+body[data-bt-board-open] .bt-settings-layer{z-index:62}
 .bt-board[data-preview-open=true] .bt-board-header{flex-wrap:wrap;gap:10px}
 .bt-board[data-preview-open=true] .bt-board-toolbar{flex-wrap:wrap}
 .bt-board[data-preview-open=true] .bt-board-search{width:100%}
