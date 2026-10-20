@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { createImapTools, createImapWriteTools, searchCriteria } from '../src/host/connectors/_imap.js'
+import { createImapTools, createImapWriteTools, decodeMailboxName, encodeMailboxName, searchCriteria } from '../src/host/connectors/_imap.js'
 
 const CRLF = '\r\n'
 const source = readFileSync(fileURLToPath(new URL('../src/host/connectors/_imap.js', import.meta.url)), 'utf8')
@@ -128,6 +128,50 @@ test('IMAP search keeps the standard criteria and only nests Gmail syntax when a
   assert.equal(searchCriteria({ query: 'newer_than:7d' }, { gmailQuery: true }), 'X-GM-RAW "newer_than:7d"')
   assert.equal(searchCriteria({ query: '  ' }, { gmailQuery: true }), 'ALL')
   assert.throws(() => searchCriteria({ query: 'line\nbreak' }, { gmailQuery: true }), /line break/)
+})
+
+test('a folder name decodes from modified UTF-7 and encodes back to the same wire name', () => {
+  // The names QQ Mail and Gmail send for Chinese folders.
+  assert.equal(decodeMailboxName('&V4NXPpCuTvY-'), '垃圾邮件')
+  assert.equal(decodeMailboxName('&XfJSIJZkkK5O9g-'), '已删除邮件')
+  assert.equal(decodeMailboxName('&XfJT0ZAB-'), '已发送')
+  assert.equal(decodeMailboxName('INBOX'), 'INBOX')
+  assert.equal(encodeMailboxName('垃圾邮件'), '&V4NXPpCuTvY-')
+  assert.equal(encodeMailboxName('已删除邮件'), '&XfJSIJZkkK5O9g-')
+  assert.equal(encodeMailboxName('A&B'), 'A&-B')
+  assert.equal(encodeMailboxName('INBOX'), 'INBOX')
+  for (const name of ['收件箱', '已发送', '草稿箱', '垃圾邮件', '[Gmail]/所有邮件', 'A&B', '测试 Test']) {
+    assert.equal(decodeMailboxName(encodeMailboxName(name)), name, name)
+  }
+})
+
+test('LIST answers the decoded name and a search names the encoded one', async () => {
+  const server = imapServer({ folders: [{ name: 'INBOX' }, { name: '&V4NXPpCuTvY-' }] })
+  const read = createImapTools({
+    id: 'qq', displayName: 'QQ Mail', credential: 'user@example.com:secret-code', account: { mailbox: 'user@example.com' },
+    connect: server.connect, timeoutMs: 1_000,
+  })
+  try {
+    const folders = await read.tools[0].execute()
+    assert.match(folders, /垃圾邮件/)
+    assert.equal(folders.includes('&V4NXPpCuTvY-'), false)
+    await read.tools[1].execute({ folder: '垃圾邮件' })
+  } finally {
+    await read.close()
+  }
+  assert.ok(sent(server).includes('EXAMINE "&V4NXPpCuTvY-"'))
+})
+
+test('a write names the folder in its wire form, including a folder found by flag', async () => {
+  const server = imapServer({
+    capabilities: ['IMAP4rev1', 'MOVE'],
+    folders: [{ name: 'INBOX' }, { name: '&V4NXPpCuTvY-' }, { name: '&XfJSIJZkkK5O9g-', flags: '\Trash \HasNoChildren' }],
+  })
+  const tools = writeTools({ server })
+  await tool(tools, 'mark_read').execute({ folder: '垃圾邮件', uids: [12] })
+  assert.ok(sent(server).includes('SELECT "&V4NXPpCuTvY-"'))
+  await tool(tools, 'delete_messages').execute({ uids: [9] })
+  assert.ok(sent(server).includes('UID MOVE 9 "&XfJSIJZkkK5O9g-"'))
 })
 
 test('only the Gmail connector offers the raw query parameter', () => {
