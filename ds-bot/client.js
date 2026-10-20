@@ -14094,13 +14094,15 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const [levelDraft, setLevelDraft] = (0, import_react34.useState)(null);
   const shownLevel = oauth ? levelDraft ?? currentLevel : currentLevel;
   const chooseLevel = (id) => {
-    if (oauth) {
+    if (oauth && !on) {
       setLevelDraft(id);
       return;
     }
+    setLevelDraft(null);
     void run(actions.connectorSetLevel(connector.id, id));
   };
-  const settingsEmpty = settings.some((field) => settingValue(field).trim() === "");
+  const storedSetting = (field) => (typeof field.value === "string" ? field.value : "").trim();
+  const settingsEmpty = settings.some((field) => storedSetting(field) === "");
   const levelBlocked = (id) => {
     const note = typeof levelNotes[id] === "string" && levelNotes[id] !== "" ? levelNotes[id] : null;
     if (note !== null) return note;
@@ -14232,6 +14234,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
             "aria-label": field.label ?? field.name,
             autoComplete: "off",
             spellCheck: false,
+            disabled: busy,
             onChange: (event) => setSettingDraft((previous) => ({ ...previous, [field.name]: event.target.value })),
             onKeyDown: (event) => {
               if (event.key === "Enter") saveSettings();
