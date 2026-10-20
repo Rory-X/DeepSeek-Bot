@@ -173,9 +173,13 @@ test('a refused write asks first and sends no command at all', async () => {
   const server = imapServer()
   let asked
   const tools = writeTools({ server, approve: async (request) => { asked = request; throw new Error('The user denied it; nothing changed.') } })
-  await assert.rejects(tool(tools, 'mark_read').execute({ uids: [12, 13] }), /The user denied it/)
+  const exec = { agent: { id: 'm1' } }
+  await assert.rejects(tool(tools, 'mark_read').execute({ uids: [12, 13] }, exec), /The user denied it/)
   assert.equal(asked.tool, 'qq_mark_read')
   assert.match(asked.line, /Mark 2 message\(s\) in "INBOX" as read \(UID 12,13\)/)
+  // The framework aims its approval card at the Session that asked, so the call carries it.
+  assert.equal(asked.exec, exec)
+  assert.equal(asked.exec.agent.id, 'm1')
   assert.equal(server.sockets.length, 0)
 })
 
