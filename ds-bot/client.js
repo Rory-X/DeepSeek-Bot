@@ -233,6 +233,7 @@ var ZH = {
   ...BOARD_ZH,
   // Shared
   "Main Bot": "主 Bot",
+  "Main Bots": "主 Bot",
   Working: "工作中",
   "Waiting for your answer": "等你回答",
   "Waiting for {names}": "等 {names} 交回",
@@ -1667,6 +1668,7 @@ function createSource(initial) {
 var EMPTY_ROSTER = { revision: -1, mainBotId: null, mainBotIds: [], bots: [], rooms: [], agents: [], exchangeTurns: {}, questions: {}, secrets: [], capabilities: [], capabilityStatuses: {}, secretRequests: {}, models: [], defaultModel: null, modelsKey: null, prefs: {}, byId: {}, roomsById: {}, agentsById: {}, agentOf: {}, ready: false };
 var isMainOf = (roster, id) => id !== void 0 && (roster.mainBotIds ?? []).includes(id);
 function indexRoster(value) {
+  const mainBotIds = Array.isArray(value.mainBotIds) && value.mainBotIds.length > 0 ? value.mainBotIds : value.mainBotId ? [value.mainBotId] : [];
   const byId = {};
   for (const bot of value.bots) {
     for (const id of [...bot.parts ?? [], bot.sessionId ?? bot.id, bot.id]) byId[id] = bot;
@@ -1679,7 +1681,7 @@ function indexRoster(value) {
     agentsById[agent.id] = agent;
     for (const sessionId of agent.sessions ?? []) agentOf[sessionId] = agent.id;
   }
-  return { ...value, agents: value.agents ?? [], byId, roomsById, agentsById, agentOf, ready: true };
+  return { ...value, mainBotIds, mainBotId: mainBotIds[0] ?? null, agents: value.agents ?? [], byId, roomsById, agentsById, agentOf, ready: true };
 }
 function isAgentSession(roster, cache, sessionId) {
   if (sessionId === void 0 || sessionId === null || sessionId === "") return false;
@@ -2855,6 +2857,22 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-list{--bt-row-inset:8px;--bt-row-gap:8px;--bt-row-stack-gap:3px;display:flex;flex-direction:column;gap:var(--bt-row-stack-gap);overflow-y:auto;min-height:0;flex:1 1 auto}
 .bt-tile-wrap{display:flex;justify-content:center;padding:20px 0 15px}
 .bt-tile{display:flex;flex-direction:column;align-items:center;gap:4px;width:95px;padding:6px 8px 4px;border-radius:12px;border:0;background:transparent;color:var(--bt-ink);cursor:pointer;font-family:inherit;transition:background-color .12s ease}
+/* Every Main Bot, side by side over one scrollable row: two fill the width, a third
+   runs past it. The single Main Bot keeps the plain card above. */
+.bt-mains-wrap{position:relative}
+.bt-mains{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:none;scroll-snap-type:x proximity;scroll-padding-inline:8px;padding:20px 8px 15px;box-sizing:border-box;cursor:grab}
+.bt-mains::-webkit-scrollbar{display:none}
+.bt-mains[data-dragging]{cursor:grabbing;scroll-snap-type:none}
+.bt-mains>.bt-tile-wrap{flex:1 0 calc(40% - 4px);min-width:0;padding:0;justify-content:center;scroll-snap-align:start}
+/* Two fill the row; a third (and every one after it) peeks past the edge as the hint. */
+.bt-mains[data-count="2"]>.bt-tile-wrap{flex-basis:calc(50% - 3px)}
+.bt-mains .bt-tile{width:100%;max-width:100%;position:relative}
+.bt-mains .bt-tile-name,.bt-mains .bt-chip{max-width:100%}
+.bt-tile .bt-unread{position:absolute;top:10px;right:10px;margin:0}
+.bt-mains-fade{position:absolute;top:20px;bottom:15px;width:18px;pointer-events:none;z-index:1}
+.bt-mains-fade-left{left:0;background:linear-gradient(to right,var(--bt-main),transparent)}
+.bt-mains-fade-right{right:0;background:linear-gradient(to left,var(--bt-main),transparent)}
+body[data-bt-chief=collapsed] .bt-mains-wrap .bt-mains-fade{display:none}
 .bt-tile:hover{background:var(--bt-hover)}
 .bt-tile[aria-current=page]{background:var(--bt-active)}
 .bt-tile-name{font-size:13px;line-height:18px;font-weight:400;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -9457,7 +9475,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   const unread = useSessionStatus((map) => map.get(part)?.completionUnread === true || map.get(part)?.pendingInteraction !== void 0) || marked && !active;
   useMarkedUnread(id, active, marked, actions);
   const main = isMainOf(roster, id);
-  const tile = roster.mainBotId === id;
+  const tile = isMainOf(roster, id);
   const approval = useApproval(useWork, (entry) => entry.botId === id);
   const alert = roster.questions?.[part] !== void 0 || approval;
   const doing = useActivity((map) => map[id]);
@@ -9488,7 +9506,8 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
       },
       (0, import_react21.createElement)(BotAvatar, { bot, size: 60, state, main: true }),
       (0, import_react21.createElement)("span", { className: "bt-tile-name" }, bot.name),
-      bot.role ? (0, import_react21.createElement)("span", { className: "bt-chip" }, bot.role) : null
+      bot.role ? (0, import_react21.createElement)("span", { className: "bt-chip" }, bot.role) : null,
+      unread && !active ? (0, import_react21.createElement)("span", { className: "bt-unread", "aria-hidden": true }) : null
     ));
   }
   return (0, import_react21.createElement)(
@@ -9726,14 +9745,15 @@ function TeamSidebar(props) {
       return Math.max(seen, stamps[id] ?? 0, item.createdAt ?? 0);
     };
     const entries2 = [
-      ...roster.bots.filter((bot) => bot.id !== roster.mainBotId).map((bot) => ({ kind: "bot", item: bot, at: activity(bot, currentPart(bot)) })),
+      ...roster.bots.filter((bot) => !isMainOf(roster, bot.id)).map((bot) => ({ kind: "bot", item: bot, at: activity(bot, currentPart(bot)) })),
       ...roster.rooms.map((room2) => ({ kind: "room", item: room2, at: activity(room2, room2.id) })),
       // The Agent sorts by its most recent Session, falling back to when it was added.
       ...(roster.agents ?? []).map((agent) => ({ kind: "agent", item: agent, at: Math.max(0, ...agent.sessions.map((id) => stamps[id] ?? 0)) || agent.createdAt }))
     ];
     return entries2.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at);
   }, [roster, updated]);
-  const main = roster.byId[roster.mainBotId];
+  const mains = (0, import_react21.useMemo)(() => (roster.mainBotIds ?? []).map((id) => roster.byId[id]).filter(Boolean), [roster]);
+  const main = mains[0];
   const onPhone = props.useMobileNav((value) => value);
   const atList = props.useNavLevel((value) => value === "list");
   useListGlide(listRef, wide, order.map((entry) => entry.item.id).join(","));
@@ -9751,6 +9771,7 @@ function TeamSidebar(props) {
       roster,
       actions,
       listRef,
+      mains,
       main,
       order,
       markedUnread,
@@ -9781,21 +9802,108 @@ function TeamSidebar(props) {
       (0, import_react21.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react21.createElement)(PlusIcon))
     ),
     wide && roster.readOnly ? (0, import_react21.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
-    (0, import_react21.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps })
+    (0, import_react21.createElement)(BotList, { listRef, mains, order, roster, markedUnread, rowProps })
   );
 }
-function BotList({ listRef, main, order, roster, markedUnread, rowProps, showTime }) {
+function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTime }) {
   const stamp = (entry) => showTime ? relativeShort(entry.at) : void 0;
   const sections = splitBotFolders(order, roster.botFolders);
   const row = (entry) => entry.kind === "bot" ? (0, import_react21.createElement)(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) }) : entry.kind === "room" ? (0, import_react21.createElement)(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) }) : (0, import_react21.createElement)(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true });
+  const tops = (mains ?? []).map((bot) => (0, import_react21.createElement)(BotRow, { key: bot.id, ...rowProps, bot, marked: markedUnread[bot.id] === true, time: void 0 }));
   return (0, import_react21.createElement)(
     "div",
     { ref: listRef, className: "bt-list", role: "region", "aria-label": t("Bot list") },
-    main ? (0, import_react21.createElement)(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true, time: void 0 }) : roster.ready ? null : (0, import_react21.createElement)("div", { className: "bt-hint" }, t("Setting up your Main Bot…")),
+    mains === void 0 || mains.length === 0 ? roster.ready ? null : (0, import_react21.createElement)("div", { className: "bt-hint" }, t("Setting up your Main Bot…")) : rowProps.wide ? mains.length === 1 ? tops[0] : (0, import_react21.createElement)(MainStrip, { count: mains.length }, tops) : tops,
     rowProps.wide ? sections.pinned.map(row) : null,
     rowProps.wide ? sections.folders.map((folder) => (0, import_react21.createElement)(BotFolderSection, { key: folder.id, folder, roster, actions: rowProps.actions, useUi: rowProps.useUi, renderRow: row })) : null,
     rowProps.wide ? sections.loose.map(row) : order.map(row),
     rowProps.wide ? (0, import_react21.createElement)("button", { type: "button", className: "bt-bot-folder-empty", onClick: () => rowProps.actions.openBotFolders() }, t("New Bot folder")) : null
+  );
+}
+function useHorizontalScroll(ref, setEdges) {
+  (0, import_react21.useEffect)(() => {
+    const row = ref.current;
+    if (row === null) return void 0;
+    const read = () => {
+      const max = row.scrollWidth - row.clientWidth;
+      const left = row.scrollLeft > 1;
+      const right = max - row.scrollLeft > 1;
+      setEdges((current) => current.left === left && current.right === right ? current : { left, right });
+    };
+    let drag = null;
+    let swallowClick = false;
+    const refuseClick = (event) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.stopPropagation();
+      event.preventDefault();
+    };
+    const onDown = (event) => {
+      if (event.pointerType !== "mouse" || event.button !== 0) return;
+      drag = { x: event.clientX, left: row.scrollLeft, moved: false };
+      row.dataset.dragging = "";
+      row.setPointerCapture?.(event.pointerId);
+    };
+    const onMove = (event) => {
+      if (drag === null) return;
+      const dx = event.clientX - drag.x;
+      if (Math.abs(dx) > 4) drag.moved = true;
+      if (drag.moved) row.scrollLeft = drag.left - dx;
+    };
+    const onUp = () => {
+      if (drag === null) return;
+      const moved = drag.moved;
+      drag = null;
+      delete row.dataset.dragging;
+      if (moved) {
+        swallowClick = true;
+        setTimeout(() => {
+          swallowClick = false;
+        }, 300);
+      }
+    };
+    const onWheel = (event) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      const max = row.scrollWidth - row.clientWidth;
+      if (max <= 0) return;
+      const atStart = row.scrollLeft <= 0;
+      const atEnd = row.scrollLeft >= max - 1;
+      if (event.deltaY < 0 && atStart || event.deltaY > 0 && atEnd) return;
+      event.preventDefault();
+      row.scrollLeft = Math.max(0, Math.min(max, row.scrollLeft + event.deltaY));
+    };
+    row.addEventListener("pointerdown", onDown);
+    row.addEventListener("pointermove", onMove);
+    row.addEventListener("pointerup", onUp);
+    row.addEventListener("pointercancel", onUp);
+    row.addEventListener("click", refuseClick, true);
+    row.addEventListener("wheel", onWheel, { passive: false });
+    row.addEventListener("scroll", read, { passive: true });
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(read) : null;
+    observer?.observe(row);
+    read();
+    return () => {
+      row.removeEventListener("pointerdown", onDown);
+      row.removeEventListener("pointermove", onMove);
+      row.removeEventListener("pointerup", onUp);
+      row.removeEventListener("pointercancel", onUp);
+      row.removeEventListener("click", refuseClick, true);
+      row.removeEventListener("wheel", onWheel);
+      row.removeEventListener("scroll", read);
+      observer?.disconnect();
+    };
+  }, [ref, setEdges]);
+}
+function MainStrip({ count, children }) {
+  const row = (0, import_react21.useRef)(null);
+  const [edges, setEdges] = (0, import_react21.useState)({ left: false, right: false });
+  useHorizontalScroll(row, setEdges);
+  return (0, import_react21.createElement)(
+    "div",
+    { className: "bt-mains-wrap" },
+    (0, import_react21.createElement)("div", { ref: row, className: "bt-mains", "data-count": count, role: "group", "aria-label": t("Main Bots") }, children),
+    edges.left ? (0, import_react21.createElement)("span", { className: "bt-mains-fade bt-mains-fade-left", "aria-hidden": true }) : null,
+    edges.right ? (0, import_react21.createElement)("span", { className: "bt-mains-fade bt-mains-fade-right", "aria-hidden": true }) : null
   );
 }
 var CHIEF_COLLAPSE_AT = 24;
@@ -9839,7 +9947,7 @@ function ChiefBar({ main, actions }) {
   );
 }
 var listScrollTop = 0;
-function MobileNavList({ roster, actions, listRef, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
+function MobileNavList({ roster, actions, listRef, mains, main, order, markedUnread, rowProps, typeToSearch, useUpdate }) {
   const menu = useAccountMenu(actions, "down");
   const chiefOut = useChiefBar(listRef);
   (0, import_react21.useLayoutEffect)(() => {
@@ -9888,7 +9996,7 @@ function MobileNavList({ roster, actions, listRef, main, order, markedUnread, ro
       { className: "bt-nav-body" },
       // The stand-in comes first in the DOM: while it is drawn, it is what the card is.
       chiefOut ? (0, import_react21.createElement)(ChiefBar, { main, actions }) : null,
-      (0, import_react21.createElement)(BotList, { listRef, main, order, roster, markedUnread, rowProps, showTime: true })
+      (0, import_react21.createElement)(BotList, { listRef, mains, order, roster, markedUnread, rowProps, showTime: true })
     ),
     menu.menu
   );

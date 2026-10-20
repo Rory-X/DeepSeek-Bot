@@ -143,6 +143,22 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-list{--bt-row-inset:8px;--bt-row-gap:8px;--bt-row-stack-gap:3px;display:flex;flex-direction:column;gap:var(--bt-row-stack-gap);overflow-y:auto;min-height:0;flex:1 1 auto}
 .bt-tile-wrap{display:flex;justify-content:center;padding:20px 0 15px}
 .bt-tile{display:flex;flex-direction:column;align-items:center;gap:4px;width:95px;padding:6px 8px 4px;border-radius:12px;border:0;background:transparent;color:var(--bt-ink);cursor:pointer;font-family:inherit;transition:background-color .12s ease}
+/* Every Main Bot, side by side over one scrollable row: two fill the width, a third
+   runs past it. The single Main Bot keeps the plain card above. */
+.bt-mains-wrap{position:relative}
+.bt-mains{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:none;scroll-snap-type:x proximity;scroll-padding-inline:8px;padding:20px 8px 15px;box-sizing:border-box;cursor:grab}
+.bt-mains::-webkit-scrollbar{display:none}
+.bt-mains[data-dragging]{cursor:grabbing;scroll-snap-type:none}
+.bt-mains>.bt-tile-wrap{flex:1 0 calc(40% - 4px);min-width:0;padding:0;justify-content:center;scroll-snap-align:start}
+/* Two fill the row; a third (and every one after it) peeks past the edge as the hint. */
+.bt-mains[data-count="2"]>.bt-tile-wrap{flex-basis:calc(50% - 3px)}
+.bt-mains .bt-tile{width:100%;max-width:100%;position:relative}
+.bt-mains .bt-tile-name,.bt-mains .bt-chip{max-width:100%}
+.bt-tile .bt-unread{position:absolute;top:10px;right:10px;margin:0}
+.bt-mains-fade{position:absolute;top:20px;bottom:15px;width:18px;pointer-events:none;z-index:1}
+.bt-mains-fade-left{left:0;background:linear-gradient(to right,var(--bt-main),transparent)}
+.bt-mains-fade-right{right:0;background:linear-gradient(to left,var(--bt-main),transparent)}
+body[data-bt-chief=collapsed] .bt-mains-wrap .bt-mains-fade{display:none}
 .bt-tile:hover{background:var(--bt-hover)}
 .bt-tile[aria-current=page]{background:var(--bt-active)}
 .bt-tile-name{font-size:13px;line-height:18px;font-weight:400;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
