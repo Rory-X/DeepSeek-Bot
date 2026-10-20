@@ -431,16 +431,30 @@ export function install(rt) {
   const settingsOf = id => state.connectors?.[id]?.settings ?? {}
   // A module may say it is not ready for a level or for the settings it has (a missing
   // project id): the row stays off with that reason and no mount is attempted.
-  const levelNoteOf = (id) => {
-    const connector = options[id]
-    if (typeof connector.unavailable === 'string' && connector.unavailable !== '') return connector.unavailable
+  const readinessFor = (connector, level, settings) => {
     if (typeof connector.readiness !== 'function') return undefined
     try {
-      const note = connector.readiness({ level: levelOf(id), settings: settingsOf(id) })
+      const note = connector.readiness({ level, settings })
       return typeof note === 'string' && note !== '' ? note : undefined
     } catch (error) {
       return reason(error)
     }
+  }
+  const levelNoteOf = (id) => {
+    const connector = options[id]
+    if (typeof connector.unavailable === 'string' && connector.unavailable !== '') return connector.unavailable
+    return readinessFor(connector, levelOf(id), settingsOf(id))
+  }
+  // Every declared level and the reason it is not usable yet (nothing for the levels that
+  // are). The client disables a level before the user switches into a dead end.
+  const levelNotesOf = (id) => {
+    const connector = options[id]
+    const notes = {}
+    for (const level of levelsOf(connector)) {
+      const note = readinessFor(connector, level, settingsOf(id))
+      if (note !== undefined) notes[level] = note
+    }
+    return notes
   }
   // What the connector may expose at its level: the read tools always, the action tools
   // only at write level. A module may answer per level (`toolsOf`); otherwise its static
@@ -1018,6 +1032,7 @@ export function install(rt) {
           }
         : {}),
       ...(levelNoteOf(id) === undefined ? {} : { levelNote: levelNoteOf(id) }),
+      ...(Object.keys(levelNotesOf(id)).length === 0 ? {} : { levelNotes: levelNotesOf(id) }),
       ...(state.connectors?.[id]?.needsReauth === true ? { needsReauth: true } : {}),
       ...((connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom')
         ? { mode: connector.mode, inputs: credentialFields(connector) }
@@ -1127,7 +1142,10 @@ export function install(rt) {
       if (!levels.includes(level)) throw new Error(`${connector.displayName} has no ${String(level)} access level`)
       const readOnly = rt.readOnly()
       if (readOnly !== undefined && level === 'write') throw new Error(`DS Bot is read-only: ${readOnly}`)
-      const note = levelNoteOf(body.id)
+      // The requested level decides readiness, not the level stored before the switch: an
+      // authorization for a level that still misses settings must not start.
+      const note = (typeof connector.unavailable === 'string' && connector.unavailable !== '' ? connector.unavailable : undefined)
+        ?? readinessFor(connector, level, settingsOf(body.id))
       if (note !== undefined) throw new Error(note)
       return await oauth.start(body.id, { origin: meta.origin, level, settings: settingsOf(body.id) })
     },
@@ -1180,6 +1198,10 @@ export function install(rt) {
       if (!levelsOf(connector).includes(level)) throw new Error(`${connector.displayName} has no ${level === '' ? 'such' : level} access level`)
       const readOnly = rt.readOnly()
       if (readOnly !== undefined) throw new Error(`DS Bot is read-only: ${readOnly}`)
+      // A level that is not ready yet must not take the current authorization away: refuse
+      // before the disconnect and before the team file changes.
+      const note = readinessFor(connector, level, settingsOf(body.id))
+      if (note !== undefined) throw new Error(note)
       const prior = state.connectors?.[body.id] ?? {}
       const authorized = connector.mode === 'oauth-mcp' && (prior.authorizedAt !== undefined || prior.account !== undefined)
       if (authorized) {
