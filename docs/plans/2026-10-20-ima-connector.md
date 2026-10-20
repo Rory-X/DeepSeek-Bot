@@ -43,12 +43,13 @@
 - `search_notes` 的请求体需要嵌套 `query_info: { title, content }`，声明用点号键 `"query_info.title"` 表达；冻结底座 `integ/connector-base-next` 的 `requestBody` 已支持点号嵌套（`setPath`），实测发出 `{"query_info":{"title":…,"content":…}}`。
 - 卡片无账号名：ima 没有 whoami 接口，`verify` 只回 `{ ok: true }`；卡片应显示「已连接」，不显示账号。
 - 真实 key 下的联调未做；mock 只覆盖协议形状，不覆盖 ima 真实字段演进。
+- 底座 `test/connectors.test.js` 目前写死三个内置连接器；任何第一条外部连接器模块都会让它 7 条用例失败，需要底座侧改成动态读取（本模块没有改共享测试）。
 - `list_note` 的翻页游标语义文档没写清（响应无 `next_cursor`），先按「传 `""` 起页、再传上次结果」声明，联调时校正。
 
 ## 证据（2026-10-20）
 
-- 单测：`node --test test/ima.test.js` → 11 tests / 11 pass / 0 fail，约 1.1 s；覆盖成功、401、超时、断网、业务码、半填凭据、非信封回包、写入端点缺席、body 只发映射字段。
-- 全量：`npm test` → 833 tests / 832 pass / 1 fail。唯一失败是 `test/work-dir.test.js` 的 `a model the user picks while the fresh part is made reaches the fresh part`（2 s 超时），在干净的主线 tip `2b77fa9` 主 worktree 上同样复现（19/20），与本次改动无关。
+- 单测：`node --test test/ima.test.js` → 14 tests / 14 pass / 0 fail；覆盖成功、401、超时、断网、业务码、半填凭据、非信封回包、写入端点缺席、body 只发映射字段，以及「声明 → 冻结底座适配器」的 9 个工具挂载、逐条请求与错误映射。
+- 全量（rebase 到 `100f603`）：861 tests / 853 pass / 8 fail。8 个失败里，7 个是底座 `test/connectors.test.js` 把连接器列表写死成 github / vercel / cloudflare——本模块是第一个外部模块，`ima` 出现在 view 里就断言不一致（底座单独跑 32/32 通过，放回 `ima.js` 即复现）；另 1 个是 `test/switch-keeps-input.test.js` 的既有失败，底座不带本模块也失败。需要底座测试改成从 registry 取连接器 id 才能转绿（已报 Marshal / Forge）。
 - 门槛：`node scripts/build-client.mjs --check` 通过；`npm run lint` 0 error（14 条 warning 全是既有客户端文件，不在本次改动内）。
 - 适配器集成（冻结点 `integ/connector-base-next` @ `100f603`）：9 个工具注册为 `ima_*`，逐条断言 host 只有 `ima.qq.com`、`POST`、两个 header + `ima-openapi-ctx`、body 只含映射字段（含 `query_info` 嵌套与 `target_content_format: 0` 常量）、`code=0` 解包、`20004/20002` 映射为工具错误。
 - 未做：真实 clientid/apikey 联调；UI 截图要等 `integ/connector-base` + 卡片渲染落地，计划两屏：连接器页 ima 卡片未连接态（390 / 1280 各一张）、连接后一次 `ima_search_kb_list` 空结果调用（不截真实笔记内容）。
