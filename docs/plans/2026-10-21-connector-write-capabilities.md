@@ -266,8 +266,10 @@ Extend the shared core; the read tools keep EXAMINE and BODY.PEEK unchanged.
   `approve({ tool, line, danger, exec })` first, with a summary naming the folder, the
   number of messages and the UIDs; `exec` is the tool call's exec, so the framework can
   address the card to the Session running it. Nothing is sent when refused.
-- Modules opt in with `imap: { write: true }`; the framework mounts these tools only at
-  level `write` and only for a module that opted in.
+- Modules opt in with `imap: { write: true }` and mount `createImapWriteTools(...)`
+  themselves inside `mountTools`, which receives `{ level, settings, approve }`: they add
+  the write tools only when `level === 'write'`. The framework does not mount them
+  itself; it supplies the approval entry that turns a helper's summary into the card.
 - Tests: a mocked IMAP server asserts the command list (no write command at read level,
   no bare EXPUNGE), refusal means no command at all, UID limits and folder quoting.
 
@@ -286,9 +288,10 @@ A new shared module beside `_imap.js`, no new dependency:
   `approve({ tool, line, danger, exec })` with a summary of recipients, subject, the first
   80 characters of the body and the attachment names; `exec` addresses the card to the
   running Session.
-- Modules opt in with `smtp: { host, port }`; the framework mounts the tools only at
-  level `write` and only with the same app password / authorization code the IMAP side
-  uses.
+- Modules opt in with `smtp: { host, port }` and mount `createSmtpTools(...)` themselves
+  inside `mountTools` (`{ level, settings, approve }`), only when `level === 'write'`;
+  they pass the same app password / authorization code the IMAP side uses. The framework
+  supplies the approval entry.
 - Tests: a mock TLS SMTP server, MIME parsing of a sent message, refusal means no
   connection, a mismatched From is refused before connecting.
 
