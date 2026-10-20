@@ -985,7 +985,9 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
 
   // The approval names the call and hands over the calling session (`exec`), which is what
   // the framework needs to aim its card at the Session that asked.
-  const allowed = (tool, line, exec, danger) => approve({ tool, line, ...(danger === true ? { danger: true } : {}), exec })
+  // The card gets the line plus whatever the framework renders for a riskier call: a
+  // permanent delete says it cannot be undone and what it removes.
+  const allowed = (tool, line, exec, extra) => approve({ tool, line, ...(extra ?? {}), exec })
 
   const uidsParam = {
     type: 'array',
@@ -1071,7 +1073,12 @@ export function createImapWriteTools({ id, displayName, credential, account, hos
         const folder = folderName(args?.folder)
         const uids = uidList(args?.uids)
         if (args?.permanent === true) {
-          await allowed(`${id}_delete_messages`, `Permanently delete ${uids.length} message(s) in "${folder}" (UID ${uids.join(',')}); this cannot be undone`, exec, true)
+          await allowed(
+            `${id}_delete_messages`,
+            `Permanently delete ${uids.length} message(s) in "${folder}" (UID ${uids.join(',')}); this cannot be undone`,
+            exec,
+            { danger: true, reversible: false, change: 'Permanently removes messages from the mailbox' },
+          )
           return run(async (imap) => {
             await imap.select(folder)
             if (!(await imap.capabilities()).has('UIDPLUS')) throw new Error('This mail server cannot permanently delete; it only moves messages to Trash.')
