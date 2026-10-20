@@ -290,7 +290,6 @@ var ZH = {
   Connectors: "连接器",
   "Search connectors": "搜索连接器",
   "No connectors": "暂无连接器",
-  Capabilities: "能力",
   "Shared capabilities": "共享能力",
   "Add capability": "添加能力",
   "No capabilities saved": "还没有保存能力",
@@ -334,6 +333,13 @@ var ZH = {
   "Vercel token": "Vercel 令牌",
   "Create a token on Vercel": "去 Vercel 创建 Token",
   Documentation: "文档",
+  "Access level": "访问级别",
+  "Changes: {target}": "会改动：{target}",
+  "This cannot be undone.": "这个操作无法撤销。",
+  "I understand what this changes": "我了解这次改动的内容",
+  "Switching the access level needs a new authorization.": "切换访问级别需要重新授权。",
+  Capabilities: "能力",
+  "Unavailable on this host.": "这台主机上不可用。",
   "Chat found": "已找到会话",
   "Chat id": "会话 ID",
   "Chat id (optional)": "会话 ID（可空）",
@@ -344,12 +350,6 @@ var ZH = {
   Actions: "执行操作",
   Off: "关闭",
   On: "开启",
-  "Full capabilities": "完整能力",
-  "Let the Bots use every tool the server offers, not only the read ones": "允许 Bot 使用服务器提供的全部工具，而不只限于只读工具",
-  "With Full capabilities on, actions go through {tool} and ask for approval one by one": "完整能力开启时，动作经 {tool} 逐次批准",
-  "Each run goes through {tool}": "每次执行都经 {tool}",
-  "Full access can change your {service} account; every write asks for your approval first.": "Full access 允许改动你的 {service} 账号；每次写操作都会先请求你批准。",
-  "Allow actions": "允许执行操作",
   "Connector settings": "连接器设置",
   "Waiting for the browser…": "正在浏览器里等待…",
   "Not connected": "未连接",
@@ -362,8 +362,6 @@ var ZH = {
   "Save and connect": "保存并连接",
   "Open the authorization page": "打开授权页面",
   "Use a different app": "换一个应用",
-  "Each run asks for your approval": "每次执行都会弹出审批",
-  "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
   "Projects, deployments, and logs": "项目、部署和日志",
   "Could not reach GitHub": "连不上 GitHub",
   "GitHub did not accept this token": "GitHub 不接受这个 token",
@@ -2084,8 +2082,9 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     connectorConnectValues: (id, values) => after(call2("connector-connect", { id, values })),
     connectorDisconnect: (id) => after(call2("connector-disconnect", { id })),
     connectorRetry: (id) => after(call2("connector-retry", { id })),
-    connectorSetActions: (id, enabled) => after(call2("connector-set-actions", { id, enabled })),
-    connectorSetToolbox: (id, enabled) => after(call2("connector-set-toolbox", { id, enabled })),
+    // A level change asks the host for a new grant: an OAuth connector goes back to off and
+    // asks to authorize again, a token connector remounts with the new level.
+    connectorSetLevel: (id, level) => after(call2("connector-set-level", { id, level })),
     connectorOauthStart: (id) => after(call2("connector-oauth-start", { id })),
     connectorOauthApp: (id, clientId, clientSecret) => after(call2("connector-oauth-app", { id, clientId, clientSecret })),
     saveCapability: (capability) => after(call2("capability-save", capability)),
@@ -2986,6 +2985,15 @@ body[data-ds-dark-theme] .bt-q{--bt-q-edge:rgba(255,255,255,.16);--bt-q-rule:rgb
 .bt-q-x:hover{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-q-x:focus-visible,.bt-q-opt:focus-visible{outline:2px solid var(--bt-accent);outline-offset:-2px}
 .bt-q-list{display:flex;flex-direction:column;gap:1px;min-width:0;box-sizing:border-box;margin:0 -8px}
+/* What a connector write will touch, before its options. */
+.bt-q-preview{display:flex;flex-direction:column;gap:4px;margin:8px 0 10px;padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-ink) 4%,transparent);border:.5px solid var(--bt-line)}
+.bt-q-preview[data-danger]{border-color:color-mix(in srgb,var(--bt-danger) 40%,transparent);background:color-mix(in srgb,var(--bt-danger) 6%,transparent)}
+.bt-q-target{font-size:13px;line-height:18px;font-weight:500;overflow-wrap:anywhere}
+.bt-q-change{font-size:13px;line-height:18px;color:var(--bt-ink-2);overflow-wrap:anywhere}
+.bt-q-warning{font-size:12px;line-height:16px;color:var(--bt-danger)}
+.bt-q-confirm{display:flex;align-items:flex-start;gap:8px;min-height:32px;padding-top:2px;font-size:12px;line-height:17px;cursor:pointer}
+.bt-q-confirm input{flex:none;width:16px;height:16px;margin:1px 0 0;accent-color:var(--bt-accent);cursor:pointer}
+.bt-q-opt[data-gated]{opacity:.45;cursor:default}
 .bt-q-opt{position:relative;display:flex;align-items:flex-start;gap:16px;width:100%;min-width:0;box-sizing:border-box;margin:0;border:0;border-radius:12px;background:transparent;padding:10px 8px;font:inherit;color:var(--bt-ink);text-align:start;cursor:pointer;transition:background-color .12s ease}
 .bt-q:not(.bt-q-raised)>.bt-q-head:has(+.bt-q-list){padding-bottom:12px;border-bottom:1px solid var(--bt-q-rule)}
 .bt-q:not(.bt-q-raised)>.bt-q-head+.bt-q-list{margin-top:-6px}
@@ -3321,6 +3329,18 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* The actions section has nothing to control while the toolbox is on, so it folds dim; the
    line under it says where actions went. */
 .bt-connector-setting{display:flex;flex-direction:column;gap:6px}
+/* Write access as declared: the level buttons and the capability list, nothing to toggle. */
+.bt-connector-levels{display:flex;flex-wrap:wrap;gap:6px}
+.bt-connector-level{display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:8px 12px;border-radius:10px;border:.5px solid var(--bt-line-2);background:none;color:inherit;font:inherit;font-size:12px;line-height:16px;text-align:left;cursor:pointer}
+.bt-connector-level[data-current]{border-color:color-mix(in srgb,var(--bt-accent) 60%,transparent);background:color-mix(in srgb,var(--bt-accent) 8%,transparent)}
+.bt-connector-level:disabled{opacity:.5;cursor:default}
+.bt-connector-level-title{font-size:13px;line-height:18px;font-weight:500}
+.bt-connector-level-note{color:var(--bt-ink-3)}
+.bt-connector-caps{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+.bt-connector-cap{display:flex;flex-direction:column;gap:2px;min-height:24px}
+.bt-connector-cap[data-locked]{color:var(--bt-ink-3)}
+.bt-connector-cap-title{font-size:13px;line-height:18px}
+.bt-connector-cap-note,.bt-connector-cap-lock{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 .bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
@@ -4601,7 +4621,13 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
   const multi = question.multiSelect === true;
   const custom = own.trim();
   const canSubmit = multi ? picked.length > 0 || custom !== "" : custom !== "";
+  const target = typeof question.target === "string" && question.target !== "" ? question.target : null;
+  const change = typeof question.change === "string" && question.change !== "" ? question.change : null;
+  const dangerous = question.danger === true || question.reversible === false;
+  const [confirmed, setConfirmed] = (0, import_react5.useState)(false);
+  const needsConfirm = dangerous && (question.reversible === false || question.danger === true);
   const choose = (label) => {
+    if (needsConfirm && !confirmed && /^Allow\b/i.test(label)) return;
     if (multi) {
       setPicked((current) => current.includes(label) ? current.filter((item) => item !== label) : [...current, label]);
       return;
@@ -4633,6 +4659,7 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
   }) : null;
   const rows = options.map((option, optionIndex) => {
     const selected = multi && picked.includes(option.label);
+    const gated = needsConfirm && !confirmed && /^Allow\b/i.test(option.label);
     return (0, import_react5.createElement)(
       "button",
       {
@@ -4641,6 +4668,8 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
         className: "bt-q-opt",
         "aria-pressed": multi ? selected : void 0,
         "aria-keyshortcuts": keyLetter(optionIndex).toLowerCase(),
+        disabled: gated,
+        "data-gated": gated || void 0,
         onClick: () => choose(option.label)
       },
       (0, import_react5.createElement)("span", { className: "bt-key", "aria-hidden": true }, keyLetter(optionIndex)),
@@ -4672,11 +4701,25 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
   } else if ((raised || multi) && canSubmit) {
     foot = (0, import_react5.createElement)("div", { className: "bt-q-foot" }, (0, import_react5.createElement)("button", { type: "submit", className: "bt-q-submit" }, t("Submit")));
   }
+  const preview = target !== null || change !== null || needsConfirm ? (0, import_react5.createElement)(
+    "div",
+    { className: "bt-q-preview", "data-danger": dangerous || void 0 },
+    target !== null ? (0, import_react5.createElement)("div", { className: "bt-q-target" }, t("Changes: {target}", { target })) : null,
+    change !== null ? (0, import_react5.createElement)("div", { className: "bt-q-change" }, change) : null,
+    question.reversible === false ? (0, import_react5.createElement)("div", { className: "bt-q-warning" }, t("This cannot be undone.")) : null,
+    needsConfirm ? (0, import_react5.createElement)(
+      "label",
+      { className: "bt-q-confirm" },
+      (0, import_react5.createElement)("input", { type: "checkbox", checked: confirmed, onChange: (event) => setConfirmed(event.target.checked) }),
+      (0, import_react5.createElement)("span", null, t("I understand what this changes"))
+    ) : null
+  ) : null;
   return (0, import_react5.createElement)(
     "form",
     {
       className: raised ? "bt-q bt-q-raised" : "bt-q",
       "aria-labelledby": titleId,
+      "data-danger": dangerous || void 0,
       onSubmit: (event) => {
         event.preventDefault();
         submit();
@@ -4694,6 +4737,7 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
       ),
       (0, import_react5.createElement)("button", { type: "button", className: "bt-q-x", "aria-label": t("Dismiss question"), title: t("Dismiss"), onClick: onDismiss }, (0, import_react5.createElement)(CloseIcon))
     ),
+    preview,
     rows.length > 0 ? (0, import_react5.createElement)("div", { className: "bt-q-list", role: "group" }, rows) : null,
     field && !raised ? (0, import_react5.createElement)(
       "div",
@@ -13586,31 +13630,19 @@ var cardText = (connector, key) => {
   return wantsChinese() && typeof chinese === "string" && chinese !== "" ? chinese : value;
 };
 var cardAbout = (connector) => cardText(connector, "about") ?? ABOUT[connector.id]?.();
-function ConnectorOption({ title, note, checked, disabled = false, describedby, onChange }) {
-  return (0, import_react32.createElement)(
-    "div",
-    { className: "bt-connector-action-row" },
-    (0, import_react32.createElement)(
-      "div",
-      { className: "bt-connector-action-text" },
-      (0, import_react32.createElement)("div", { className: "bt-connector-action-title" }, title),
-      (0, import_react32.createElement)("div", { className: "bt-connector-action-note" }, note)
-    ),
-    (0, import_react32.createElement)("button", {
-      type: "button",
-      role: "switch",
-      className: "bt-switch",
-      "aria-checked": checked,
-      "aria-label": title,
-      disabled,
-      ...describedby ? { "aria-describedby": describedby } : {},
-      onClick: (event) => {
-        event.stopPropagation();
-        onChange(!checked);
-      }
-    }, (0, import_react32.createElement)("span", { className: "bt-switch-knob", "aria-hidden": true }))
-  );
-}
+var levelItem = (entry) => typeof entry === "string" ? { id: entry, title: entry, description: null } : {
+  id: typeof entry?.id === "string" ? entry.id : String(entry?.id ?? ""),
+  title: typeof entry?.title === "string" ? entry.title : typeof entry?.name === "string" ? entry.name : String(entry?.id ?? ""),
+  description: typeof entry?.description === "string" && entry.description !== "" ? entry.description : null,
+  write: entry?.write === true || entry?.danger === true
+};
+var capabilityItem = (entry, index) => ({
+  key: typeof entry?.key === "string" ? entry.key : `capability-${index}`,
+  title: typeof entry?.title === "string" ? entry.title : typeof entry?.name === "string" ? entry.name : String(entry?.key ?? ""),
+  description: typeof entry?.description === "string" && entry.description !== "" ? entry.description : null,
+  write: entry?.write === true || entry?.danger === true,
+  available: entry?.available !== false
+});
 function statusText2(connector) {
   if (connector.state === "connecting") return connector.oauth === true ? t("Waiting for the browser…") : t("Connecting…");
   if (connector.state === "error" && connector.oauth === true) return connector.error ?? t("Could not connect");
@@ -13622,7 +13654,7 @@ function statusText2(connector) {
   }
   return cardAbout(connector) ?? (connector.oauth === true ? t("Not connected") : "");
 }
-function ConnectorRow({ connector, actions }) {
+function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = (0, import_react32.useState)(false);
   const [values, setValues] = (0, import_react32.useState)({});
   const [busy, setBusy] = (0, import_react32.useState)(false);
@@ -13725,13 +13757,12 @@ function ConnectorRow({ connector, actions }) {
     void run(actions.connectorSetChat(connector.id, chatValue.trim()), () => setChatDraft(null));
   };
   const on = connector.state !== "off";
-  const actionsOn = connector.actions === true;
-  const toolboxOn = connector.toolbox === true;
-  const toolboxOffered = typeof connector.toolbox === "boolean";
-  const toolboxCall = typeof connector.toolboxCall === "string" && connector.toolboxCall !== "" ? connector.toolboxCall : "vercel_call";
-  const actionsOffered = typeof connector.actions === "boolean";
-  const hasOptions = on && (actionsOffered || toolboxOffered);
-  const actionsNoteId = toolboxOn && actionsOffered ? `bt-connector-${connector.id}-actions-note` : void 0;
+  const levels = Array.isArray(connector.levels) ? connector.levels.filter((entry) => entry !== null) : [];
+  const currentLevel = typeof connector.level === "string" ? connector.level : null;
+  const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter((entry) => entry !== null && typeof entry === "object") : [];
+  const permissions = typeof connector.permissions?.summary === "string" && connector.permissions.summary !== "" ? connector.permissions.summary : null;
+  const writesLocked = typeof readOnly === "string" && readOnly !== "";
+  const hasOptions = on && (levels.length > 0 || capabilities.length > 0 || permissions !== null);
   const [details, setDetails] = (0, import_react32.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark;
@@ -13839,31 +13870,53 @@ function ConnectorRow({ connector, actions }) {
     hasOptions && details ? (0, import_react32.createElement)(
       "div",
       { className: "bt-connector-panel", id: panelId, role: "group", "aria-label": t("Connector settings") },
-      toolboxOffered ? (0, import_react32.createElement)(
+      levels.length > 0 ? (0, import_react32.createElement)(
         "div",
         { className: "bt-connector-setting" },
-        (0, import_react32.createElement)(ConnectorOption, {
-          title: t("Full capabilities"),
-          note: toolboxOn ? t("Each run goes through {tool}", { tool: toolboxCall }) : t("Let the Bots use every tool the server offers, not only the read ones"),
-          checked: toolboxOn,
-          disabled: busy,
-          onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next))
-        }),
-        // A full-access grant can write; say so where its toolbox is switched on.
-        connector.oauth === true && connector.id === "cloudflare" ? (0, import_react32.createElement)("div", { className: "bt-connector-action-note" }, t("Full access can change your {service} account; every write asks for your approval first.", { service: connector.name })) : null
+        (0, import_react32.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
+        (0, import_react32.createElement)(
+          "div",
+          { className: "bt-connector-levels", role: "radiogroup", "aria-label": t("Access level") },
+          levels.map((entry) => {
+            const item = levelItem(entry);
+            const current = item.id === currentLevel;
+            return (0, import_react32.createElement)(
+              "button",
+              {
+                key: item.id,
+                type: "button",
+                role: "radio",
+                "aria-checked": current,
+                className: "bt-connector-level",
+                "data-current": current || void 0,
+                disabled: busy || writesLocked && item.write === true,
+                onClick: () => {
+                  if (!current) void run(actions.connectorSetLevel(connector.id, item.id));
+                }
+              },
+              (0, import_react32.createElement)("span", { className: "bt-connector-level-title" }, item.title),
+              item.description !== null ? (0, import_react32.createElement)("span", { className: "bt-connector-level-note" }, item.description) : null
+            );
+          })
+        ),
+        (0, import_react32.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization."))
       ) : null,
-      actionsOffered ? (0, import_react32.createElement)(
+      permissions !== null ? (0, import_react32.createElement)("div", { className: "bt-connector-hint" }, permissions) : null,
+      capabilities.length > 0 ? (0, import_react32.createElement)(
         "div",
-        { className: "bt-connector-setting", "data-locked": toolboxOn || void 0 },
-        (0, import_react32.createElement)(ConnectorOption, {
-          title: t("Allow actions"),
-          note: actionsOn ? t("Each run asks for your approval") : t("Let the Bots deploy, cancel, promote and roll back; every run asks for your approval"),
-          checked: actionsOn,
-          disabled: busy || toolboxOn,
-          describedby: actionsNoteId,
-          onChange: (next) => void run(actions.connectorSetActions(connector.id, next))
-        }),
-        actionsNoteId ? (0, import_react32.createElement)("div", { className: "bt-connector-action-note", id: actionsNoteId }, t("With Full capabilities on, actions go through {tool} and ask for approval one by one", { tool: toolboxCall })) : null
+        { className: "bt-connector-setting" },
+        (0, import_react32.createElement)("div", { className: "bt-connector-action-title" }, t("Capabilities")),
+        (0, import_react32.createElement)("ul", { className: "bt-connector-caps" }, capabilities.map((entry, index) => {
+          const item = capabilityItem(entry, index);
+          const locked = item.available === false || writesLocked && item.write === true;
+          return (0, import_react32.createElement)(
+            "li",
+            { key: item.key, className: "bt-connector-cap", "data-write": item.write || void 0, "data-locked": locked || void 0 },
+            (0, import_react32.createElement)("span", { className: "bt-connector-cap-title" }, item.title),
+            item.description !== null ? (0, import_react32.createElement)("span", { className: "bt-connector-cap-note" }, item.description) : null,
+            locked ? (0, import_react32.createElement)("span", { className: "bt-connector-cap-lock" }, t("Unavailable on this host.")) : null
+          );
+        }))
       ) : null
     ) : null,
     !oauth && !on && form ? (0, import_react32.createElement)(
@@ -13963,10 +14016,11 @@ function ConnectorRow({ connector, actions }) {
 }
 function ConnectorsPage({ roster, actions }) {
   const list = roster?.connectors ?? [];
+  const readOnly = typeof roster?.readOnly === "string" && roster.readOnly !== "" ? roster.readOnly : null;
   return (0, import_react32.createElement)(
     "section",
     { className: "bt-set-section" },
-    (0, import_react32.createElement)("div", { className: "bt-set-card bt-connectors-card" }, list.length === 0 ? (0, import_react32.createElement)("div", { className: "bt-set-row" }, (0, import_react32.createElement)("span", { className: "bt-set-hint" }, t("No connectors"))) : list.map((connector) => (0, import_react32.createElement)(ConnectorRow, { key: connector.id, connector, actions })))
+    (0, import_react32.createElement)("div", { className: "bt-set-card bt-connectors-card" }, list.length === 0 ? (0, import_react32.createElement)("div", { className: "bt-set-row" }, (0, import_react32.createElement)("span", { className: "bt-set-hint" }, t("No connectors"))) : list.map((connector) => (0, import_react32.createElement)(ConnectorRow, { key: connector.id, connector, actions, readOnly })))
   );
 }
 
@@ -17352,6 +17406,7 @@ function apply(ctx) {
     const current = roster.getSnapshot();
     const live2 = {};
     if (value.connectors !== void 0 && JSON.stringify(value.connectors) !== JSON.stringify(current.connectors ?? [])) live2.connectors = value.connectors;
+    if (value.readOnly !== void 0 && value.readOnly !== (current.readOnly ?? null)) live2.readOnly = value.readOnly;
     if (value.capabilityStatuses !== void 0 && JSON.stringify(value.capabilityStatuses) !== JSON.stringify(current.capabilityStatuses ?? {})) live2.capabilityStatuses = value.capabilityStatuses;
     if (Object.keys(live2).length > 0 && current.ready) roster.set({ ...current, ...live2 });
     if (value.unchanged || value.revision === current.revision && value.modelsKey === current.modelsKey) return;

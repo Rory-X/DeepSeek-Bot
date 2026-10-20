@@ -260,6 +260,15 @@ body[data-ds-dark-theme] .bt-q{--bt-q-edge:rgba(255,255,255,.16);--bt-q-rule:rgb
 .bt-q-x:hover{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-q-x:focus-visible,.bt-q-opt:focus-visible{outline:2px solid var(--bt-accent);outline-offset:-2px}
 .bt-q-list{display:flex;flex-direction:column;gap:1px;min-width:0;box-sizing:border-box;margin:0 -8px}
+/* What a connector write will touch, before its options. */
+.bt-q-preview{display:flex;flex-direction:column;gap:4px;margin:8px 0 10px;padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-ink) 4%,transparent);border:.5px solid var(--bt-line)}
+.bt-q-preview[data-danger]{border-color:color-mix(in srgb,var(--bt-danger) 40%,transparent);background:color-mix(in srgb,var(--bt-danger) 6%,transparent)}
+.bt-q-target{font-size:13px;line-height:18px;font-weight:500;overflow-wrap:anywhere}
+.bt-q-change{font-size:13px;line-height:18px;color:var(--bt-ink-2);overflow-wrap:anywhere}
+.bt-q-warning{font-size:12px;line-height:16px;color:var(--bt-danger)}
+.bt-q-confirm{display:flex;align-items:flex-start;gap:8px;min-height:32px;padding-top:2px;font-size:12px;line-height:17px;cursor:pointer}
+.bt-q-confirm input{flex:none;width:16px;height:16px;margin:1px 0 0;accent-color:var(--bt-accent);cursor:pointer}
+.bt-q-opt[data-gated]{opacity:.45;cursor:default}
 .bt-q-opt{position:relative;display:flex;align-items:flex-start;gap:16px;width:100%;min-width:0;box-sizing:border-box;margin:0;border:0;border-radius:12px;background:transparent;padding:10px 8px;font:inherit;color:var(--bt-ink);text-align:start;cursor:pointer;transition:background-color .12s ease}
 .bt-q:not(.bt-q-raised)>.bt-q-head:has(+.bt-q-list){padding-bottom:12px;border-bottom:1px solid var(--bt-q-rule)}
 .bt-q:not(.bt-q-raised)>.bt-q-head+.bt-q-list{margin-top:-6px}
@@ -595,6 +604,18 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* The actions section has nothing to control while the toolbox is on, so it folds dim; the
    line under it says where actions went. */
 .bt-connector-setting{display:flex;flex-direction:column;gap:6px}
+/* Write access as declared: the level buttons and the capability list, nothing to toggle. */
+.bt-connector-levels{display:flex;flex-wrap:wrap;gap:6px}
+.bt-connector-level{display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:8px 12px;border-radius:10px;border:.5px solid var(--bt-line-2);background:none;color:inherit;font:inherit;font-size:12px;line-height:16px;text-align:left;cursor:pointer}
+.bt-connector-level[data-current]{border-color:color-mix(in srgb,var(--bt-accent) 60%,transparent);background:color-mix(in srgb,var(--bt-accent) 8%,transparent)}
+.bt-connector-level:disabled{opacity:.5;cursor:default}
+.bt-connector-level-title{font-size:13px;line-height:18px;font-weight:500}
+.bt-connector-level-note{color:var(--bt-ink-3)}
+.bt-connector-caps{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+.bt-connector-cap{display:flex;flex-direction:column;gap:2px;min-height:24px}
+.bt-connector-cap[data-locked]{color:var(--bt-ink-3)}
+.bt-connector-cap-title{font-size:13px;line-height:18px}
+.bt-connector-cap-note,.bt-connector-cap-lock{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
 .bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}

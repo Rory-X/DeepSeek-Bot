@@ -162,6 +162,8 @@ export function apply(ctx) {
     // Connector and capability states change without a new revision.
     const live = {}
     if (value.connectors !== undefined && JSON.stringify(value.connectors) !== JSON.stringify(current.connectors ?? [])) live.connectors = value.connectors
+    // A host can stop allowing changes without a new revision; the connector cards read it.
+    if (value.readOnly !== undefined && value.readOnly !== (current.readOnly ?? null)) live.readOnly = value.readOnly
     if (value.capabilityStatuses !== undefined && JSON.stringify(value.capabilityStatuses) !== JSON.stringify(current.capabilityStatuses ?? {})) live.capabilityStatuses = value.capabilityStatuses
     if (Object.keys(live).length > 0 && current.ready) roster.set({ ...current, ...live })
     if (value.unchanged || (value.revision === current.revision && value.modelsKey === current.modelsKey)) return
