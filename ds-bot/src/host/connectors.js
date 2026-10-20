@@ -394,6 +394,16 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     const connector = options[id]
     return connector.baseId === undefined ? connector.displayName : `${connector.displayName} (${id})`
   }
+  // One audit line per disconnect, whether the user pressed Disconnect or a level/settings
+  // change invalidated the grant. It names the instance and never records a token.
+  const auditDisconnected = (id, origin) => {
+    const connector = options[id]
+    if (connector === undefined) return
+    rt.diagnostics?.record?.({
+      source: 'connector-disconnected',
+      text: `${connector.displayName} (${id}) disconnected from ${typeof origin === 'string' && origin !== '' ? origin : 'a connector change'}`,
+    })
+  }
   const requireActionApproval = async (id, tool, args, exec, client) => {
     await requireApproval(id, tool, exec, await approvalOf(id, tool, args, client))
   }
@@ -533,16 +543,41 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   const settingsOf = id => state.connectors?.[id]?.settings ?? {}
   // A module may say it is not ready for a level or for the settings it has (a missing
   // project id): the row stays off with that reason and no mount is attempted.
-  const levelNoteOf = (id) => {
+  const readinessFor = (id, level, settings) => {
     const connector = options[id]
-    if (typeof connector.unavailable === 'string' && connector.unavailable !== '') return connector.unavailable
     if (typeof connector.readiness !== 'function') return undefined
     try {
-      const note = connector.readiness({ level: levelOf(id), settings: settingsOf(id), instance: instanceContextOf(id) })
+      const note = connector.readiness({ level, settings, instance: instanceContextOf(id) })
       return typeof note === 'string' && note !== '' ? note : undefined
     } catch (error) {
       return reason(error)
     }
+  }
+  const levelNoteOf = (id) => {
+    const connector = options[id]
+    if (typeof connector.unavailable === 'string' && connector.unavailable !== '') return connector.unavailable
+    return readinessFor(id, levelOf(id), settingsOf(id))
+  }
+  // Every declared level and the reason it is not usable yet (nothing for the levels that
+  // are). The client disables a level before the user switches into a dead end.
+  const levelNotesOf = (id) => {
+    const notes = {}
+    for (const level of levelsOf(options[id])) {
+      const note = readinessFor(id, level, settingsOf(id))
+      if (note !== undefined) notes[level] = note
+    }
+    return notes
+  }
+  // `label` only names the card; every other settings field feeds the grant or the mount, so
+  // only a change to one of those needs a new authorization. A rename keeps the grant.
+  const DISPLAY_SETTINGS = new Set(['label'])
+  const grantSettingsChanged = (before, after) => {
+    const left = before !== null && typeof before === 'object' ? before : {}
+    const right = after !== null && typeof after === 'object' ? after : {}
+    for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+      if (!DISPLAY_SETTINGS.has(key) && left[key] !== right[key]) return true
+    }
+    return false
   }
   // What the connector may expose at its level: the read tools always, the action tools
   // only at write level. A module may answer per level (`toolsOf`); otherwise its static
@@ -1084,6 +1119,28 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   // `force` connects again even when the token is the same.
   const sync = (id, force = false) => serialise(() => refresh(id, force))
 
+  // The team file can be adopted after this host installed (the store loads it lazily on
+  // the first read), so an instance that appears in it later still gets its row and mount.
+  // A restart therefore lists every saved instance, not only the one implied at install.
+  let ensuring = false
+  const ensureInstances = () => {
+    if (ensuring) return
+    ensuring = true
+    try {
+      for (const base of Object.keys(connectors)) {
+        if (connectors[base].instances === undefined) continue
+        for (const id of instanceIdsOf(base)) {
+          if (options[id] !== undefined || rt.config[id] === false) continue
+          options[id] = buildOption(base, id)
+          statuses.set(id, { state: 'off' })
+          void sync(id)
+        }
+      }
+    } finally {
+      ensuring = false
+    }
+  }
+
   // A token connector shows the account signIn read; an OAuth connector shows what its
   // own account tool answered after the mount.
   const accountOf = (id) => {
@@ -1097,7 +1154,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     return state.connectors?.[id]?.[connector.accountField] ?? null
   }
 
-  const connectorsView = () => ids().map(id => {
+  const connectorRow = (id) => {
     const connector = options[id]
     const status = statuses.get(id) ?? { state: 'off' }
     const oauthConnector = connector.mode === 'oauth-mcp'
@@ -1127,6 +1184,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
           }
         : {}),
       ...(levelNoteOf(id) === undefined ? {} : { levelNote: levelNoteOf(id) }),
+      ...(Object.keys(levelNotesOf(id)).length === 0 ? {} : { levelNotes: levelNotesOf(id) }),
       ...(state.connectors?.[id]?.needsReauth === true ? { needsReauth: true } : {}),
       ...((connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom')
         ? { mode: connector.mode, inputs: credentialFields(connector) }
@@ -1158,7 +1216,12 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
           }
         : {}),
     }
-  })
+  }
+
+  const connectorsView = () => {
+    ensureInstances()
+    return ids().map(connectorRow)
+  }
 
   const known = id => {
     if (!Object.hasOwn(options, id)) throw new Error('No such connector')
@@ -1257,7 +1320,10 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       if (!levels.includes(level)) throw new Error(`${connector.displayName} has no ${String(level)} access level`)
       const readOnly = rt.readOnly()
       if (readOnly !== undefined && level === 'write') throw new Error(`DS Bot is read-only: ${readOnly}`)
-      const note = levelNoteOf(body.id)
+      // The requested level decides readiness, not the one stored before the switch: an
+      // authorization for a level that still misses settings must not start.
+      const note = (typeof connector.unavailable === 'string' && connector.unavailable !== '' ? connector.unavailable : undefined)
+        ?? readinessFor(body.id, level, settingsOf(body.id))
       if (note !== undefined) throw new Error(note)
       // The endpoint is queued like every change: a browser that comes back after the user
       // removed the instance cannot mount it again.
@@ -1268,10 +1334,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       const connector = options[body.id]
       // Who took a connector away, and from where: a connector entry disappearing is the
       // one change a user may need to trace later. No token or secret is recorded.
-      rt.diagnostics?.record?.({
-        source: 'connector-disconnected',
-        text: `${connector.displayName} (${body.id}) disconnected from ${typeof meta?.origin === 'string' && meta.origin !== '' ? meta.origin : 'an unknown origin'}`,
-      })
+      auditDisconnected(body.id, typeof meta?.origin === 'string' && meta.origin !== '' ? meta.origin : 'an unknown origin')
       // The settings and the chosen level describe the connector, not the grant: a
       // reconnect should not ask for the project id and role again.
       const kept = (id) => {
@@ -1312,10 +1375,15 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       if (!levelsOf(connector).includes(level)) throw new Error(`${connector.displayName} has no ${level === '' ? 'such' : level} access level`)
       const readOnly = rt.readOnly()
       if (readOnly !== undefined) throw new Error(`DS Bot is read-only: ${readOnly}`)
+      // A level that is not ready yet must not take the current authorization away: refuse
+      // before the disconnect and before the team file changes.
+      const note = readinessFor(body.id, level, settingsOf(body.id))
+      if (note !== undefined) throw new Error(note)
       const prior = state.connectors?.[body.id] ?? {}
       const authorized = connector.mode === 'oauth-mcp' && (prior.authorizedAt !== undefined || prior.account !== undefined)
       if (authorized) {
         await oauth.disconnect(body.id)
+        auditDisconnected(body.id, 'a level change')
         state.connectors = {
           ...state.connectors,
           [body.id]: {
@@ -1351,8 +1419,14 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       const prior = state.connectors?.[body.id] ?? {}
       const authorized = connector.mode === 'oauth-mcp' && typeof connector.authorize === 'function'
         && (prior.authorizedAt !== undefined || prior.account !== undefined)
-      if (authorized) {
+      if (authorized && grantSettingsChanged(prior.settings, settings)) {
+        // A change that invalidates the stored authorization is refused before the grant is
+        // touched when the new settings cannot serve the current level; a rename never gets
+        // here, so a label-only save cannot cost an authorization.
+        const note = readinessFor(body.id, levelOf(body.id), settings)
+        if (note !== undefined) throw new Error(note)
         await oauth.disconnect(body.id)
+        auditDisconnected(body.id, 'a settings change')
         state.connectors = { ...state.connectors, [body.id]: { ...prior, settings, needsReauth: true } }
       } else {
         state.connectors = { ...state.connectors, [body.id]: { ...prior, settings } }
@@ -1500,11 +1574,17 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
 
   // Every endpoint that changes a connector runs in the host queue, whether it mounts,
   // authorizes, adds, removes or reconfigures: no two changes ever interleave.
-  const connectorEndpoint = (endpoint, body, meta) => serialise(() => endpoints[endpoint](body ?? {}, meta ?? {}))
+  const connectorEndpoint = (endpoint, body, meta) => {
+    ensureInstances()
+    return serialise(() => endpoints[endpoint](body ?? {}, meta ?? {}))
+  }
 
   ctx.effect(() => {
     stopped = false
-    void rt.loadSecrets().then(() => { for (const id of ids()) void sync(id) })
+    void rt.loadSecrets().then(() => {
+      ensureInstances()
+      for (const id of ids()) void sync(id)
+    })
     return () => {
       stopped = true
       approval.dispose()
@@ -1516,7 +1596,10 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   return {
     connectorsView,
     connectorEndpoint,
-    secretsChanged: () => { for (const id of ids()) void sync(id) },
+    secretsChanged: () => {
+      ensureInstances()
+      for (const id of ids()) void sync(id)
+    },
     answerConnectorApproval: (sessionId, questionId, body) => approval.answer(sessionId, questionId, body),
     dismissConnectorApproval: (sessionId, questionId) => approval.dismiss(sessionId, questionId),
     cancelConnectorApprovals: (sessionId, outcome) => approval.cancel(sessionId, outcome),
