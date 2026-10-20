@@ -3,9 +3,13 @@ import { test } from 'node:test'
 import connector, {
   IMA_API_KEY_SECRET,
   IMA_BASE,
+  IMA_CAPABILITIES,
   IMA_CLIENT_ID_SECRET,
+  IMA_PERMISSIONS,
   IMA_REST_TOOLS,
   IMA_WRITE_PATHS,
+  IMA_WRITE_TOOLS,
+  approvalFor,
   auth,
   imaAnswer,
   imaError,
@@ -254,4 +258,103 @@ test('the adapter unwraps ima answers, and a 429 stays a rate limit whatever the
     const [throttled] = mounted(async () => ({ status: 429, ok: false, text: async () => body }))
     await assert.rejects(throttled.execute({ cursor: '0', limit: 20 }), /rate limited/, JSON.stringify(body))
   }
+})
+
+// Third batch: the write declarations exist but are not wired into the mounted tool list
+// until the shared adapter accepts `write: true`. These tests pin the draft shape.
+test('the write declarations cover the third batch and cannot run yet', () => {
+  assert.deepEqual(IMA_WRITE_TOOLS.map(tool => tool.name), ['create_note', 'append_note', 'add_note_to_kb', 'import_url', 'list_addable_kb'])
+  for (const tool of IMA_WRITE_TOOLS) {
+    assert.equal(tool.method, 'POST', tool.name)
+    assert.match(tool.path, /^\/openapi\/(note|wiki)\/v1\//, tool.name)
+    assert.ok(tool.description.length > 20, tool.name)
+    if (tool.name === 'list_addable_kb') assert.equal(tool.readOnly, true, tool.name)
+    else assert.equal(tool.write, true, tool.name)
+  }
+  // The mounted read surface stays the nine read tools: a write definition in `restTools`
+  // would be refused by the adapter until the write contract lands.
+  assert.equal(connector.restTools, IMA_REST_TOOLS)
+  assert.equal(connector.restTools.some(tool => tool.write === true), false)
+  assert.deepEqual(connector.levels, ['read', 'write'])
+  assert.equal(connector.defaultLevel, 'read')
+})
+
+test('the write declarations map only declared arguments or constants', () => {
+  for (const tool of IMA_WRITE_TOOLS) {
+    const properties = tool.parameters.properties ?? {}
+    assert.deepEqual(tool.parameters.type, 'object', tool.name)
+    for (const [field, mapping] of Object.entries(tool.body ?? {})) {
+      if (mapping !== null && typeof mapping === 'object') {
+        assert.ok(Object.hasOwn(mapping, 'const'), `${tool.name}.${field} is a constant`)
+        continue
+      }
+      assert.equal(typeof mapping, 'string', `${tool.name}.${field} names an argument`)
+      assert.ok(Object.hasOwn(properties, mapping), `${tool.name}.${field} sends the declared argument "${mapping}"`)
+    }
+    for (const name of tool.parameters.required ?? []) assert.ok(Object.hasOwn(properties, name), `${tool.name} requires "${name}"`)
+  }
+  const append = IMA_WRITE_TOOLS.find(tool => tool.name === 'append_note')
+  assert.equal(append.body.note_id, 'note_id')
+  assert.deepEqual(append.body.content_format, { const: 1 })
+  const addToKb = IMA_WRITE_TOOLS.find(tool => tool.name === 'add_note_to_kb')
+  assert.equal(addToKb.body['note_info.content_id'], 'note_id')
+  assert.deepEqual(addToKb.body.media_type, { const: 11 })
+})
+
+test('a write call says what it will change and that it cannot be undone', () => {
+  const created = approvalFor('create_note', { content: 'x'.repeat(42) })
+  assert.match(created.line, /Create an ima note \(42 characters\)/)
+  assert.equal(created.danger, false)
+  assert.equal(created.reversible, false)
+  assert.equal(created.change, 'creates a new note')
+  const appended = approvalFor('append_note', { note_id: 'n-1', content: 'abc' })
+  assert.match(appended.line, /Append 3 characters to ima note n-1/)
+  assert.equal(appended.target, 'n-1')
+  assert.equal(appended.reversible, false)
+  const added = approvalFor('add_note_to_kb', { note_id: 'n-1', knowledge_base_id: 'kb-1' })
+  assert.match(added.line, /Add ima note n-1 to knowledge base kb-1/)
+  const imported = approvalFor('import_url', { knowledge_base_id: 'kb-1', urls: ['https://a.example/1', 'https://a.example/2'] })
+  assert.match(imported.line, /Import 2 URLs into knowledge base kb-1: https:\/\/a\.example\/1/)
+  const single = approvalFor('import_url', { knowledge_base_id: 'kb-1', urls: ['https://a.example/1'] })
+  assert.match(single.line, /Import 1 URL into/)
+  // The framework cuts the line again; a 400-character body still yields a short line.
+  assert.ok(approvalFor('create_note', { content: 'y'.repeat(400) }).line.length <= 181)
+})
+
+test('imaError covers the notes table as well as the reference table', () => {
+  assert.match(imaError(100001, 'bad'), /^ima rejected the request parameters: bad$/)
+  assert.match(imaError(100002, ''), /ids is not valid/)
+  assert.match(imaError(100003, ''), /internal error/)
+  assert.match(imaError(100004, ''), /rejected the size/)
+  assert.match(imaError(100005, ''), /may not do that/)
+  assert.match(imaError(100006, ''), /no longer exists/)
+  assert.match(imaError(100008, ''), /read it again before writing/)
+  assert.match(imaError(100009, ''), /split it into smaller parts/)
+  assert.match(imaError(310001, ''), /notebook does not exist/)
+  // The reference table names the same situations with 2100xx codes.
+  assert.match(imaError(210008, ''), /read it again before writing/)
+  assert.match(imaError(210009, ''), /split it into smaller parts/)
+  assert.match(imaError(210035, ''), /notebook does not exist/)
+  // An unknown code still carries the service's sentence.
+  assert.match(imaError(219999, '参数非法'), /219999: 参数非法/)
+})
+
+test('capabilities describe the write batch without registering a tool', () => {
+  assert.deepEqual(connector.capabilities, IMA_CAPABILITIES)
+  assert.equal(connector.permissions, IMA_PERMISSIONS)
+  const risks = new Set(IMA_CAPABILITIES.map(item => item.risk))
+  assert.deepEqual([...risks].sort(), ['read', 'write'])
+  for (const item of IMA_CAPABILITIES) {
+    assert.equal(typeof item.key, 'string')
+    assert.equal(typeof item.title, 'string')
+    assert.equal(typeof item.description, 'string')
+    if (item.risk === 'write') {
+      assert.equal(item.preview.reversible, false, item.key)
+      assert.equal(typeof item.preview.change, 'string', item.key)
+    }
+  }
+  assert.match(IMA_PERMISSIONS.summary, /after your approval/)
+  // Display only: the mounted tool names are still the nine read ones.
+  const mountedNames = connector.restTools.map(tool => tool.name)
+  for (const item of IMA_CAPABILITIES) assert.equal(mountedNames.includes(item.key), false, item.key)
 })
