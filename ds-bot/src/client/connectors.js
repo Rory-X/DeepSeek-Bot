@@ -295,10 +295,14 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const [levelDraft, setLevelDraft] = useState(null)
   const shownLevel = oauth ? (levelDraft ?? currentLevel) : currentLevel
   const chooseLevel = (id) => {
-    if (oauth) { setLevelDraft(id); return }
+    if (oauth && !on) { setLevelDraft(id); return }
+    // A connected OAuth connector asks the host for the new level: it disconnects and the
+    // next Connect authorizes for that level.
+    setLevelDraft(null)
     void run(actions.connectorSetLevel(connector.id, id))
   }
-  const settingsEmpty = settings.some(field => settingValue(field).trim() === '')
+  const storedSetting = field => (typeof field.value === 'string' ? field.value : '').trim()
+  const settingsEmpty = settings.some(field => storedSetting(field) === '')
   const levelBlocked = (id) => {
     const note = typeof levelNotes[id] === 'string' && levelNotes[id] !== '' ? levelNotes[id] : null
     if (note !== null) return note
@@ -386,7 +390,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
               h('span', { className: 'bt-connector-field-name' }, typeof field.label === 'string' && field.label !== '' ? field.label : field.name),
               h('div', { className: 'bt-q-field' }, h('input', {
                 className: 'bt-connector-input', value: settingValue(field), placeholder: field.name, 'aria-label': field.label ?? field.name,
-                autoComplete: 'off', spellCheck: false,
+                autoComplete: 'off', spellCheck: false, disabled: busy,
                 onChange: (event) => setSettingDraft(previous => ({ ...previous, [field.name]: event.target.value })),
                 onKeyDown: (event) => { if (event.key === 'Enter') saveSettings() },
               })))),
