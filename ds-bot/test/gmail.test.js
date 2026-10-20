@@ -375,7 +375,7 @@ test('the module declares a read default and the capabilities the write level ad
     'mark_read',
     'save_draft',
     'move_mail',
-    'trash_mail',
+    'delete_mail',
     'send_mail',
   ])
   // Labels and archive wait for the shared IMAP core's label extension; attachment reads
@@ -391,12 +391,32 @@ test('the module declares a read default and the capabilities the write level ad
   const send = gmail.capabilities.find(capability => capability.key === 'send_mail')
   assert.equal(send.risk, 'destructive')
   assert.equal(send.preview.reversible, false)
-  const trash = gmail.capabilities.find(capability => capability.key === 'trash_mail')
-  assert.equal(trash.risk, 'destructive')
-  assert.equal(trash.preview.reversible, true)
+  const deletion = gmail.capabilities.find(capability => capability.key === 'delete_mail')
+  assert.equal(deletion.risk, 'destructive')
+  assert.equal(deletion.preview.reversible, true)
   // Permanent delete, batch delete and settings are not capabilities this connector offers.
   assert.equal(keys.some(key => /permanent|batch|settings|filter|forward|signature/.test(key)), false)
-  assert.match(gmail.permissions.summary, /full capabilities/i)
+  // Every capability names a mounted tool family, and nothing the round did not wire.
+  const capabilityTools = {
+    read_mail: GMAIL_TOOLS,
+    mark_read: ['gmail_mark_read', 'gmail_mark_unread'],
+    save_draft: ['gmail_save_draft'],
+    move_mail: ['gmail_move_messages'],
+    delete_mail: ['gmail_delete_messages'],
+    send_mail: GMAIL_SEND_TOOLS,
+  }
+  const mounted = new Set([...GMAIL_TOOLS, ...GMAIL_WRITE_TOOLS, ...GMAIL_SEND_TOOLS])
+  assert.deepEqual(Object.keys(capabilityTools).sort(), [...keys].sort())
+  for (const [key, tools] of Object.entries(capabilityTools)) {
+    for (const tool of tools) assert.ok(mounted.has(tool), `${key} names ${tool}`)
+  }
+  // The summary tells the reader what the mounted tools do, and nothing else.
+  const declarationText = [gmail.permissions.summary, ...gmail.capabilities.flatMap(capability => [capability.title, capability.description])].join(' ')
+  assert.doesNotMatch(declarationText, /label|archive|attachment/i)
+  assert.match(gmail.permissions.summary, /mark/i)
+  assert.match(gmail.permissions.summary, /trash/i)
+  assert.match(gmail.permissions.summary, /draft/i)
+  assert.match(gmail.permissions.summary, /send/i)
 })
 
 
