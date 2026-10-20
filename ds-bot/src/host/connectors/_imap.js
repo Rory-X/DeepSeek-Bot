@@ -625,6 +625,25 @@ export class ImapClient {
     if (!(await this.capabilities()).has('X-GM-EXT-1')) {
       throw new Error('This mail server does not support Gmail labels; labelling and archiving are unavailable.')
     }
+    // Gmail creates a user label implicitly when a store names one that does not exist, and
+    // a typo must not create it. User labels are mailboxes in LIST; system labels (a
+    // backslash name) are known to the service and never need a pre-check. Nothing is
+    // written until every added label is known.
+    if (additions.length > 0) {
+      const folders = await this.list()
+      const known = new Set()
+      for (const folder of folders) {
+        known.add(String(folder.name).toLowerCase())
+        if (typeof folder.wire === 'string') known.add(folder.wire.toLowerCase())
+      }
+      for (const label of additions) {
+        if (label.startsWith('\\')) continue
+        const wire = encodeMailboxName(label).toLowerCase()
+        if (!known.has(label.toLowerCase()) && !known.has(wire)) {
+          throw new Error(`The label "${label}" does not exist in this account.`)
+        }
+      }
+    }
     if (additions.length > 0) await this.#command(`UID STORE ${list} +X-GM-LABELS (${additions.map(quote).join(' ')})`)
     if (removals.length > 0) await this.#command(`UID STORE ${list} -X-GM-LABELS (${removals.map(quote).join(' ')})`)
   }
