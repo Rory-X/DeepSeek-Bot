@@ -46,6 +46,12 @@ test('declares the official gateway, Bearer key and read-only REST mode', () => 
   assert.equal(weread.tokenSecret, 'WEREAD_API_KEY')
   assert.deepEqual(weread.auth({ token: TOKEN }), { Authorization: `Bearer ${TOKEN}` })
   assert.equal(typeof weread.verify, 'function')
+  // The card reads one object; a key declared at the top level would be invisible there.
+  assert.deepEqual(Object.keys(weread.card).sort(), ['about', 'docsUrl', 'glyph', 'readOnlyNote'])
+  assert.equal(weread.card.glyph, 'weread')
+  assert.match(weread.card.readOnlyNote, /^Read-only:/)
+  for (const key of ['about', 'glyph', 'docsUrl', 'readOnlyNote']) assert.equal(Object.hasOwn(weread, key), false)
+  assert.deepEqual(weread.credentials, [{ name: 'WEREAD_API_KEY', label: 'WeRead API key' }])
 })
 
 test('every tool is a read-only POST that names its own api_name and skill version', () => {
