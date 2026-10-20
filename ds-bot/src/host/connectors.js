@@ -17,6 +17,7 @@
 // outside the team file, the Secrets page and every shell.
 import { buildCloudflareToolIndex, CLOUDFLARE_TOOLBOX_TOOLS, createCloudflareCallTool, createCloudflareSearchTool, isBlockedCloudflareTool } from './cloudflare-toolbox.js'
 import { createApprovalDesk } from './connector-approval.js'
+import { createMountRetryScheduler } from './connector-retry.js'
 import { McpHttpClient, mcpResultText } from './mcp.js'
 import { credentialFields, connectValues } from './connector-setup.js'
 import { externalConnectors, CONNECTOR_ID, CONNECTOR_LEVELS } from './connectors/registry.js'
@@ -513,29 +514,17 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
 
   // A mount that times out is a transient network problem, not a broken grant: the mount
   // tries once more directly, and a mount that still fails schedules a few background
-  // retries so a slow server heals without the user pressing Reconnect.
+  // retries (15s, 45s, 120s, then stop) so a slow server heals without the user pressing
+  // Reconnect. The retry count lives in connector-retry.js, which keeps it across failed
+  // retries; only a successful mount clears it.
   const TIMEOUT_HINT = /aborted due to timeout|did not finish answering|timed out|TimeoutError/i
   const timedOut = error => error?.name === 'TimeoutError' || error?.timeout === true || TIMEOUT_HINT.test(String(error?.message ?? ''))
-  const MOUNT_RETRY_DELAYS = [15_000, 45_000, 120_000]
-  const mountRetries = new Map()
-  const clearMountRetry = (id) => {
-    const entry = mountRetries.get(id)
-    if (entry?.timer !== undefined) clearTimeout(entry.timer)
-    mountRetries.delete(id)
-  }
-  const scheduleMountRetry = (id) => {
-    if (stopped) return
-    const count = mountRetries.get(id)?.count ?? 0
-    if (count >= MOUNT_RETRY_DELAYS.length) return
-    clearMountRetry(id)
-    const timer = setTimeout(() => {
-      mountRetries.delete(id)
-      if (stopped) return
-      void sync(id, true).catch(() => {})
-    }, MOUNT_RETRY_DELAYS[count])
-    timer.unref?.()
-    mountRetries.set(id, { count: count + 1, timer })
-  }
+  const mountRetryScheduler = createMountRetryScheduler({
+    run: id => sync(id, true),
+    isStopped: () => stopped,
+  })
+  const clearMountRetry = id => mountRetryScheduler.clear(id)
+  const scheduleMountRetry = id => mountRetryScheduler.schedule(id)
 
   // Connectors that are not a single token (REST APIs with two keys, IMAP mailboxes) keep
   // their credentials in the same named secrets and mount through hooks the module brings.
