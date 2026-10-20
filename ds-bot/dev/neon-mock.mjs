@@ -1,17 +1,23 @@
 // A local Neon-shaped MCP server with its own OAuth authorization server, for acceptance
-// shots and black-box checks without a Neon account. It answers what the connector's OAuth
-// client discovers (protected-resource and authorization-server metadata), registers a public
-// client, approves the browser authorization by itself, and speaks enough MCP for a mount:
-// initialize, tools/list (the read tools plus write tools a wrong grant would expose) and
-// tools/call.
+// shots and for the QA baseline. It answers what the connector's OAuth client discovers
+// (protected-resource and authorization-server metadata), registers a public client,
+// approves the browser authorization by itself, and speaks enough MCP for a mount:
+// initialize, tools/list and tools/call.
+//
+// The catalog follows the published Neon tool names and the read-only query parameter:
+// `?readonly=true` lists only reads, a write grant gets the four P1 writes plus decoys that
+// a whitelist must drop. The debug endpoints exist only here, in dev/, never in the plugin.
 //
 // HTTPS with a self-signed certificate, because a connector address must be https. The DSH
 // the connector runs in is started with NODE_TLS_REJECT_UNAUTHORIZED=0 for the bench only.
 //
-//   node dev/neon-mock.mjs <port> [delay-ms]
+//   node dev/neon-mock.mjs <port> [approve-delay-ms]
 //
-// The delay (default 1200) is how long /authorize waits before sending the browser back, so a
-// screenshot can catch the card waiting for the browser.
+// Debug (dev-only, never shipped):
+//   GET  /debug/last-authorize   the query the authorization page was opened with
+//   GET  /debug/calls            every tools/list and tools/call the connector sent
+//   GET  /debug/dcr              dynamic client registrations served so far
+//   POST /debug/reset            clear the call log and counters
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:https'
@@ -40,8 +46,11 @@ const READ_TOOLS = [
   'list_slow_queries',
   'inspect_database',
 ]
-// What a read-only grant must hide, listed by the mock so a mount can be seen to drop them.
-const WRITE_TOOLS = ['create_project', 'delete_project', 'create_branch', 'delete_branch', 'run_sql_transaction', 'get_connection_string']
+// The four writes the write level must register, plus writes and a secret-bearing read a
+// whitelist has to drop even though the server offers them.
+const WRITE_TOOLS = ['create_branch', 'create_snapshot', 'delete_branch']
+const DECOY_TOOLS = ['update_branch', 'delete_project', 'get_connection_string', 'list_credentials', 'run_sql_transaction']
+const BRANCHES = [{ id: 'br-main', name: 'main', default: true }, { id: 'br-feature', name: 'feature-copy' }]
 
 const dir = mkdtempSync(join(tmpdir(), 'neon-mock-'))
 const key = join(dir, 'key.pem')
@@ -63,6 +72,8 @@ const bodyOf = async (req) => {
 const tool = name => ({ name, description: `Neon ${name}`, inputSchema: { type: 'object', properties: {} } })
 
 const codes = new Map()
+const debug = { authorize: null, calls: [], dcr: 0, tokens: 0 }
+const live = new Set()
 let issued = 0
 
 const metadata = {
@@ -84,9 +95,17 @@ const protectedResource = {
   bearer_methods_supported: ['header'],
 }
 
+// What one grant may see: a read-only grant lists the reads only; a write grant also lists
+// the writes and the decoys, so a mount that registers more than its whitelist is visible.
+const catalogOf = (readOnly) => readOnly
+  ? READ_TOOLS.map(tool)
+  : [...READ_TOOLS, ...WRITE_TOOLS, ...DECOY_TOOLS].map(tool)
+
 async function mcp(req, res) {
+  const url = new URL(req.url ?? '/', origin)
   const authorization = req.headers.authorization
-  if (authorization === undefined) {
+  const token = typeof authorization === 'string' ? authorization.replace(/^Bearer\s+/i, '') : ''
+  if (!live.has(token)) {
     res.writeHead(401, {
       'content-type': 'application/json',
       'www-authenticate': `Bearer realm="OAuth", resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp", scope="read write"`,
@@ -95,25 +114,44 @@ async function mcp(req, res) {
     return
   }
   const message = JSON.parse(await bodyOf(req))
-  const answer = (result) => {
-    res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'mock-session' })
-    res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }))
-  }
+  const readOnly = url.searchParams.get('readonly') === 'true'
   if (message.id === undefined) {
     res.writeHead(202)
     res.end()
     return
   }
+  const answer = (result) => {
+    res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'mock-session' })
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }))
+  }
   switch (message.method) {
     case 'initialize':
-      answer({ protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'neon-mock', version: '1' } })
+      answer({
+        protocolVersion: '2025-03-26',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'neon-mock', version: '1' },
+        ...(readOnly ? {} : { instructions: 'write grant' }),
+      })
       return
     case 'tools/list':
-      answer({ tools: [...READ_TOOLS, ...WRITE_TOOLS].map(tool) })
+      debug.calls.push({ kind: 'tools/list', readOnly, at: Date.now() })
+      answer({ tools: catalogOf(readOnly) })
       return
-    case 'tools/call':
-      answer({ content: [{ type: 'text', text: `mock ${message.params?.name} ${JSON.stringify(message.params?.arguments ?? {})}` }] })
+    case 'tools/call': {
+      const name = String(message.params?.name ?? '')
+      const args = message.params?.arguments ?? {}
+      debug.calls.push({ kind: 'tools/call', name, args, readOnly, at: Date.now() })
+      if (name === 'list_branches') {
+        answer({ content: [{ type: 'text', text: JSON.stringify({ branches: BRANCHES }) }] })
+        return
+      }
+      if (name === 'list_organizations') {
+        answer({ content: [{ type: 'text', text: JSON.stringify({ organizations: [{ id: 'org-1', name: 'Acme' }] }) }] })
+        return
+      }
+      answer({ content: [{ type: 'text', text: `mock ${name} ${JSON.stringify(args)}` }] })
       return
+    }
     default:
       res.writeHead(400, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'unknown method' } }))
@@ -128,11 +166,23 @@ const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }
   if (path === '/.well-known/oauth-authorization-server') return json(res, 200, metadata)
   if (path === '/register' && req.method === 'POST') {
     const request = JSON.parse(await bodyOf(req))
+    debug.dcr += 1
     return json(res, 201, { client_id: 'neon-mock-client', token_endpoint_auth_method: 'none', redirect_uris: request.redirect_uris })
   }
   if (path === '/authorize') {
     const redirectUri = url.searchParams.get('redirect_uri')
     if (redirectUri === null) return json(res, 400, { error: 'invalid_request' })
+    // A new authorization replaces the grant: tokens issued before it stop working.
+    live.clear()
+    debug.authorize = {
+      readonly: url.searchParams.getAll('readonly'),
+      categories: url.searchParams.getAll('category'),
+      projectId: url.searchParams.get('projectId'),
+      roleName: url.searchParams.get('roleName'),
+      scope: url.searchParams.get('scope'),
+      resource: url.searchParams.get('resource'),
+      at: Date.now(),
+    }
     const code = `code-${issued += 1}`
     codes.set(code, { redirectUri })
     setTimeout(() => {
@@ -148,22 +198,36 @@ const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }
       if (code === null || !codes.has(code)) return json(res, 400, { error: 'invalid_grant' })
       codes.delete(code)
     }
-    issued += 1
+    debug.tokens += 1
+    const access = `mock-access-${issued += 1}`
+    live.add(access)
     return json(res, 200, {
-      access_token: `mock-access-${issued}`,
-      refresh_token: `mock-refresh-${issued}`,
+      access_token: access,
+      refresh_token: `mock-refresh-${debug.tokens}`,
       token_type: 'Bearer',
       expires_in: 3600,
-      scope: 'read',
+      scope: 'read write',
     })
   }
   if (path === '/revoke' && req.method === 'POST') {
     await bodyOf(req)
+    live.clear()
     return json(res, 200, {})
+  }
+  // Dev-only observation endpoints; the plugin never calls these.
+  if (path === '/debug/last-authorize') return json(res, 200, debug.authorize)
+  if (path === '/debug/calls') return json(res, 200, debug.calls)
+  if (path === '/debug/dcr') return json(res, 200, { registrations: debug.dcr })
+  if (path === '/debug/reset' && req.method === 'POST') {
+    debug.calls = []
+    debug.dcr = 0
+    debug.tokens = 0
+    debug.authorize = null
+    return json(res, 200, { ok: true })
   }
   json(res, 404, { error: 'not_found' })
 })
 
 server.listen(port, '127.0.0.1', () => {
-  console.log(`neon mock: ${origin}/mcp  (authorize delay ${approveDelayMs} ms)`)
+  console.log(`neon mock: ${origin}/mcp  (authorize delay ${approveDelayMs} ms)  debug: ${origin}/debug/calls`)
 })
