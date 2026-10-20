@@ -27,7 +27,16 @@ export const GMAIL_TOOLS = ['gmail_list_folders', 'gmail_search', 'gmail_list_me
 // What the write level adds: the shared IMAP write session's mailbox tools and the shared
 // SMTP helper's send tools. Labels and archive wait for the shared core's label extension;
 // sending a draft is not part of this round.
-export const GMAIL_WRITE_TOOLS = ['gmail_mark_read', 'gmail_mark_unread', 'gmail_move_messages', 'gmail_delete_messages', 'gmail_save_draft']
+export const GMAIL_WRITE_TOOLS = [
+  'gmail_mark_read',
+  'gmail_mark_unread',
+  'gmail_move_messages',
+  'gmail_delete_messages',
+  'gmail_save_draft',
+  'gmail_add_labels',
+  'gmail_remove_labels',
+  'gmail_archive',
+]
 export const GMAIL_SEND_TOOLS = ['gmail_send_email', 'gmail_reply_email', 'gmail_forward_email']
 export const GMAIL_SMTP = { host: 'smtp.gmail.com', port: 465 }
 // What the card shows beside the line for each write: what changes and whether it can be
@@ -36,6 +45,9 @@ export const GMAIL_SMTP = { host: 'smtp.gmail.com', port: 465 }
 const GMAIL_APPROVAL_PREVIEW = {
   mark_read: { change: 'Changes the read flag only', reversible: true },
   mark_unread: { change: 'Changes the read flag only', reversible: true },
+  add_labels: { change: 'Only the named labels are added', reversible: true },
+  remove_labels: { change: 'Only the named labels are removed', reversible: true },
+  archive: { change: 'Removes the inbox label and keeps the message', reversible: true },
   move_messages: { change: 'Moves messages between folders', reversible: true },
   delete_messages: { change: 'Deletes messages; the default path keeps them restorable', reversible: true },
   save_draft: { change: 'Creates a draft, sends nothing', reversible: true },
@@ -98,12 +110,14 @@ export default {
   capabilities: [
     { key: 'read_mail', title: 'Read and search mail', description: 'List folders, search messages and read them without changing anything.', risk: 'read' },
     { key: 'mark_read', title: 'Mark mail read or unread', description: 'Change the read flag of up to 10 messages per call.', risk: 'write', preview: { change: 'Changes the read flag only', reversible: true } },
+    { key: 'label_mail', title: 'Add or remove labels', description: 'Apply existing labels to up to 10 messages per call; labels are never created.', risk: 'write', preview: { change: 'Only the named labels change', reversible: true } },
+    { key: 'archive_mail', title: 'Archive mail', description: 'Remove up to 10 messages from the inbox and keep them in All Mail.', risk: 'write', preview: { change: 'Removes the inbox label', reversible: true } },
     { key: 'save_draft', title: 'Save drafts', description: 'Store a draft in Gmail without sending it.', risk: 'write', preview: { change: 'Creates a draft, sends nothing', reversible: true } },
     { key: 'move_mail', title: 'Move mail', description: 'Move up to 10 messages to another folder.', risk: 'write', preview: { change: 'Moves messages between folders', reversible: true } },
     { key: 'delete_mail', title: 'Delete mail', description: 'Delete up to 10 messages per call, or permanently when the call asks for it.', risk: 'destructive', preview: { change: 'Deletes messages', reversible: true } },
     { key: 'send_mail', title: 'Send, reply and forward', description: 'Send mail as you, to at most 20 recipients per message; a send cannot be undone.', risk: 'destructive', preview: { change: 'Sends a message from your account', reversible: false } },
   ],
-  permissions: { summary: 'Reads your mail. With full capabilities it can mark, move and trash mail, save drafts, and send from your address.' },
+  permissions: { summary: 'Reads your mail. With full capabilities it can mark, label, archive, move and trash mail, save drafts, and send from your address.' },
   // The framework mounts the shared IMAP write tools and the shared SMTP tools at the
   // write level when a module opts in; the read tools stay in this module's mount.
   imap: { host: GMAIL_HOST, port: 993, mailbox: 'INBOX', gmail: true, write: true },
@@ -142,6 +156,7 @@ export default {
       host: GMAIL_HOST,
       port: 993,
       redact,
+      gmailLabels: true,
       approve: approveWrite,
       ...(connect === undefined ? {} : { connect }),
     })

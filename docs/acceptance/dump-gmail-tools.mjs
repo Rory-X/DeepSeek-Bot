@@ -22,9 +22,6 @@ process.stdout.write(`${JSON.stringify({
   levels: { default: gmail.defaultLevel, available: gmail.levels },
   tiers: { read, write },
   unregistered: [
-    // Waiting for the shared IMAP core's label extension: labels and archive.
-    'gmail_label',
-    'gmail_archive',
     // Read surface still to come: attachments.
     'gmail_list_attachments',
     'gmail_read_attachment',

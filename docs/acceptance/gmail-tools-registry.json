@@ -63,6 +63,18 @@
         "description": "Save a plain-text draft in Gmail without sending it (write; the user is asked first). Saving the same draft twice creates a second draft: this tool does not deduplicate."
       },
       {
+        "name": "gmail_add_labels",
+        "description": "Add Gmail labels to messages in a Gmail folder (write; the user is asked first)."
+      },
+      {
+        "name": "gmail_remove_labels",
+        "description": "Remove Gmail labels from messages in a Gmail folder (write; the user is asked first)."
+      },
+      {
+        "name": "gmail_archive",
+        "description": "Archive messages by removing the Inbox label, so they stay in All Mail (write; the user is asked first)."
+      },
+      {
         "name": "gmail_send_email",
         "description": "Send an email from the connected Gmail address. Every call asks for approval first; sending cannot be undone."
       },
@@ -77,8 +89,6 @@
     ]
   },
   "unregistered": [
-    "gmail_label",
-    "gmail_archive",
     "gmail_list_attachments",
     "gmail_read_attachment",
     "gmail_save_attachment",

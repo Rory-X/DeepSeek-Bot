@@ -373,16 +373,16 @@ test('the module declares a read default and the capabilities the write level ad
   assert.deepEqual(keys, [
     'read_mail',
     'mark_read',
+    'label_mail',
+    'archive_mail',
     'save_draft',
     'move_mail',
     'delete_mail',
     'send_mail',
   ])
-  // Labels and archive wait for the shared IMAP core's label extension; attachment reads
-  // and sending a draft are not part of this round.
-  for (const deferred of ['label_mail', 'archive_mail', 'read_attachments']) {
-    assert.equal(keys.includes(deferred), false, deferred)
-  }
+  // Attachment reads are the only read capability still to come; sending a draft is out
+  // of this round, and permanent/batch/settings never appear.
+  assert.equal(keys.includes('read_attachments'), false)
   for (const capability of gmail.capabilities) {
     assert.ok(['read', 'write', 'destructive'].includes(capability.risk), capability.key)
     assert.equal(typeof capability.title, 'string')
@@ -400,6 +400,8 @@ test('the module declares a read default and the capabilities the write level ad
   const capabilityTools = {
     read_mail: GMAIL_TOOLS,
     mark_read: ['gmail_mark_read', 'gmail_mark_unread'],
+    label_mail: ['gmail_add_labels', 'gmail_remove_labels'],
+    archive_mail: ['gmail_archive'],
     save_draft: ['gmail_save_draft'],
     move_mail: ['gmail_move_messages'],
     delete_mail: ['gmail_delete_messages'],
@@ -412,8 +414,10 @@ test('the module declares a read default and the capabilities the write level ad
   }
   // The summary tells the reader what the mounted tools do, and nothing else.
   const declarationText = [gmail.permissions.summary, ...gmail.capabilities.flatMap(capability => [capability.title, capability.description])].join(' ')
-  assert.doesNotMatch(declarationText, /label|archive|attachment/i)
+  assert.doesNotMatch(declarationText, /attachment/i)
   assert.match(gmail.permissions.summary, /mark/i)
+  assert.match(gmail.permissions.summary, /label/i)
+  assert.match(gmail.permissions.summary, /archive/i)
   assert.match(gmail.permissions.summary, /trash/i)
   assert.match(gmail.permissions.summary, /draft/i)
   assert.match(gmail.permissions.summary, /send/i)
