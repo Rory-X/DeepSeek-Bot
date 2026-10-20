@@ -39,7 +39,9 @@ test('stops trying when the check before a new try throws, and leaves the file a
 
 test('gives up at once on an error that waiting does not fix', async (t) => {
   const dir = folder(t)
-  const started = Date.now()
-  await assert.rejects(replaceFile(join(dir, 'missing.tmp'), join(dir, 'state.json')), { code: 'ENOENT' })
-  assert.ok(Date.now() - started < 40)
+  let waited = 0
+  await assert.rejects(replaceFile(join(dir, 'missing.tmp'), join(dir, 'state.json'), () => { waited += 1 }), { code: 'ENOENT' })
+  // The retry path is the only place that waits, so the check never running means the
+  // error came straight back. A wall-clock bound here only measured machine load.
+  assert.equal(waited, 0)
 })
