@@ -502,6 +502,11 @@ export function install(rt) {
   function mountRestTools(id) {
     const connector = options[id]
     const secrets = secretMapOf(connector)
+    // A REST write asks on the same card as any other write: the module's approval hook
+    // names the call, the framework redacts it and aims the card at the calling Session.
+    const approve = async ({ tool, args, summary, exec }) => {
+      await requireApproval(connector, tool, exec, summarise(summary, defaultApprovalLine(tool, args)))
+    }
     const dispose = []
     try {
       for (const tool of createRestTools(id, connector, {
@@ -509,12 +514,15 @@ export function install(rt) {
         secrets,
         output,
         redact: rt.redactSecrets,
+        level: levelOf(id),
+        approve,
       })) dispose.push(ctx.tools.register(tool))
     } catch (error) {
       for (const undo of dispose) undo()
       throw error
     }
-    return { token: credentialKeyOf(connector), dispose }
+    // The level is part of the mount key: a level change registers a different tool set.
+    return { token: `${credentialKeyOf(connector)}\u0002${levelOf(id)}`, dispose }
   }
 
   // A connector whose protocol the framework does not know mounts its own tools through
