@@ -89,13 +89,17 @@ export function approvalFor(name, args) {
         reversible: true,
       }
     }
-    case 'sub_issue_write':
+    case 'sub_issue_write': {
+      const child = args?.sub_issue_id
+      const hasChild = typeof child === 'number' || (typeof child === 'string' && child !== '')
+      const childText = hasChild ? `sub-issue ${child}` : 'a sub-issue'
       return {
-        line: `${method === 'remove' ? 'Remove' : method === 'reprioritize' ? 'Reorder' : 'Add'} sub-issue on ${text(issue, 'an issue')}`,
-        ...(issue === undefined ? {} : { target: issue }),
+        line: `${method === 'remove' ? 'Remove' : method === 'reprioritize' ? 'Reorder' : 'Add'} ${childText} on ${text(issue, 'an issue')}`,
+        ...(issue === undefined ? {} : { target: hasChild ? `${issue} + ${childText}` : issue }),
         change: method === 'remove' ? 'unlinks a sub-issue' : 'links or reorders a sub-issue',
         reversible: true,
       }
+    }
     case 'update_issue_comment':
       return {
         line: `Edit comment ${text(String(args?.comment_id ?? ''), 'on an issue')} in ${text(repo, 'a repository')}`,
@@ -138,15 +142,14 @@ export function approvalFor(name, args) {
       if (method === 'delete_pending') {
         return {
           line: `Delete the pending review on ${text(pull, 'a pull request')}`,
-          ...(pull === undefined ? {} : { target: pull }),
+          ...(pull === undefined ? {} : { target: `${pull} (${method})` }),
           change: 'deletes the pending review; this cannot be undone',
           reversible: false,
-          danger: true,
         }
       }
       return {
         line: `${method === 'submit_pending' ? 'Submit' : method === 'resolve_thread' ? 'Resolve' : method === 'unresolve_thread' ? 'Reopen' : 'Write'} a review on ${text(pull, 'a pull request')}`,
-        ...(pull === undefined ? {} : { target: pull }),
+        ...(pull === undefined ? {} : { target: method === '' ? pull : `${pull} (${method})` }),
         change: 'writes a review',
         reversible: true,
       }

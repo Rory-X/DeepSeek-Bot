@@ -256,9 +256,15 @@ test('the irreversible rows say what changes and where it could be undone', asyn
   await created.done()
 
   const deletePending = await showCard('pull_request_review_write', { owner: 'octo', repo: 'demo', pullNumber: 7, method: 'delete_pending' })
-  assert.deepEqual([deletePending.shown.reversible, deletePending.shown.danger], [false, true])
+  assert.deepEqual([deletePending.shown.reversible, deletePending.shown.danger], [false, undefined])
+  assert.equal(deletePending.shown.target, 'octo/demo#7 (delete_pending)')
   assert.match(deletePending.shown.change, /deletes the pending review/)
   await deletePending.done()
+
+  const subIssue = await showCard('sub_issue_write', { owner: 'octo', repo: 'demo', issue_number: 5, sub_issue_id: 99, method: 'remove' })
+  assert.equal(subIssue.shown.target, 'octo/demo#5 + sub-issue 99')
+  assert.ok(subIssue.shown.detail.includes('sub-issue 99'))
+  await subIssue.done()
 })
 
 test('per-method rows name the action and the object', async (t) => {
@@ -304,6 +310,31 @@ test('push_files exposes no force parameter and blocked tools are absent from th
   for (const name of BLOCKED_TOOLS) {
     assert.equal(READ_TOOLS.includes(name) || ACTION_TOOLS.includes(name), false, name)
   }
+})
+
+test('every blocked name is denied before it runs, without a card or a request', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = githubBench()
+  globalThis.fetch = bench.fetch
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const gate = ctx.listeners.get('tools/pre-execute').at(-1)
+  let passed = 0
+  const next = () => { passed += 1; return Promise.resolve({ kind: 'allow' }) }
+  for (const name of BLOCKED_TOOLS) {
+    for (const called of [name, `github_${name}`]) {
+      const denied = await gate({ name: called, arguments: {} }, next)
+      assert.equal(denied.kind, 'deny', called)
+      assert.match(denied.reason, /does not run/)
+    }
+  }
+  assert.equal(passed, 0)
+  assert.equal(await card(ctx), undefined)
+  assert.equal(bench.count(), 0)
+  // A name that is not blocked still reaches the tool.
+  assert.deepEqual(await gate({ name: 'github_get_me', arguments: {} }, next), { kind: 'allow' })
+  assert.equal(passed, 1)
 })
 
 test('the declared lists stay inside the server list, and the read ones skip sensitive names', () => {
