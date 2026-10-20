@@ -363,7 +363,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         capabilities.length > 0
           ? h('div', { className: 'bt-connector-setting' },
             h('div', { className: 'bt-connector-action-title' }, t('Capabilities')),
-            capWrites && currentLevel === 'read'
+            capWrites && currentLevel === 'read' && !writesLocked
               ? h('div', { className: 'bt-connector-hint' }, t('Capabilities that write open after switching to Can write.'))
               : null,
             h('ul', { className: 'bt-connector-caps' }, capabilities.map((entry, index) => {
