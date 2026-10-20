@@ -586,7 +586,7 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-connector-head{display:flex;align-items:center;gap:12px;min-width:0}
 .bt-connector-mark{flex:none;width:36px;height:36px;border-radius:10px;background:var(--bt-card);border:.5px solid var(--bt-line);display:flex;align-items:center;justify-content:center;color:var(--bt-ink)}
 .bt-connector-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.bt-connector-name{font-size:14px;line-height:20px;font-weight:500}
+.bt-connector-name{font-size:14px;line-height:20px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-connector-status{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-connector[data-state=ready] .bt-connector-status{color:var(--bt-ink-2)}
 .bt-connector[data-state=error] .bt-connector-status{color:var(--bt-danger);white-space:normal}
@@ -643,6 +643,28 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* A form with several credentials names each field above its masked box. */
 .bt-connector-field{display:flex;flex-direction:column;gap:4px}
 .bt-connector-field-name{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+/* Several instances of one module: each is a card of its own, the panel names the fields the
+   instance keeps, and one more instance is added from the bottom of the group. */
+.bt-connector-panel-inner{display:flex;flex-direction:column;gap:12px;min-width:0}
+.bt-connector-instance-grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;min-width:0}
+.bt-connector-instance-title{grid-column:1/-1}
+.bt-connector-instance-grid>.bt-connector-field{min-width:0}
+.bt-connector-instance-save{grid-column:1/-1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.bt-connector-remove{padding-top:10px;border-top:.5px solid var(--bt-line)}
+.bt-connector-remove-ask{display:flex;flex-direction:column;gap:8px}
+.bt-connector-remove .bt-connector-link-btn{color:var(--bt-danger)}
+.bt-connector-remove .bt-connector-link-btn:disabled{opacity:.4;cursor:default}
+.bt-connector-add{display:flex;flex-direction:column;gap:6px;padding:12px;min-width:0}
+.bt-connector-add-btn{display:flex;align-items:center;gap:8px;width:100%;min-height:40px;box-sizing:border-box;padding:0 12px;border:.5px dashed var(--bt-line-2);border-radius:10px;background:none;color:var(--bt-ink-2);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
+.bt-connector-add-btn:hover{background:var(--bt-hover)}
+.bt-connector-add-btn:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-connector-add-btn:disabled{opacity:.4;cursor:default}
+.bt-connector-add-plus{display:inline-flex;flex:none;color:var(--bt-ink-3)}
+.bt-connector-add .bt-connector-error{padding-left:0}
+/* A wide settings panel lays the instance fields out two by two; a phone keeps one column. */
+@media (min-width:900px){
+.bt-connector-instance-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
 
 /* Shell chrome reshaped for the team view. Selectors use stable data attributes where the
    shell offers them and CSS-module name suffixes elsewhere. */
