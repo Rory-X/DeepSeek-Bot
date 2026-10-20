@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { apply } from '../index.js'
-import { signIn } from '../src/host/connectors.js'
+import { createConnectorHost, signIn } from '../src/host/connectors.js'
 import { fakeContext } from './fake-ctx.js'
 import { fakeCredentials, fakeOAuthServer, fakeResponse, fakeWebServer } from './oauth-fakes.js'
 
@@ -991,4 +991,306 @@ test('a blocked tool name is denied before a card or a request', async (t) => {
   // A normal GitHub tool is not affected, and no approval card was made for either.
   assert.equal((await gateFor('github_list_issues')).result, undefined)
   assert.equal((await call(ctx, 'state', {})).value.questions.m1, undefined)
+})
+
+// ---------------------------------------------------------------------------------------
+// Multi-instance connectors. The plugin's own modules are tested above; these cases pin the
+// framework rules every multi-instance connector shares, on a definition the test owns.
+
+function demoDefinition(overrides = {}) {
+  return {
+    displayName: 'Demo',
+    mode: 'oauth-mcp',
+    levels: ['read', 'write'],
+    defaultLevel: 'read',
+    mcpUrl: 'https://mcp.demo.test/mcp',
+    readTools: ['ping', 'pong'],
+    oauth: { scopes: ['read'] },
+    settings: [{ name: 'label', label: 'Name' }, { name: 'projectId', label: 'Project ID' }],
+    instances: { prefix: 'demo', min: 1, max: 2 },
+    ...overrides,
+  }
+}
+
+const DEMO_TOOL_LIST = ['ping', 'pong'].map(name => ({ name, description: `Demo ${name}`, inputSchema: { type: 'object', properties: {} } }))
+
+// One fake Demo MCP server: it lists the whitelist and records the token each call carries.
+function demoBench() {
+  const calls = []
+  const fetch = async (url, init = {}) => {
+    assert.equal(String(url), 'https://mcp.demo.test/mcp')
+    const body = JSON.parse(init.body)
+    calls.push({ method: body.method, name: body.params?.name, authorization: init.headers?.authorization })
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Demo', version: '1' } })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: DEMO_TOOL_LIST })
+    if (body.method === 'tools/call') return mcpAnswer(body.id, { content: [{ type: 'text', text: `ran ${body.params.name}` }] })
+    throw new Error(`unexpected method ${body.method}`)
+  }
+  return { calls, fetch }
+}
+
+const demoGrant = (access, { level = 'read' } = {}) => ({
+  version: 1,
+  client: { id: `client-${access}`, redirectUri: 'https://dsh.test/oauth/ds-bot/demo' },
+  resource: 'https://mcp.demo.test/mcp',
+  tokens: { access, refresh: `refresh-${access}`, expiresAt: Date.now() + 3_600_000 },
+  scopes: level === 'write' ? ['read', 'write'] : ['read'],
+  level,
+})
+
+// A connector host on its own definitions, so an instance case never depends on which
+// modules happen to live under src/host/connectors.
+function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), extraDefinitions = {}, config = {}, grants = {} } = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'dsb-connector-instances-'))
+  const statePath = join(home, 'state.json')
+  writeFileSync(statePath, JSON.stringify(state))
+  const credentials = fakeCredentials()
+  for (const [id, grant] of Object.entries(grants)) credentials.records.set(`ds-bot/connector-${id}`, { kind: 'grant', payload: grant })
+  const webServer = fakeWebServer()
+  const ctx = fakeContext({ services: { credentials, webServer } })
+  const audit = []
+  const registered = []
+  const disposed = []
+  const register = ctx.tools.register
+  ctx.tools.register = (tool) => {
+    registered.push(tool.name)
+    const undo = register(tool)
+    return () => { disposed.push(tool.name); undo() }
+  }
+  const rt = {
+    ctx,
+    state,
+    config,
+    home,
+    statePath,
+    warn: () => {},
+    redactSecrets: text => String(text),
+    readOnly: () => undefined,
+    save: async () => { writeFileSync(statePath, JSON.stringify(state)) },
+    loadSecrets: async () => {},
+    secretValue: () => undefined,
+    secretEndpoint: async () => {},
+    diagnostics: { record: entry => audit.push(entry) },
+    selfOf: () => 'm1',
+    botOf: () => ({ name: 'Chief' }),
+  }
+  const host = createConnectorHost(rt, { demo: definition, ...extraDefinitions })
+  Object.assign(rt, host)
+  return { rt, ctx, home, statePath, credentials, webServer, audit, registered, disposed, host }
+}
+
+const rowOf = (rt, id) => rt.connectorsView().find(row => row.id === id)
+
+test('a multi-instance connector gives each instance its own row, grant and tools', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const state = {
+    connectors: {
+      demo: { level: 'read', settings: { projectId: 'proj-a' }, authorizedAt: 1 },
+      'demo-2': { level: 'read', settings: { projectId: 'proj-b' }, authorizedAt: 2 },
+    },
+  }
+  const { ctx, rt, home, registered } = hostSetup({ state, grants: { demo: demoGrant('access-a'), 'demo-2': demoGrant('access-b') } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  await until(async () => (['demo', 'demo-2'].every(id => rowOf(rt, id)?.state === 'ready') ? true : undefined), 'both instances to mount')
+  const rows = rt.connectorsView()
+  assert.deepEqual(rows.map(row => row.id), ['demo', 'demo-2'])
+  assert.deepEqual(rows.map(row => row.name), ['Demo', 'Demo 2'])
+  assert.deepEqual(rows.map(row => row.instance), [
+    { base: 'demo', id: 'demo', label: 'Demo' },
+    { base: 'demo', id: 'demo-2', label: 'Demo 2' },
+  ])
+  assert.deepEqual(rows.map(row => row.settings.find(field => field.name === 'projectId').value), ['proj-a', 'proj-b'])
+  // Each instance mounted with its own grant and registered its own prefixed tools.
+  assert.deepEqual([...registered].sort(), ['demo-2_ping', 'demo-2_pong', 'demo_ping', 'demo_pong'])
+  await ctx.registeredTools.get('demo_ping').execute({})
+  await ctx.registeredTools.get('demo-2_ping').execute({})
+  const calls = bench.calls.filter(call => call.method === 'tools/call').map(call => call.authorization)
+  assert.deepEqual(calls, ['Bearer access-a', 'Bearer access-b'])
+  // Neither instance's token reaches the view or the team file.
+  assert.ok(!JSON.stringify(rows).includes('access-a'))
+  assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes('access-a'))
+})
+
+test('a saved single-instance authorization becomes the default instance without a rewrite', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const state = { revision: 3, connectors: { demo: { level: 'write', settings: { projectId: 'proj-1', roleName: 'app' }, account: 'acme', authorizedAt: 9 } } }
+  const { ctx, rt, home, statePath, credentials } = hostSetup({ state, grants: { demo: demoGrant('access-a', { level: 'write' }) } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const before = readFileSync(statePath, 'utf8')
+
+  await until(async () => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the default instance to mount')
+  const rows = rt.connectorsView()
+  assert.equal(rows.length, 1)
+  assert.deepEqual([rows[0].id, rows[0].name, rows[0].level, rows[0].instance], ['demo', 'Demo', 'write', { base: 'demo', id: 'demo', label: 'Demo' }])
+  assert.deepEqual(rows[0].settings.find(field => field.name === 'projectId').value, 'proj-1')
+  // The old grant mounts the old instance, and nothing was rewritten or re-authorized.
+  await ctx.registeredTools.get('demo_ping').execute({})
+  assert.equal(bench.calls.find(call => call.method === 'tools/call').authorization, 'Bearer access-a')
+  assert.equal(readFileSync(statePath, 'utf8'), before)
+  assert.deepEqual(credentials.records.get('ds-bot/connector-demo').payload.level, 'write')
+  assert.equal(credentials.records.size, 1)
+})
+
+test('creating, renaming and removing an instance never authorizes it and never reuses its id', async (t) => {
+  const { ctx, rt, home, credentials, audit, registered, disposed } = hostSetup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  // A team that never configured the connector still has its first instance, off.
+  assert.deepEqual(rt.connectorsView().map(row => row.id), ['demo'])
+
+  const created = await rt.connectorEndpoint('connector-create-instance', { base: 'demo' })
+  assert.deepEqual(created.map(row => row.id), ['demo', 'demo-2'])
+  const added = created[1]
+  assert.deepEqual([added.name, added.state, added.level, added.instance], ['Demo 2', 'off', 'read', { base: 'demo', id: 'demo-2', label: 'Demo 2' }])
+  assert.deepEqual(rt.state.connectors['demo-2'], { level: 'read', settings: {} })
+  // No authorization was started and no tool was mounted for the new instance.
+  assert.equal(credentials.records.has('ds-bot/connector-demo-2'), false)
+  assert.ok(!registered.some(name => name.startsWith('demo-2_')))
+  assert.match(audit.at(-1).text, /Demo instance demo-2 added as "Demo 2"/)
+
+  const renamed = await rt.connectorEndpoint('connector-set-settings', { id: 'demo-2', values: { label: 'Staging', projectId: 'proj-b' } })
+  const renamedRow = renamed.find(row => row.id === 'demo-2')
+  assert.deepEqual([renamedRow.name, renamedRow.instance.label], ['Staging', 'Staging'])
+  assert.deepEqual(rt.state.connectors['demo-2'].settings, { label: 'Staging', projectId: 'proj-b' })
+
+  const removed = await rt.connectorEndpoint('connector-delete-instance', { id: 'demo-2' }, { origin: 'https://dsh.test' })
+  assert.deepEqual(removed.map(row => row.id), ['demo'])
+  assert.equal(rt.state.connectors['demo-2'], undefined)
+  assert.deepEqual(disposed, [])
+  assert.match(audit.at(-1).text, /Demo instance demo-2 \("Staging"\) removed from https:\/\/dsh\.test/)
+
+  // The id is not reused: the next instance is demo-3, and the high-water mark is saved.
+  const again = await rt.connectorEndpoint('connector-create-instance', { base: 'demo' })
+  assert.deepEqual(again.map(row => row.id), ['demo', 'demo-3'])
+  assert.equal(rt.state.connectorInstances.demo.next, 4)
+
+  // The base instance may go while another stays; the list is the state keys, not a name.
+  const withoutBase = await rt.connectorEndpoint('connector-delete-instance', { id: 'demo' })
+  assert.deepEqual(withoutBase.map(row => row.id), ['demo-3'])
+  const fourth = await rt.connectorEndpoint('connector-create-instance', { base: 'demo' })
+  assert.deepEqual(fourth.map(row => row.id), ['demo-3', 'demo-4'])
+  const last = await rt.connectorEndpoint('connector-delete-instance', { id: 'demo-4' })
+  assert.deepEqual(last.map(row => row.id), ['demo-3'])
+  // The last instance cannot be removed.
+  await assert.rejects(rt.connectorEndpoint('connector-delete-instance', { id: 'demo-3' }), /keeps at least 1 instance/)
+})
+
+test('a new instance skips an id another connector module already uses', async (t) => {
+  const { ctx, rt, home } = hostSetup({
+    extraDefinitions: { 'demo-2': { displayName: 'Other', mode: 'oauth-mcp', levels: ['read'], defaultLevel: 'read', mcpUrl: 'https://other.test/mcp', readTools: ['ping'], oauth: { scopes: ['read'] } } },
+  })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const created = await rt.connectorEndpoint('connector-create-instance', { base: 'demo' })
+  // demo-2 belongs to another module, so the framework's instance starts at demo-3.
+  assert.deepEqual(created.map(row => row.id), ['demo', 'demo-2', 'demo-3'])
+  assert.equal(rowOf(rt, 'demo-2').instance, undefined)
+  assert.deepEqual(rowOf(rt, 'demo-3').instance, { base: 'demo', id: 'demo-3', label: 'Demo 3' })
+})
+
+test('two instance creations queue behind each other and the limit holds', async (t) => {
+  const { ctx, rt, home } = hostSetup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const attempted = await Promise.allSettled([
+    rt.connectorEndpoint('connector-create-instance', { base: 'demo' }),
+    rt.connectorEndpoint('connector-create-instance', { base: 'demo' }),
+  ])
+  assert.equal(attempted.filter(result => result.status === 'fulfilled').length, 1)
+  assert.match(attempted.find(result => result.status === 'rejected').reason.message, /at most 2 instances/)
+  assert.deepEqual(rt.connectorsView().map(row => row.id), ['demo', 'demo-2'])
+})
+
+test('removing one instance clears only its own grant and tools', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const state = {
+    connectors: {
+      demo: { level: 'read', settings: { projectId: 'proj-a' }, authorizedAt: 1 },
+      'demo-2': { level: 'read', settings: { projectId: 'proj-b' }, authorizedAt: 2 },
+    },
+  }
+  const { ctx, rt, home, credentials, disposed } = hostSetup({
+    state,
+    grants: { demo: demoGrant('access-a'), 'demo-2': demoGrant('access-b') },
+    extraDefinitions: { single: { displayName: 'Single', mode: 'oauth-mcp', levels: ['read'], defaultLevel: 'read', mcpUrl: 'https://single.test/mcp', readTools: ['ping'], oauth: { scopes: ['read'] } } },
+  })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => (['demo', 'demo-2'].every(id => rowOf(rt, id)?.state === 'ready') ? true : undefined), 'both instances to mount')
+
+  // The provider cannot be asked to revoke: the local removal still completes.
+  globalThis.fetch = async () => ({ status: 404, ok: false, headers: { get: () => null }, text: async () => '' })
+  const removed = await rt.connectorEndpoint('connector-delete-instance', { id: 'demo-2' })
+  assert.deepEqual(removed.filter(row => row.id.startsWith('demo')).map(row => row.id), ['demo'])
+  assert.equal(credentials.records.has('ds-bot/connector-demo-2'), false)
+  assert.equal(credentials.records.has('ds-bot/connector-demo'), true)
+  assert.deepEqual([...disposed].sort(), ['demo-2_ping', 'demo-2_pong'])
+  assert.deepEqual(rt.state.connectors.demo.settings, { projectId: 'proj-a' })
+  assert.equal(rowOf(rt, 'demo').state, 'ready')
+
+  // A single-instance connector has no instance endpoints at all.
+  await assert.rejects(rt.connectorEndpoint('connector-create-instance', { base: 'single' }), /does not support more than one instance/)
+  await assert.rejects(rt.connectorEndpoint('connector-delete-instance', { id: 'single' }), /single instance and cannot be removed/)
+})
+
+test('an instance without a grant does not borrow another instance grant', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const state = {
+    connectors: {
+      demo: { level: 'read', settings: {} },
+      'demo-2': { level: 'read', settings: {}, authorizedAt: 1 },
+    },
+  }
+  const { ctx, rt, home, registered } = hostSetup({ state, grants: { 'demo-2': demoGrant('access-b') } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  await until(async () => (rowOf(rt, 'demo-2')?.state === 'ready' ? true : undefined), 'the authorized instance to mount')
+  assert.deepEqual([rowOf(rt, 'demo').state, rowOf(rt, 'demo-2').state], ['off', 'ready'])
+  assert.deepEqual([...registered].sort(), ['demo-2_ping', 'demo-2_pong'])
+  assert.equal(ctx.registeredTools.get('demo_ping'), undefined)
+})
+
+test('a new instance authorizes through its own callback and keeps its own grant', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const oauth = fakeOAuthServer({ resource: 'https://mcp.demo.test/mcp', issuer: 'https://mcp.demo.test' })
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url) !== 'https://mcp.demo.test/mcp' || init.headers?.authorization === undefined) return oauth.fetch(url, init)
+    const body = JSON.parse(init.body)
+    if (body.method === 'initialize') return mcpAnswer(body.id, { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'Demo', version: '1' } })
+    if (body.method === 'notifications/initialized') return emptyAnswer()
+    if (body.method === 'tools/list') return mcpAnswer(body.id, { tools: DEMO_TOOL_LIST })
+    if (body.method === 'tools/call') return mcpAnswer(body.id, { content: [{ type: 'text', text: `ran ${body.params.name}` }] })
+    throw new Error(`unexpected method ${body.method}`)
+  }
+  const { ctx, rt, home, credentials, webServer } = hostSetup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.connectorEndpoint('connector-create-instance', { base: 'demo' })
+
+  const started = await rt.connectorEndpoint('connector-oauth-start', { id: 'demo-2' }, { origin: 'https://dsh.test' })
+  const authorizeUrl = new URL(started.authorizeUrl)
+  assert.equal(authorizeUrl.searchParams.get('redirect_uri'), 'https://dsh.test/oauth/ds-bot/demo-2')
+  const { res, done } = fakeResponse()
+  webServer.routes[0].handler({ method: 'GET', url: `/oauth/ds-bot/demo-2?code=auth-code&state=${encodeURIComponent(authorizeUrl.searchParams.get('state'))}` }, res)
+  assert.equal((await done).statusCode, 200)
+  await until(async () => (rowOf(rt, 'demo-2')?.state === 'ready' ? true : undefined), 'the new instance to mount')
+
+  // The grant is addressed by instance id, and the default instance never authorized.
+  assert.deepEqual([...credentials.records.keys()], ['ds-bot/connector-demo-2'])
+  assert.deepEqual(credentials.records.get('ds-bot/connector-demo-2').payload.tokens.access, 'access-1')
+  assert.equal(rowOf(rt, 'demo').state, 'off')
+  assert.deepEqual([...ctx.registeredTools.keys()].filter(name => name.startsWith('demo-2_')).sort(), ['demo-2_ping', 'demo-2_pong'])
+  assert.ok(ctx.registeredTools.get('demo_ping') === undefined)
+  assert.ok(!JSON.stringify(rt.connectorsView()).includes('access-1'))
+  assert.ok(!readFileSync(join(home, 'state.json'), 'utf8').includes('access-1'))
 })
