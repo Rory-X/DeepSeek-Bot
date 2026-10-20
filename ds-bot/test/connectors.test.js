@@ -1328,7 +1328,7 @@ test('instance changes queue behind each other and stay on their own instance', 
       'demo-2': { level: 'read', settings: { projectId: 'proj-b' }, authorizedAt: 2 },
     },
   }
-  const { ctx, rt, home, credentials } = hostSetup({ state, grants: { demo: demoGrant('access-a'), 'demo-2': demoGrant('access-b') } })
+  const { ctx, rt, home, credentials, audit } = hostSetup({ state, grants: { demo: demoGrant('access-a'), 'demo-2': demoGrant('access-b') } })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await until(async () => (['demo', 'demo-2'].every(id => rowOf(rt, id)?.state === 'ready') ? true : undefined), 'both instances to mount')
 
@@ -1347,6 +1347,8 @@ test('instance changes queue behind each other and stay on their own instance', 
   // grant; the rename kept the other instance's grant and remounted it.
   assert.deepEqual([...credentials.records.keys()], ['ds-bot/connector-demo-2'])
   assert.equal(rowOf(rt, 'demo-2').state, 'ready')
+  // The implicit disconnect caused by the level change is audited with the instance id.
+  assert.ok(audit.some(entry => entry.source === 'connector-disconnected' && entry.text.includes('Demo (demo)')), JSON.stringify(audit))
 
   // A removal racing a settings change: the queue decides the order, and the loser hears a
   // clean "No such connector" instead of resurrecting the instance.
@@ -1454,4 +1456,92 @@ test('an approval outcome is audited with the instance id and never the argument
   assert.ok(!JSON.stringify(audit).includes('select secret_value'))
   assert.ok(!JSON.stringify(audit).includes('access-b'))
   assert.deepEqual(rt.state.questions, {})
+})
+
+test('an instance that appears after the host started is adopted and mounted', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const { ctx, rt, home, credentials, registered } = hostSetup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  // The team file is adopted lazily on the first read, after this host installed: both the
+  // implied instance and the saved ones have to end up on the page with their grants.
+  rt.state.connectors = {
+    demo: { level: 'read', settings: { projectId: 'proj-a' }, authorizedAt: 1 },
+    'demo-2': { level: 'read', settings: { projectId: 'proj-b' }, authorizedAt: 2 },
+  }
+  credentials.records.set('ds-bot/connector-demo', { kind: 'grant', payload: demoGrant('access-a') })
+  credentials.records.set('ds-bot/connector-demo-2', { kind: 'grant', payload: demoGrant('access-b') })
+
+  assert.deepEqual(rt.connectorsView().map(row => row.id), ['demo', 'demo-2'])
+  await until(async () => (['demo', 'demo-2'].every(id => rowOf(rt, id)?.state === 'ready') ? true : undefined), 'the adopted instances to mount')
+  assert.deepEqual([...registered].sort(), ['demo-2_ping', 'demo-2_pong', 'demo_ping', 'demo_pong'])
+  // A second read does not add or remount anything.
+  assert.deepEqual(rt.connectorsView().map(row => row.id), ['demo', 'demo-2'])
+  assert.equal(registered.length, 4)
+})
+
+test('switching to a level that is not ready is refused before the grant is touched', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const definition = demoDefinition({
+    readiness: ({ level, settings }) => (level === 'write' && (typeof settings.projectId !== 'string' || typeof settings.roleName !== 'string')
+      ? 'A project id and a SQL role are required for write access'
+      : undefined),
+  })
+  const state = { connectors: { demo: { level: 'read', settings: {}, authorizedAt: 1 } } }
+  const { ctx, rt, home, credentials } = hostSetup({ state, definition, grants: { demo: demoGrant('access-a') } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the read instance to mount')
+
+  // The level is not usable yet: the refusal comes before any disconnect or state write.
+  await assert.rejects(rt.connectorEndpoint('connector-set-level', { id: 'demo', level: 'write' }), /project id and a SQL role/)
+  const unchanged = rowOf(rt, 'demo')
+  assert.deepEqual([unchanged.level, unchanged.state], ['read', 'ready'])
+  assert.deepEqual(rt.state.connectors.demo.settings, {})
+  assert.equal(credentials.records.has('ds-bot/connector-demo'), true)
+  // The view names every level that is not usable so the client can disable it first.
+  assert.match(unchanged.levelNotes.write, /project id and a SQL role/)
+  assert.equal(unchanged.levelNotes.read, undefined)
+
+  // The authorization for the same unready level is refused too.
+  await rt.connectorEndpoint('connector-create-instance', { base: 'demo' })
+  await assert.rejects(
+    rt.connectorEndpoint('connector-oauth-start', { id: 'demo-2', level: 'write' }, { origin: 'https://dsh.test' }),
+    /project id and a SQL role/,
+  )
+  assert.equal(credentials.records.has('ds-bot/connector-demo-2'), false)
+})
+
+test('renaming an instance keeps its grant while a grant setting change drops it', async (t) => {
+  const realFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bench = demoBench()
+  globalThis.fetch = bench.fetch
+  const state = { connectors: { demo: { level: 'read', settings: { projectId: 'proj-a' }, authorizedAt: 1 } } }
+  // A real OAuth connector brings an `authorize` hook; it is what makes a settings change
+  // count against the stored grant.
+  const definition = demoDefinition({ authorize: () => ({ url: 'https://mcp.demo.test/mcp', scopes: ['read'] }) })
+  const { ctx, rt, home, credentials } = hostSetup({ state, definition, grants: { demo: demoGrant('access-a') } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(async () => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the instance to mount')
+
+  // A rename is display-only: the authorization and the mount stay.
+  const renamed = await rt.connectorEndpoint('connector-set-settings', { id: 'demo', values: { label: 'Prod', projectId: 'proj-a' } })
+  const renamedRow = renamed.find(row => row.id === 'demo')
+  assert.deepEqual([renamedRow.name, renamedRow.needsReauth], ['Prod', undefined])
+  assert.equal(credentials.records.has('ds-bot/connector-demo'), true)
+  assert.equal(rt.state.connectors.demo.needsReauth, undefined)
+  await until(async () => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the renamed instance to be ready again')
+
+  // The project id feeds the grant: changing it asks for a new authorization and clears
+  // only this instance's grant.
+  const changed = await rt.connectorEndpoint('connector-set-settings', { id: 'demo', values: { label: 'Prod', projectId: 'proj-b' } })
+  const changedRow = changed.find(row => row.id === 'demo')
+  assert.deepEqual([changedRow.name, changedRow.needsReauth], ['Prod', true])
+  assert.equal(credentials.records.has('ds-bot/connector-demo'), false)
+  assert.deepEqual(rt.state.connectors.demo.settings, { label: 'Prod', projectId: 'proj-b' })
 })
