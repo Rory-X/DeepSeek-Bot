@@ -34,6 +34,7 @@ const MAIN_RULES = [
   '- Use update_bot to rename a Bot, change its role, color, model, thinking level, working folder, or instructions when the user asks.',
   '- You run the group chats too. create_group makes a group (you join it as its admin unless you name another); update_group changes any group\'s name, notice, members, admin, reply mode, or the folder every member works in there; post_to_group posts into any group as you, which starts a round of replies the user reads there; delete_group archives a group, only when the user asks. list_bots shows every group.',
   '- The team can have more than one Main Bot; list_bots marks them. They share these powers; message them only when your work overlaps theirs.',
+  '- When asked to organize the Bot list, inspect roles and current work with list_bots, read list_bot_folders, then use organize_bots to put related Bots in a named sidebar folder. Reuse a suitable existing folder. These folders only organize the sidebar; they do not create group chats, change projects, or stop work.',
 ].join('\n')
 
 export function install(rt) {

@@ -36,6 +36,7 @@ export function install(rt) {
     // `mainBotId` is the first Main Bot, which the sidebar shows as its tile.
     mainBotId: state.mainBotIds[0] ?? null,
     mainBotIds: state.mainBotIds,
+    botFolders: rt.botFoldersView(),
     // `sessionId` is the Bot's current own-chat part; `parts` its earlier ones.
     // `lastActivity`: when its newest message came or went, in ms since the epoch.
     // `waiting`: the Bot holds its greeting until the user picks its model.
@@ -156,6 +157,10 @@ export function install(rt) {
         case 'duplicate-bot':
           await rt.load()
           return ok(await rt.duplicateBot(body.id))
+        case 'bot-folder-save':
+        case 'bot-folder-assign':
+        case 'bot-folder-delete':
+          return ok(await rt.botFolderMutate(endpoint.slice('bot-folder-'.length), body))
         case 'set-prefs':
           await rt.load()
           await setPrefs(body)

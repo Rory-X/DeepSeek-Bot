@@ -95,6 +95,7 @@ export function NewChat({ mode, roster, actions }) {
   const options = []
   if (!group && picked.length === 0 && mode !== 'search' && wanted === '') {
     options.push({ key: 'new', icon: h(PlusIcon), label: t('Create new Bot'), run: createBot })
+    options.push({ key: 'folders', icon: h(PlusIcon), label: t('Organize Bots'), run: () => actions.openBotFolders() })
     options.push({ key: 'group', icon: h(PeopleIcon), label: t('Create group chat'), run: () => { setGroup(true); setCursor(0); inputRef.current?.focus() } })
     // A team holds at most one DSH Agent; the entry exists only while there is none.
     if ((roster.agents ?? []).length === 0 && actions.addAgent) {

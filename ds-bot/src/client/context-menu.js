@@ -35,6 +35,8 @@ export function ContextMenu({ menu, roster, actions, leaving = false }) {
     [
       bot ? [t('Rename Bot'), PencilIcon, () => actions.renameBot(bot.id)] : null,
       bot ? [t('Edit Bot'), GearIcon, () => actions.openSettings('bots', bot.id)] : null,
+      bot && !isTile ? [t('Move to folder…'), GearIcon, () => actions.openBotFolders({ botId: bot.id })] : null,
+      bot && (roster.botFolders ?? []).some(folder => folder.botIds.includes(bot.id)) ? [t('Remove from folder'), HideIcon, () => actions.ungroupBot(bot.id)] : null,
       room ? [t('Group settings'), GearIcon, () => actions.openSettings('groups', room.id)] : null,
       room ? [t('Rename group'), PencilIcon, () => actions.renameBot(room.id)] : null,
       bot ? [t('Duplicate'), DuplicateIcon, async () => { const copy = await actions.duplicateBot(bot.id); actions.openSession(copy.id) }] : null,
