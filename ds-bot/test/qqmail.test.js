@@ -85,6 +85,13 @@ test('the connector is one read-only IMAP module the registry can load', async (
   assert.equal(typeof qqmail.verify, 'function')
   assert.equal(typeof qqmail.mount, 'function')
   assert.deepEqual(qqmail.credentials.map(field => field.name), ['QQMAIL_ADDRESS', 'QQMAIL_AUTH_CODE'])
+  // The client reads the card's copy from `card`; top-level copy would not be shown.
+  assert.deepEqual(Object.keys(qqmail.card).sort(), ['about', 'docsUrl', 'glyph', 'readOnlyNote'])
+  assert.equal(qqmail.card.glyph, 'qqmail')
+  assert.match(qqmail.card.about, /Read your QQ Mail inbox over IMAP/)
+  assert.match(qqmail.card.readOnlyNote, /Read-only/)
+  assert.match(qqmail.card.docsUrl, /^https:\/\/service\.mail\.qq\.com\//)
+  for (const field of ['glyph', 'about', 'readOnlyNote', 'docsUrl']) assert.equal(qqmail[field], undefined)
   // The two fields are checked before anything is saved: a missing code is refused at once.
   await assert.rejects(qqmail.verify({ secrets: { QQMAIL_ADDRESS: 'user@qq.com' } }), /authorization code is missing/)
   await assert.rejects(qqmail.verify({ values: { QQMAIL_ADDRESS: 'user@qq.com' } }), /authorization code is missing/)

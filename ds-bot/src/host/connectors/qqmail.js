@@ -49,10 +49,14 @@ export default {
   ],
   accountField: 'account',
   readOnly: true,
-  glyph: 'qqmail',
-  about: 'Read your QQ Mail inbox over IMAP: list folders, search, and read messages. Sending is not part of this connector.',
-  readOnlyNote: 'Read-only: opens the mailbox with EXAMINE and fetches bodies with BODY.PEEK, so reading a mail here never marks it as read. It never sends, deletes or moves a message.',
-  docsUrl: 'https://service.mail.qq.com/',
+  // The settings card reads its copy from `card`, not from top-level fields: the mark, the
+  // one-line about, the read-only note and the help link all live here together.
+  card: {
+    glyph: 'qqmail',
+    about: 'Read your QQ Mail inbox over IMAP: list folders, search, and read messages. Sending is not part of this connector.',
+    readOnlyNote: 'Read-only: opens the mailbox with EXAMINE and fetches bodies with BODY.PEEK, so reading a mail here never marks it as read. It never sends, deletes or moves a message.',
+    docsUrl: 'https://service.mail.qq.com/',
+  },
   // Checked once, when the card saves the credentials: a login that opens INBOX read-only.
   // The address comes from the first field; only the code is a secret. The framework hands
   // the saved form over as `secrets`; `values` is accepted too so a caller may pass either.
