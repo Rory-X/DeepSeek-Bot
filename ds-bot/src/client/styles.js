@@ -601,18 +601,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
 .bt-connector-input{flex:1 1 auto;min-width:0;border:0;background:none;color:inherit;font:inherit;font-size:13px;outline:none;padding:0}
 .bt-connector-hint{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
-/* The access choice on the authorization page: a quiet accent panel under the card's row,
-   with the acknowledgement that arms the first Connect press. */
-.bt-connector-scope{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--bt-accent) 7%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 26%,transparent);animation:bt-veil-in .18s ease-out}
-.bt-connector-scope-title{font-size:12px;line-height:17px;font-weight:600}
-.bt-connector-scope-body{font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
-.bt-connector-consent{display:flex;align-items:flex-start;gap:8px;min-height:32px;padding:3px 0 1px;font-size:12px;line-height:17px;cursor:pointer}
-.bt-connector-check{flex:none;width:16px;height:16px;margin:0.5px 0 0;accent-color:var(--bt-accent);cursor:pointer}
-@media (prefers-reduced-motion:reduce){.bt-connector-scope{animation:none}}
 .bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
-/* What a connector says about itself: a quiet panel for a read-only grant, and a docs link. */
-.bt-connector-readonly{padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-accent) 6%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 22%,transparent);font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
 .bt-connector-docs{padding-left:48px;font-size:12px;line-height:16px}
 /* A notification connector keeps its chat id beside the connection, under the head. */
 .bt-connector-chat{display:flex;flex-direction:column;gap:6px;padding-left:48px;}

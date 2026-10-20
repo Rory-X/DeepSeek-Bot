@@ -362,9 +362,6 @@ var ZH = {
   "Save and connect": "保存并连接",
   "Open the authorization page": "打开授权页面",
   "Use a different app": "换一个应用",
-  "Choose the access level on the authorization page": "在授权页选择权限范围",
-  "Requested scopes is read-only, and it is all this connector asks for. Full access lets Bots change your {service} account; every write still asks for your approval first.": "Requested scopes 是只读权限，也是这个连接器申请的权限。Full access 允许 Bot 修改你的 {service} 账号，每次写操作仍会先请求你批准。",
-  "I'll choose the access level on the authorization page": "我会在授权页自行选择权限范围",
   "Each run asks for your approval": "每次执行都会弹出审批",
   "Let the Bots deploy, cancel, promote and roll back; every run asks for your approval": "允许 Bot 执行部署、取消、推广和回滚；每次执行都需要你批准",
   "Projects, deployments, and logs": "项目、部署和日志",
@@ -3330,18 +3327,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
 .bt-connector-input{flex:1 1 auto;min-width:0;border:0;background:none;color:inherit;font:inherit;font-size:13px;outline:none;padding:0}
 .bt-connector-hint{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
-/* The access choice on the authorization page: a quiet accent panel under the card's row,
-   with the acknowledgement that arms the first Connect press. */
-.bt-connector-scope{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--bt-accent) 7%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 26%,transparent);animation:bt-veil-in .18s ease-out}
-.bt-connector-scope-title{font-size:12px;line-height:17px;font-weight:600}
-.bt-connector-scope-body{font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
-.bt-connector-consent{display:flex;align-items:flex-start;gap:8px;min-height:32px;padding:3px 0 1px;font-size:12px;line-height:17px;cursor:pointer}
-.bt-connector-check{flex:none;width:16px;height:16px;margin:0.5px 0 0;accent-color:var(--bt-accent);cursor:pointer}
-@media (prefers-reduced-motion:reduce){.bt-connector-scope{animation:none}}
 .bt-connector-link-btn{margin:0;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .bt-connector-error{padding-left:48px;font-size:12px;line-height:16px;color:var(--bt-danger)}
-/* What a connector says about itself: a quiet panel for a read-only grant, and a docs link. */
-.bt-connector-readonly{padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--bt-accent) 6%,transparent);border:.5px solid color-mix(in srgb,var(--bt-accent) 22%,transparent);font-size:12px;line-height:17px;color:var(--bt-ink-2);overflow-wrap:anywhere}
 .bt-connector-docs{padding-left:48px;font-size:12px;line-height:16px}
 /* A notification connector keeps its chat id beside the connection, under the head. */
 .bt-connector-chat{display:flex;flex-direction:column;gap:6px;padding-left:48px;}
@@ -13599,23 +13586,6 @@ var cardText = (connector, key) => {
   return wantsChinese() && typeof chinese === "string" && chinese !== "" ? chinese : value;
 };
 var cardAbout = (connector) => cardText(connector, "about") ?? ABOUT[connector.id]?.();
-var cardConsent = (connector) => {
-  const consent = connector.card?.consent;
-  if (consent === null || typeof consent !== "object" || typeof consent.title !== "string") return null;
-  const chinese = wantsChinese() ? connector.card?.zh?.consent : void 0;
-  const pick2 = (key, fallback) => {
-    const zh = chinese?.[key];
-    if (wantsChinese() && typeof zh === "string" && zh !== "") return zh;
-    return typeof fallback === "string" ? fallback : null;
-  };
-  return {
-    title: pick2("title", consent.title),
-    body: pick2("body", consent.body) ?? "",
-    // Only a connector whose authorization page asks the reader to choose says so in the
-    // card; without that line the consent is information, not a gate.
-    acknowledge: pick2("acknowledge", consent.acknowledge)
-  };
-};
 function ConnectorOption({ title, note, checked, disabled = false, describedby, onChange }) {
   return (0, import_react32.createElement)(
     "div",
@@ -13672,9 +13642,6 @@ function ConnectorRow({ connector, actions }) {
   const notify = connector.mode === "notify";
   const [chatDraft, setChatDraft] = (0, import_react32.useState)(null);
   const chatValue = chatDraft ?? (typeof connector.chatId === "string" ? connector.chatId : "");
-  const consent = oauth && connector.state === "off" ? cardConsent(connector) : null;
-  const consentGate = consent !== null && consent.acknowledge !== null;
-  const [consentAck, setConsentAck] = (0, import_react32.useState)(false);
   const configured = typeof connector.clientId === "string" && connector.clientId !== "";
   const [appForm, setAppForm] = (0, import_react32.useState)(false);
   const [appId, setAppId] = (0, import_react32.useState)("");
@@ -13768,7 +13735,6 @@ function ConnectorRow({ connector, actions }) {
   const [details, setDetails] = (0, import_react32.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark;
-  const readOnlyNote = cardText(connector, "readOnlyNote");
   const docsUrl = typeof connector.card?.docsUrl === "string" && connector.card.docsUrl !== "" ? connector.card.docsUrl : TOKEN_URLS[connector.id];
   const row = (0, import_react32.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
@@ -13822,7 +13788,7 @@ function ConnectorRow({ connector, actions }) {
         } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react32.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? manual && !configured && !appForm ? null : (0, import_react32.createElement)("button", {
           type: "button",
           className: "bt-soft bt-soft-sm",
-          disabled: busy || consentGate && !consentAck,
+          disabled: busy,
           onClick: (event) => {
             event.stopPropagation();
             void startAuthorization();
@@ -13865,30 +13831,10 @@ function ConnectorRow({ connector, actions }) {
       ),
       typeof connector.chatId === "string" && connector.chatId !== "" ? null : (0, import_react32.createElement)("div", { className: "bt-connector-hint" }, t("Send the bot a message first, then press Test."))
     ) : null,
-    // What a read-only grant means, in the connector's own words: it says before connecting
-    // what the Bots may do, and stays there once connected.
-    readOnlyNote !== null ? (0, import_react32.createElement)("div", { className: "bt-connector-readonly" }, readOnlyNote) : null,
     oauth && docsUrl !== void 0 ? (0, import_react32.createElement)(
       "div",
       { className: "bt-connector-docs" },
       (0, import_react32.createElement)("a", { className: "bt-connector-link", href: docsUrl, target: "_blank", rel: "noopener noreferrer" }, t("Documentation"))
-    ) : null,
-    consent !== null ? (0, import_react32.createElement)(
-      "div",
-      { className: "bt-connector-scope" },
-      (0, import_react32.createElement)("div", { className: "bt-connector-scope-title" }, consent.title),
-      consent.body !== "" ? (0, import_react32.createElement)("div", { className: "bt-connector-scope-body" }, consent.body) : null,
-      consent.acknowledge !== null ? (0, import_react32.createElement)(
-        "label",
-        { className: "bt-connector-consent" },
-        (0, import_react32.createElement)("input", {
-          type: "checkbox",
-          className: "bt-connector-check",
-          checked: consentAck,
-          onChange: (event) => setConsentAck(event.target.checked)
-        }),
-        (0, import_react32.createElement)("span", null, consent.acknowledge)
-      ) : null
     ) : null,
     hasOptions && details ? (0, import_react32.createElement)(
       "div",
