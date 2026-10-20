@@ -90,8 +90,9 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, tur
     connectorConnectValues: (id, values) => after(call('connector-connect', { id, values })),
     connectorDisconnect: id => after(call('connector-disconnect', { id })),
     connectorRetry: id => after(call('connector-retry', { id })),
-    connectorSetActions: (id, enabled) => after(call('connector-set-actions', { id, enabled })),
-    connectorSetToolbox: (id, enabled) => after(call('connector-set-toolbox', { id, enabled })),
+    // A level change asks the host for a new grant: an OAuth connector goes back to off and
+    // asks to authorize again, a token connector remounts with the new level.
+    connectorSetLevel: (id, level) => after(call('connector-set-level', { id, level })),
     connectorOauthStart: id => after(call('connector-oauth-start', { id })),
     connectorOauthApp: (id, clientId, clientSecret) => after(call('connector-oauth-app', { id, clientId, clientSecret })),
     saveCapability: capability => after(call('capability-save', capability)),

@@ -49,7 +49,15 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
   const multi = question.multiSelect === true
   const custom = own.trim()
   const canSubmit = multi ? picked.length > 0 || custom !== '' : custom !== ''
+  // A connector write says what it will touch before its options; one that cannot be undone
+  // asks the reader to confirm before Allow becomes pressable.
+  const target = typeof question.target === 'string' && question.target !== '' ? question.target : null
+  const change = typeof question.change === 'string' && question.change !== '' ? question.change : null
+  const dangerous = question.danger === true || question.reversible === false
+  const [confirmed, setConfirmed] = useState(false)
+  const needsConfirm = dangerous && (question.reversible === false || question.danger === true)
   const choose = (label) => {
+    if (needsConfirm && !confirmed && /^Allow\b/i.test(label)) return
     if (multi) {
       setPicked(current => current.includes(label) ? current.filter(item => item !== label) : [...current, label])
       return
@@ -75,10 +83,13 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
   }) : null
   const rows = options.map((option, optionIndex) => {
     const selected = multi && picked.includes(option.label)
+    const gated = needsConfirm && !confirmed && /^Allow\b/i.test(option.label)
     return h('button', {
       key: option.label, type: 'button', className: 'bt-q-opt',
       'aria-pressed': multi ? selected : undefined,
       'aria-keyshortcuts': keyLetter(optionIndex).toLowerCase(),
+      disabled: gated,
+      'data-gated': gated || undefined,
       onClick: () => choose(option.label),
     },
     h('span', { className: 'bt-key', 'aria-hidden': true }, keyLetter(optionIndex)),
@@ -101,8 +112,20 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
   } else if ((raised || multi) && canSubmit) {
     foot = h('div', { className: 'bt-q-foot' }, h('button', { type: 'submit', className: 'bt-q-submit' }, t('Submit')))
   }
+  const preview = target !== null || change !== null || needsConfirm
+    ? h('div', { className: 'bt-q-preview', 'data-danger': dangerous || undefined },
+      target !== null ? h('div', { className: 'bt-q-target' }, t('Changes: {target}', { target })) : null,
+      change !== null ? h('div', { className: 'bt-q-change' }, change) : null,
+      question.reversible === false ? h('div', { className: 'bt-q-warning' }, t('This cannot be undone.')) : null,
+      needsConfirm
+        ? h('label', { className: 'bt-q-confirm' },
+          h('input', { type: 'checkbox', checked: confirmed, onChange: event => setConfirmed(event.target.checked) }),
+          h('span', null, t('I understand what this changes')))
+        : null)
+    : null
   return h('form', {
     className: raised ? 'bt-q bt-q-raised' : 'bt-q', 'aria-labelledby': titleId,
+    'data-danger': dangerous || undefined,
     onSubmit: (event) => { event.preventDefault(); submit() },
   },
     h('div', { className: 'bt-q-head' },
@@ -111,6 +134,7 @@ function QuestionView({ question, onAnswer, onDismiss, ownAnswer = false, raised
         question.detail ? h('div', { className: 'bt-q-detail' }, question.detail) : null,
         raised && multi ? h('div', { className: 'bt-q-detail' }, t('Choose all that apply')) : null),
       h('button', { type: 'button', className: 'bt-q-x', 'aria-label': t('Dismiss question'), title: t('Dismiss'), onClick: onDismiss }, h(CloseIcon))),
+    preview,
     rows.length > 0 ? h('div', { className: 'bt-q-list', role: 'group' }, rows) : null,
     field && !raised ? h('div', { className: 'bt-q-custom' },
       h('label', { className: 'bt-q-field' }, field),

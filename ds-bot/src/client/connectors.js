@@ -103,21 +103,23 @@ const cardText = (connector, key) => {
   return wantsChinese() && typeof chinese === 'string' && chinese !== '' ? chinese : value
 }
 const cardAbout = connector => cardText(connector, 'about') ?? ABOUT[connector.id]?.()
-
-// One settings section inside a connector's panel: a title, what the switch does, and the
-// switch itself. Any connector with settings renders these; the card owns the panel.
-export function ConnectorOption({ title, note, checked, disabled = false, describedby, onChange }) {
-  return h('div', { className: 'bt-connector-action-row' },
-    h('div', { className: 'bt-connector-action-text' },
-      h('div', { className: 'bt-connector-action-title' }, title),
-      h('div', { className: 'bt-connector-action-note' }, note)),
-    h('button', {
-      type: 'button', role: 'switch', className: 'bt-switch', 'aria-checked': checked, 'aria-label': title,
-      disabled,
-      ...(describedby ? { 'aria-describedby': describedby } : {}),
-      onClick: (event) => { event.stopPropagation(); onChange(!checked) },
-    }, h('span', { className: 'bt-switch-knob', 'aria-hidden': true })))
-}
+// A level or a capability is drawn as the module declares it: its own order and words.
+// Only the shape we need is filled in; nothing is inferred beyond the declared `write`.
+const levelItem = entry => (typeof entry === 'string'
+  ? { id: entry, title: entry, description: null }
+  : {
+      id: typeof entry?.id === 'string' ? entry.id : String(entry?.id ?? ''),
+      title: typeof entry?.title === 'string' ? entry.title : typeof entry?.name === 'string' ? entry.name : String(entry?.id ?? ''),
+      description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
+      write: entry?.write === true || entry?.danger === true,
+    })
+const capabilityItem = (entry, index) => ({
+  key: typeof entry?.key === 'string' ? entry.key : `capability-${index}`,
+  title: typeof entry?.title === 'string' ? entry.title : typeof entry?.name === 'string' ? entry.name : String(entry?.key ?? ''),
+  description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
+  write: entry?.write === true || entry?.danger === true,
+  available: entry?.available !== false,
+})
 
 function statusText(connector) {
   if (connector.state === 'connecting') return connector.oauth === true ? t('Waiting for the browser…') : t('Connecting…')
@@ -135,7 +137,7 @@ function statusText(connector) {
   return cardAbout(connector) ?? (connector.oauth === true ? t('Not connected') : '')
 }
 
-function ConnectorRow({ connector, actions }) {
+function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = useState(false)
   // The credential values, by the secret name the host declared; a form with one field is
   // the token field the cards always had.
@@ -238,24 +240,18 @@ function ConnectorRow({ connector, actions }) {
     void run(actions.connectorSetChat(connector.id, chatValue.trim()), () => setChatDraft(null))
   }
   const on = connector.state !== 'off'
-  // `actions` is absent for a connector without write actions; a boolean says whether the
-  // Bot may run them, and every run asks the user first.
-  const actionsOn = connector.actions === true
-  // `toolbox` is absent for a connector that cannot offer its whole toolset. With it on,
-  // the named action tools are not registered: every action goes through the server's own
-  // call tool, which asks for approval by itself, so the actions switch has nothing to do.
-  const toolboxOn = connector.toolbox === true
-  const toolboxOffered = typeof connector.toolbox === 'boolean'
-  // The call tool is per service (`vercel_call`, `cloudflare_call`); an older host without
-  // the field keeps the Vercel one.
-  const toolboxCall = typeof connector.toolboxCall === 'string' && connector.toolboxCall !== '' ? connector.toolboxCall : 'vercel_call'
-  const actionsOffered = typeof connector.actions === 'boolean'
-  // A connected connector that has settings opens them from its own row; without either
-  // there is nothing to open and the row stays what it was.
-  const hasOptions = on && (actionsOffered || toolboxOffered)
-  // The line saying where actions go while the toolbox is on; the disabled switch points
-  // at it, so the reason survives a reader who never focuses the switch.
-  const actionsNoteId = toolboxOn && actionsOffered ? `bt-connector-${connector.id}-actions-note` : undefined
+  // Write access is what the connector declares: its level, its capabilities in its own
+  // order, and a line about its permissions. Nothing here switches them on or off; the
+  // level is the setting, and a change asks the host for a new grant.
+  const levels = Array.isArray(connector.levels) ? connector.levels.filter(entry => entry !== null) : []
+  const currentLevel = typeof connector.level === 'string' ? connector.level : null
+  const capabilities = Array.isArray(connector.capabilities) ? connector.capabilities.filter(entry => entry !== null && typeof entry === 'object') : []
+  const permissions = typeof connector.permissions?.summary === 'string' && connector.permissions.summary !== '' ? connector.permissions.summary : null
+  // A host whose profile forbids changes says why; every declared write then shows as
+  // unavailable instead of disappearing.
+  const writesLocked = typeof readOnly === 'string' && readOnly !== ''
+  // A connected connector that has something to show opens its panel from its own row.
+  const hasOptions = on && (levels.length > 0 || capabilities.length > 0 || permissions !== null)
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   // The card names its own glyph; a host that declares none keeps the mark its id had.
@@ -324,37 +320,36 @@ function ConnectorRow({ connector, actions }) {
       h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation'))) : null,
     hasOptions && details
       ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
-        toolboxOffered
+        levels.length > 0
           ? h('div', { className: 'bt-connector-setting' },
-            h(ConnectorOption, {
-              title: t('Full capabilities'),
-              note: toolboxOn
-                ? t('Each run goes through {tool}', { tool: toolboxCall })
-                : t('Let the Bots use every tool the server offers, not only the read ones'),
-              checked: toolboxOn,
-              disabled: busy,
-              onChange: (next) => void run(actions.connectorSetToolbox(connector.id, next)),
-            }),
-            // A full-access grant can write; say so where its toolbox is switched on.
-            connector.oauth === true && connector.id === 'cloudflare'
-              ? h('div', { className: 'bt-connector-action-note' }, t('Full access can change your {service} account; every write asks for your approval first.', { service: connector.name }))
-              : null)
+            h('div', { className: 'bt-connector-action-title' }, t('Access level')),
+            h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
+              levels.map((entry) => {
+                const item = levelItem(entry)
+                const current = item.id === currentLevel
+                return h('button', {
+                  key: item.id, type: 'button', role: 'radio', 'aria-checked': current,
+                  className: 'bt-connector-level', 'data-current': current || undefined,
+                  disabled: busy || (writesLocked && item.write === true),
+                  onClick: () => { if (!current) void run(actions.connectorSetLevel(connector.id, item.id)) },
+                },
+                h('span', { className: 'bt-connector-level-title' }, item.title),
+                item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null)
+              })),
+            h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')))
           : null,
-        actionsOffered
-          ? h('div', { className: 'bt-connector-setting', 'data-locked': toolboxOn || undefined },
-            h(ConnectorOption, {
-              title: t('Allow actions'),
-              note: actionsOn
-                ? t('Each run asks for your approval')
-                : t('Let the Bots deploy, cancel, promote and roll back; every run asks for your approval'),
-              checked: actionsOn,
-              disabled: busy || toolboxOn,
-              describedby: actionsNoteId,
-              onChange: (next) => void run(actions.connectorSetActions(connector.id, next)),
-            }),
-            actionsNoteId
-              ? h('div', { className: 'bt-connector-action-note', id: actionsNoteId }, t('With Full capabilities on, actions go through {tool} and ask for approval one by one', { tool: toolboxCall }))
-              : null)
+        permissions !== null ? h('div', { className: 'bt-connector-hint' }, permissions) : null,
+        capabilities.length > 0
+          ? h('div', { className: 'bt-connector-setting' },
+            h('div', { className: 'bt-connector-action-title' }, t('Capabilities')),
+            h('ul', { className: 'bt-connector-caps' }, capabilities.map((entry, index) => {
+              const item = capabilityItem(entry, index)
+              const locked = item.available === false || (writesLocked && item.write === true)
+              return h('li', { key: item.key, className: 'bt-connector-cap', 'data-write': item.write || undefined, 'data-locked': locked || undefined },
+                h('span', { className: 'bt-connector-cap-title' }, item.title),
+                item.description !== null ? h('span', { className: 'bt-connector-cap-note' }, item.description) : null,
+                locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
+            })))
           : null)
       : null,
     !oauth && !on && form ? h('div', { className: 'bt-connector-form' },
@@ -412,8 +407,9 @@ function ConnectorRow({ connector, actions }) {
 // Settings → Connectors: one row per connector.
 export function ConnectorsPage({ roster, actions }) {
   const list = roster?.connectors ?? []
+  const readOnly = typeof roster?.readOnly === 'string' && roster.readOnly !== '' ? roster.readOnly : null
   return h('section', { className: 'bt-set-section' },
     h('div', { className: 'bt-set-card bt-connectors-card' }, list.length === 0
       ? h('div', { className: 'bt-set-row' }, h('span', { className: 'bt-set-hint' }, t('No connectors')))
-      : list.map(connector => h(ConnectorRow, { key: connector.id, connector, actions }))))
+      : list.map(connector => h(ConnectorRow, { key: connector.id, connector, actions, readOnly }))))
 }
