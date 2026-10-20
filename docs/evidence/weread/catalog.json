@@ -1,0 +1,134 @@
+{
+  "skillVersion": "1.0.5",
+  "endpoints": {
+    "/book/bestbookmarks": {
+      "needLogin": true,
+      "params": [
+        "bookId*",
+        "chapterUid",
+        "synckey"
+      ]
+    },
+    "/book/bookmarklist": {
+      "needLogin": true,
+      "params": [
+        "bookId*"
+      ]
+    },
+    "/book/chapterinfo": {
+      "needLogin": false,
+      "params": [
+        "bookId*"
+      ]
+    },
+    "/book/getprogress": {
+      "needLogin": true,
+      "params": [
+        "bookId*"
+      ]
+    },
+    "/book/info": {
+      "needLogin": false,
+      "params": [
+        "bookId*"
+      ]
+    },
+    "/book/readreviews": {
+      "needLogin": true,
+      "params": [
+        "bookId*",
+        "chapterUid*",
+        "reviews*"
+      ]
+    },
+    "/book/recommend": {
+      "needLogin": true,
+      "params": [
+        "count",
+        "maxIdx"
+      ]
+    },
+    "/book/similar": {
+      "needLogin": true,
+      "params": [
+        "bookId*",
+        "count",
+        "maxIdx",
+        "sessionId"
+      ]
+    },
+    "/book/underlines": {
+      "needLogin": true,
+      "params": [
+        "bookId*",
+        "chapterUid*",
+        "synckey"
+      ]
+    },
+    "/discover/interact/type3": {
+      "needLogin": true,
+      "params": [
+        "count",
+        "maxIdx",
+        "synckey"
+      ]
+    },
+    "/readdata/detail": {
+      "needLogin": true,
+      "params": [
+        "baseTime",
+        "mode"
+      ]
+    },
+    "/review/list": {
+      "needLogin": true,
+      "params": [
+        "bookId*",
+        "count",
+        "maxIdx",
+        "reviewListType",
+        "synckey"
+      ]
+    },
+    "/review/list/mine": {
+      "needLogin": true,
+      "params": [
+        "bookid*",
+        "count",
+        "synckey"
+      ]
+    },
+    "/review/single": {
+      "needLogin": true,
+      "params": [
+        "commentsCount",
+        "commentsDirection",
+        "likesCount",
+        "likesDirection",
+        "reviewId*",
+        "synckey"
+      ]
+    },
+    "/shelf/sync": {
+      "needLogin": true,
+      "params": []
+    },
+    "/store/search": {
+      "needLogin": true,
+      "params": [
+        "count",
+        "keyword*",
+        "maxIdx",
+        "scope"
+      ]
+    },
+    "/user/notebooks": {
+      "needLogin": true,
+      "params": [
+        "count",
+        "lastSort"
+      ]
+    }
+  },
+  "checkedAt": "2026-10-20T05:04:27.318Z"
+}

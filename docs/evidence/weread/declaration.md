@@ -16,7 +16,7 @@
 - 三个连接器级声明：`envelope`（成功无 `errcode`、失败取 `errmsg`）、`verify`（POST 校验 key）、
   `auth`（Bearer 头）；卡片元数据 `about`/`glyph`/`docsUrl`/`readOnlyNote` 随模块给出。
 
-## 2. 只读工具（13 个：核心 10 + 可选 3）
+## 2. 只读工具（15 个：核心 10 + 可选 5）
 
 工具名是 `<id>_<name>`，即 `weread_<name>`。
 
@@ -35,26 +35,25 @@
 | `weread_popular_highlights` | `/book/bestbookmarks` | `bookId*`、`chapterUid` |
 | `weread_stats` | `/readdata/detail` | `mode`、`baseTime` |
 
-### 可选 3
+### 可选 5
 
 | 工具 | api_name | 参数（必填 *） |
 | --- | --- | --- |
+| `weread_recommend` | `/book/recommend` | `count`、`maxIdx` |
 | `weread_similar` | `/book/similar` | `bookId*`、`count*`、`maxIdx*`、`sessionId` |
 | `weread_reviews` | `/review/list` | `bookId*`、`reviewListType`、`count`、`maxIdx`、`synckey` |
+| `weread_review_single` | `/review/single` | `reviewId*`、`commentsCount`、`commentsDirection`、`likesCount`、`likesDirection`、`synckey` |
 | `weread_chapter_heat` | `/book/underlines` | `bookId*`、`chapterUid*` |
 
 ## 3. 未注册端点 / blocked
 
 - 确认**不注册**：`/_list`（授权后自省用，只作调试；也不该暴露给模型）、
-  `/book/readreviews`（划线下的想法，二级详情）、`/review/single`（单条想法详情）。
-- 另有 `/book/recommend`（个性化推荐）**未注册**：Ada 的 §11.9.2 映射表未列入，本线按映射表执行；
-  它是只读接口，若要补，属于加一个工具声明，不影响只读性质。
-- 真 key 调 `/_list` 实见 **17 个接口**（比 Ada 的 16 个多一个 `/discover/interact/type3`：
-  「发现页朋友在读动态」，只读、`need_login=true`）。**17 个全部是读**，没有写接口出现。
-  未注册的四个是 `/_list`、`/book/readreviews`、`/review/single`、`/book/recommend`
-  （外加新见的 `/discover/interact/type3`，候选，未注册）。
+  `/book/readreviews`（划线下的想法；参数含对象数组 `reviews[]`，等 `rest-tools` 的数组映射）、
+  `/discover/interact/type3`（发现页朋友在读动态，含他人社交数据，等用户决定）。
+- 真 key 调 `/_list` 实见 **17 个接口**，**全部是读**，没有写接口出现：15 个已注册，
+  未注册的是上面三个。
 - blocked 列表：**空**。本连接器没有 toolbox、没有 actionTools、没有任何写工具声明，
-  13 个工具全部 `readOnly: true` 的 POST，适配器还会在构建时拒绝非 GET/POST、以及没写
+  15 个工具全部 `readOnly: true` 的 POST，适配器还会在构建时拒绝非 GET/POST、以及没写
   `readOnly` 或没给显式 body 映射的 POST。
 
 ## 4. 凭据
@@ -77,17 +76,17 @@
 
 ## 6. 单测与门槛
 
-- 本线：`node --test test/weread.test.js` → **11 tests / 11 pass / 0 fail**，约 1.2–1.6 s。
-  覆盖：声明形态（gateway/Bearer/rest-tools/verify）、13 个工具全为只读 POST 且参数不得含
+- 本线：`node --test test/weread.test.js` → **12 tests / 12 pass / 0 fail**，约 1.2–1.6 s。
+  覆盖：声明形态（gateway/Bearer/rest-tools/verify/card）、15 个工具全为只读 POST 且参数不得含
   `api_name`/`path`/`url`/`method`/`headers`、工具与 `api_name` 白名单逐条相等、成功回包（无 errcode）、
   只转发声明参数（含模型走私 `api_name`/`path`/`url` 的负例）、鉴权错误不回显 key、
   业务错误取 `errmsg`（不是 "answered 499"）、网络失败归一、空结果不算失败、POST 校验成功/401/业务码/不可达。
 - `test/connectors.test.js`（底座已改为只比内置行）：**32 / 32 pass**，外部模块不再撞全等断言。
-- 全仓 `npm test`（本 branch，final base `ea71e4f`）：**958 tests / 955 pass / 1 fail / 2 skip**。
-  唯一的红是 `test/files.test.js` 的计时断言 `Date.now() - started < 40`（实测 152ms）；
-  该用例在纯净 `ea71e4f` 与本 branch 上都出现 pass/fail 交替，属底座自带 flaky，与本线无关。底座侧验收（Marshal 亲跑、不含本线 11 条）为 947 tests / 945 pass /
-  0 fail / 2 skip。
+- 全仓 `npm test`（本 branch，基于 `8ec91cc`）：**1032 tests / 1030 pass / 0 fail / 2 skip**，全绿。
 - `node scripts/build-client.mjs --check` → exit 0；`npm run lint` → 0 errors。
+- 目录 watchdog：`node dev/weread-catalog-check.mjs`（手动/月度，不随请求跑）——`/_list` 快照存在
+  `docs/evidence/weread/catalog.json`，比对新增/消失端点与参数变化，并核对上游 SKILL.md 版本；
+  无变化 exit 0、有变化 exit 1，`--update` 写回新快照。
 - 截图脚本已就绪：`ds-bot/dev/shots-weread.mjs`，Prism 的卡片客户端合入后一键出
   `390-01-connectors.png`、`390-02-form.png`、`390-03-error.png`、`1280-01/02`；当前未跑、无图。
 - 自查文档：本文件。
@@ -111,6 +110,8 @@
 | `/book/similar` | 200 | `booksimilar`（`booksimilar.books`, `booksimilar.booksHasMore`） |
 | `/review/list` | 200 | `synckey,reviews,reviewsHasMore,reviewsCnt,recentTotalCnt,friendCommentCount,friendUniqueCount,friendCommentUsers,deepVRecommendInfo,…` |
 | `/book/underlines` | 200 | `synckey,bookId,chapterUid,underlines`（本章无划线时为空数组） |
+| `/book/recommend` | 200 | `books`（books[]: bookId,title,author,cover,category,intro,payType,price,type,deepLink） |
+| `/review/single` | 200 | `reviewId,review,htmlContent,synckey`（review 是对象：type/bookId/content/author/star/chapterName/…） |
 
 - **成功信封**：HTTP 2xx，业务回包 **不含 `errcode`**（只有 `/_list` 自带 `errcode:0`）。
 - **业务错误信封**：HTTP **499**（非标准状态码）+ `{errcode:-2003, errmsg, errlog}`；
@@ -119,13 +120,18 @@
 - **鉴权错误信封**：HTTP 401 + `{errcode:-2013, errmsg:"鉴权失败"}`；不带 key 时
   HTTP 401 + `{errcode:-2010, errmsg:"用户不存在"}`。
 - **`skill_version`**：省略也不报错（服务端有默认），但仍按官方文档每请求都带 `1.0.5`。
-- **`/book/recommend`**（未注册）：200，顶层 `books`。
+
 - **`/discover/interact/type3`**（未注册候选）：200，顶层 `synckey,count,hasMore,nextMaxIdx,items`。
 - **一个 bookId 格式边界**：`/review/list` 对书架里 `CB_…` 形式的新书 id 回 `-2003 参数格式错误`，
   换同一本书的数字 id 可正常返回；`/book/info`、`/book/chapterinfo`、`/book/bookmarklist` 等对
   `CB_…` id 正常。属服务端行为，工具按 errmsg 原样上报，不重试。
 
 ## 8. 已知边界 / 未验
+
+- **`/book/readreviews` 未接**：参数含对象数组 `reviews[]`，当前 `rest-tools` 的 body 映射只收标量或
+  标量列表，等 Forge 的对象数组映射（P2）后再声明。
+- **`/discover/interact/type3` 未接**：只读，但返回他人社交动态（谁在读什么），需要用户决定是否接。
+- **`upgrade_info` 不自动停**：工具调用不会自动暂停去升级，watchdog 月度检查里会读到它并报错提示。
 
 - **隐私**：key 绑定用户身份，回包是书架/笔记/划线/阅读统计等个人数据；工具只读，不写 state，
   不落日志；截图计划不拍真实书架与笔记。
