@@ -14,7 +14,7 @@
 // EXAMINE, fetches with BODY.PEEK, and has no STORE, APPEND, COPY, MOVE or EXPUNGE. The
 // send tools come from the shared SMTP helper and exist only at the write level, where the
 // framework's approval hook is available; every send asks before a connection is opened.
-import { createImapTools, signInImap } from './_imap.js'
+import { createImapTools, createImapWriteTools, signInImap } from './_imap.js'
 import { createSmtpTools } from './_smtp.js'
 
 export const GMAIL_ID = 'gmail'
@@ -24,8 +24,10 @@ export const GMAIL_APP_PASSWORD_SECRET = 'GMAIL_APP_PASSWORD'
 // The four tools the shared core builds for `<id>`. Kept here so the card, the tests and
 // the declaration for QA name the same list.
 export const GMAIL_TOOLS = ['gmail_list_folders', 'gmail_search', 'gmail_list_messages', 'gmail_get_message']
-// The tools the write level adds from the shared SMTP helper. The IMAP write tools
-// (mark, move, trash, save draft) arrive with the shared IMAP write session.
+// What the write level adds: the shared IMAP write session's mailbox tools and the shared
+// SMTP helper's send tools. Labels and archive wait for the shared core's label extension;
+// sending a draft is not part of this round.
+export const GMAIL_WRITE_TOOLS = ['gmail_mark_read', 'gmail_mark_unread', 'gmail_move_messages', 'gmail_delete_messages', 'gmail_save_draft']
 export const GMAIL_SEND_TOOLS = ['gmail_send_email', 'gmail_reply_email', 'gmail_forward_email']
 export const GMAIL_SMTP = { host: 'smtp.gmail.com', port: 465 }
 
@@ -82,6 +84,10 @@ export default {
   // mounted tool list, which the framework keeps empty at the read level.
   capabilities: [
     { key: 'read_mail', title: 'Read and search mail', description: 'List folders, search messages and read them without changing anything.', risk: 'read' },
+    { key: 'mark_read', title: 'Mark mail read or unread', description: 'Change the read flag of up to 10 messages per call.', risk: 'write', preview: { change: 'Changes the read flag only', reversible: true } },
+    { key: 'save_draft', title: 'Save drafts', description: 'Store a draft in Gmail without sending it.', risk: 'write', preview: { change: 'Creates a draft, sends nothing', reversible: true } },
+    { key: 'move_mail', title: 'Move mail', description: 'Move up to 10 messages to another folder.', risk: 'write', preview: { change: 'Moves messages between folders', reversible: true } },
+    { key: 'trash_mail', title: 'Delete mail (to Trash)', description: 'Move up to 10 messages to Trash, where they can be restored for 30 days.', risk: 'destructive', preview: { change: 'Moves messages to Trash', reversible: true } },
     { key: 'send_mail', title: 'Send, reply and forward', description: 'Send mail as you, to at most 20 recipients per message; a send cannot be undone.', risk: 'destructive', preview: { change: 'Sends a message from your account', reversible: false } },
   ],
   permissions: { summary: 'Reads your mail. With full capabilities it can mark, label, archive, draft, move and trash mail, and send from your address.' },
@@ -103,22 +109,31 @@ export default {
   // only when the hook is there, because a send without it could not ask first.
   mount: ({ secrets, redact, level, approve, state, connect } = {}) => {
     const levelNow = level ?? state?.level ?? 'read'
-    const read = createGmailTools({
-      credential: secrets[GMAIL_APP_PASSWORD_SECRET],
-      account: { mailbox: secrets[GMAIL_ADDRESS_SECRET] },
-      redact,
-    })
+    const credential = secrets[GMAIL_APP_PASSWORD_SECRET]
+    const account = { mailbox: secrets[GMAIL_ADDRESS_SECRET] }
+    const read = createGmailTools({ credential, account, redact })
     if (levelNow !== 'write' || typeof approve !== 'function') return read
+    const mailbox = createImapWriteTools({
+      id: GMAIL_ID,
+      displayName: 'Gmail',
+      credential,
+      account,
+      host: GMAIL_HOST,
+      port: 993,
+      redact,
+      approve,
+      ...(connect === undefined ? {} : { connect }),
+    })
     const send = createSmtpTools({
       id: GMAIL_ID,
       displayName: 'Gmail',
-      credential: secrets[GMAIL_APP_PASSWORD_SECRET],
-      account: { mailbox: secrets[GMAIL_ADDRESS_SECRET] },
+      credential,
+      account,
       smtp: GMAIL_SMTP,
       redact,
       approve,
       ...(connect === undefined ? {} : { connect }),
     })
-    return { tools: [...read.tools, ...send], close: read.close }
+    return { tools: [...read.tools, ...mailbox, ...send], close: read.close }
   },
 }

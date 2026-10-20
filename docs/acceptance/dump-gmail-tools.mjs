@@ -22,12 +22,7 @@ process.stdout.write(`${JSON.stringify({
   levels: { default: gmail.defaultLevel, available: gmail.levels },
   tiers: { read, write },
   unregistered: [
-    // Waiting for the shared IMAP write session (P3): mark, draft, move, trash, labels, archive.
-    'gmail_mark_read',
-    'gmail_mark_unread',
-    'gmail_move_messages',
-    'gmail_delete_messages',
-    'gmail_save_draft',
+    // Waiting for the shared IMAP core's label extension: labels and archive.
     'gmail_label',
     'gmail_archive',
     // Read surface still to come: attachments.

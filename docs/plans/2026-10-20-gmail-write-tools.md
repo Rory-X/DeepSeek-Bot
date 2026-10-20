@@ -120,11 +120,11 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 16. **标签存在性预检**：执行前 `LIST` 取现有标签；不存在 → 清晰错误、0 条 STORE，绝不隐式创建。
 17. **取原文时机**：需要引用时，原文正文在批准后读取；弹卡阶段只取最小头字段，因此批准前不会有原文进入任何持久化位置。
 
-## 8. 工具声明（第三批实际接线，P1 底座 `06dd4e5`）
+## 8. 工具声明（3a 接线，base `9cd333e`）
 
-开关：框架只有访问级别 `read` / `write`（没有单独的 send 开关）；默认 `read`。能力关/级别 read 时写工具**不存在**。
+访问级别：`read` / `write`，默认 `read`；read 级别下写工具**不存在**。
 
-**read 档（常驻 4 个；这次附件读取推迟）**
+**read 档（常驻 4 个）**
 
 | 工具 | description 原文 |
 | --- | --- |
@@ -133,22 +133,32 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 | `gmail_list_messages` | List the newest messages of a Gmail folder with sender, date and subject (read-only). |
 | `gmail_get_message` | Read one message of a Gmail folder: headers and its plain text body (read-only). |
 
-**write 档（在 read 之上新增 3 个；每次调用先弹审批卡，发信不可撤回）**
+**write 档（在 read 之上新增 8 个：共享 IMAP 写会话 5 个 + 共享 SMTP 3 个；每次调用先弹审批卡）**
 
 | 工具 | description 原文 |
 | --- | --- |
+| `gmail_mark_read` | Mark messages as read in a Gmail folder (write; the user is asked first). |
+| `gmail_mark_unread` | Mark messages as unread in a Gmail folder (write; the user is asked first). |
+| `gmail_move_messages` | Move messages from one Gmail folder to another (write; the user is asked first). |
+| `gmail_delete_messages` | Move messages to Trash, or delete them for good with permanent (write; the user is asked first). |
+| `gmail_save_draft` | Save a plain-text draft in Gmail without sending it (write; the user is asked first). Saving the same draft twice creates a second draft: this tool does not deduplicate. |
 | `gmail_send_email` | Send an email from the connected Gmail address. Every call asks for approval first; sending cannot be undone. |
 | `gmail_reply_email` | Reply to a message from the connected Gmail address. The caller supplies the original Message-ID and References. Every call asks for approval first; sending cannot be undone. |
 | `gmail_forward_email` | Forward a message from the connected Gmail address, keeping the attachments the caller passes. Every call asks for approval first; sending cannot be undone. |
 
 **未注册（负向断言）**
 
-- 等 P3 共享 IMAP 写会话：`gmail_mark_read`、`gmail_mark_unread`、`gmail_move_messages`、`gmail_delete_messages`、`gmail_save_draft`、`gmail_label`、`gmail_archive`。
+- 等共享 IMAP 核心的 label 扩展：`gmail_label`、`gmail_archive`。
 - 等 `_imap.js` 附件解析：`gmail_list_attachments`、`gmail_read_attachment`、`gmail_save_attachment`。
 - 永不做：`gmail_delete_permanent`、`gmail_empty_trash`、`gmail_delete_many`、`gmail_batch_delete`、`gmail_send_draft`、`gmail_settings`、`gmail_set_auto_forward`、`gmail_create_filter`、`gmail_set_signature`。
 
-机器可读注册表由运行期脚本生成（不是手写）：`docs/acceptance/dump-gmail-tools.mjs` →
-`node docs/acceptance/dump-gmail-tools.mjs > docs/acceptance/gmail-tools-registry.json`。
+机器可读注册表由运行期脚本生成（不是手写）：
+
+```sh
+node docs/acceptance/dump-gmail-tools.mjs > docs/acceptance/gmail-tools-registry.json
+```
+
+当前输出：read 4 个、write 12 个（4 read + 5 IMAP 写 + 3 SMTP）。
 
 ## 9. 单测计划（实现时随代码交付）
 
@@ -173,9 +183,10 @@ P2 的“发送/回复/转发/发草稿”四个工具整体受 `send` 能力开
 6. **声明形状**：`levels: ['read','write']`、`defaultLevel: 'read'`、`capabilities`（read/write/destructive，send 不可逆、trash 30 天可恢复）、`permissions.summary`、`imap.write: true`、`smtp: { host, port }`。
 
 
-## 11. P1 底座接线状态（2026-10-20）
+## 11. 接线状态（3a 集成底座 `9cd333e`）
 
-- **已完成**：`gmail.js` 的 `mount` 接受 `{ level, approve, connect }`；read 档挂 4 个只读工具；write 档且拿到 `approve` 时追加 P4 `createSmtpTools` 的 3 个发送工具，`exec` 透传；没有 `approve` 时不挂发送工具（宁可缺，不可绕过审批）。
-- **框架缺口（已报 Forge）**：`06dd4e5` 的 `mountConnectorTools` 仍只传 `{ctx,rt,connector,token,secrets,state,output,redact}`，没有 `level`/`approve`。模块可以退回用 `state.connectors[id].level` 判断级别，但没有审批入口；需要 Forge 在 P1 追加把 `level` 和 `approve({tool,line,danger,exec})` 注入 mount。补齐后本线零改动切换。
-- **P4 依赖**：`_smtp.js` 由 P4 线交付（分支 `feat/smtp-core` @ `19c0dee`）；本分支暂存一份逐字副本供单测/注册表 dump，P4 进底座后删除副本改 import。
-- **能力开关差异**：框架是单一 `read`/`write` 级别，没有“发送单独开关/三档”的机制；Probe 的 `read-only / +write / +send` 三档矩阵在当前框架下应映射成 `read / write` 两档，发送工具属于 write 档。
+- 框架已把 `level` 与 `approve({tool,line,danger,change,reversible,target,exec})` 注入 `mount`；Gmail 的 `mount` 接受 `{ secrets, redact, state, level, approve, connect }`。
+- read 档挂 4 个只读工具；write 档调共享 `createImapWriteTools`（P3：mark_read/mark_unread/move_messages/delete_messages/save_draft）和 `createSmtpTools`（P4：send_email/reply_email/forward_email），每个工具的 execute 先 `await approve(...)`，拒绝/超时/取消 → 0 连接。
+- 本分支**不再带 `_smtp.js` 副本**：底座 `9cd333e` 自带框架版，直接 import。
+- `label`/`archive` 等共享核心的 label 扩展；附件读取等 `_imap.js` 的附件解析；`send_draft` 不做。
+- 框架只有 `read`/`write` 两级，没有单独的 send 开关；Probe 的三档矩阵按 `read / write` 两档映射（发送工具属于 write 档）。

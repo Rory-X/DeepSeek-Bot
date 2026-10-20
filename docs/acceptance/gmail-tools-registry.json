@@ -43,6 +43,26 @@
         "description": "Read one message of a Gmail folder: headers and its plain text body (read-only)."
       },
       {
+        "name": "gmail_mark_read",
+        "description": "Mark messages as read in a Gmail folder (write; the user is asked first)."
+      },
+      {
+        "name": "gmail_mark_unread",
+        "description": "Mark messages as unread in a Gmail folder (write; the user is asked first)."
+      },
+      {
+        "name": "gmail_move_messages",
+        "description": "Move messages from one Gmail folder to another (write; the user is asked first)."
+      },
+      {
+        "name": "gmail_delete_messages",
+        "description": "Move messages to Trash, or delete them for good with permanent (write; the user is asked first)."
+      },
+      {
+        "name": "gmail_save_draft",
+        "description": "Save a plain-text draft in Gmail without sending it (write; the user is asked first). Saving the same draft twice creates a second draft: this tool does not deduplicate."
+      },
+      {
         "name": "gmail_send_email",
         "description": "Send an email from the connected Gmail address. Every call asks for approval first; sending cannot be undone."
       },
@@ -57,11 +77,6 @@
     ]
   },
   "unregistered": [
-    "gmail_mark_read",
-    "gmail_mark_unread",
-    "gmail_move_messages",
-    "gmail_delete_messages",
-    "gmail_save_draft",
     "gmail_label",
     "gmail_archive",
     "gmail_list_attachments",

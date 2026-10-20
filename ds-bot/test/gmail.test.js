@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import { parseCredential } from '../src/host/connectors/_imap.js'
 import { connectValues, credentialFields } from '../src/host/connector-setup.js'
 import { externalConnectors } from '../src/host/connectors/registry.js'
-import gmail, { GMAIL_HOST, GMAIL_SEND_TOOLS, GMAIL_TOOLS, createGmailTools, signInGmail } from '../src/host/connectors/gmail.js'
+import gmail, { GMAIL_HOST, GMAIL_SEND_TOOLS, GMAIL_TOOLS, GMAIL_WRITE_TOOLS, createGmailTools, signInGmail } from '../src/host/connectors/gmail.js'
 
 const CRLF = '\r\n'
 const HEADER_FIELDS = 'FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO CONTENT-TYPE CONTENT-TRANSFER-ENCODING'
@@ -372,11 +372,15 @@ test('the module declares a read default and the capabilities the write level ad
   const keys = gmail.capabilities.map(capability => capability.key)
   assert.deepEqual(keys, [
     'read_mail',
+    'mark_read',
+    'save_draft',
+    'move_mail',
+    'trash_mail',
     'send_mail',
   ])
-  // IMAP write tools (mark, label, archive, draft, move, trash) wait for the shared IMAP
-  // write session; this round wires the read surface and the send tools.
-  for (const deferred of ['mark_read', 'label_mail', 'archive_mail', 'save_draft', 'move_mail', 'trash_mail']) {
+  // Labels and archive wait for the shared IMAP core's label extension; attachment reads
+  // and sending a draft are not part of this round.
+  for (const deferred of ['label_mail', 'archive_mail', 'read_attachments']) {
     assert.equal(keys.includes(deferred), false, deferred)
   }
   for (const capability of gmail.capabilities) {
@@ -387,6 +391,9 @@ test('the module declares a read default and the capabilities the write level ad
   const send = gmail.capabilities.find(capability => capability.key === 'send_mail')
   assert.equal(send.risk, 'destructive')
   assert.equal(send.preview.reversible, false)
+  const trash = gmail.capabilities.find(capability => capability.key === 'trash_mail')
+  assert.equal(trash.risk, 'destructive')
+  assert.equal(trash.preview.reversible, true)
   // Permanent delete, batch delete and settings are not capabilities this connector offers.
   assert.equal(keys.some(key => /permanent|batch|settings|filter|forward|signature/.test(key)), false)
   assert.match(gmail.permissions.summary, /full capabilities/i)
@@ -451,7 +458,7 @@ function fakeSmtp() {
   return { connect, state }
 }
 
-test('the write level mounts the send tools only when the approval hook is there', () => {
+test('the write level adds the mailbox and send tools only when the approval hook is there', () => {
   const server = fakeSmtp()
   const read = gmail.mount({ secrets: FIELDS, redact: String, level: 'read', approve: async () => {} })
   assert.deepEqual(read.tools.map(tool => tool.name), GMAIL_TOOLS)
@@ -460,7 +467,7 @@ test('the write level mounts the send tools only when the approval hook is there
   assert.deepEqual(noHook.tools.map(tool => tool.name), GMAIL_TOOLS)
   noHook.close()
   const write = gmail.mount({ secrets: FIELDS, redact: String, level: 'write', approve: async () => {}, connect: server.connect })
-  assert.deepEqual(write.tools.map(tool => tool.name), [...GMAIL_TOOLS, ...GMAIL_SEND_TOOLS])
+  assert.deepEqual(write.tools.map(tool => tool.name), [...GMAIL_TOOLS, ...GMAIL_WRITE_TOOLS, ...GMAIL_SEND_TOOLS])
   write.close()
 })
 
@@ -483,6 +490,24 @@ test('a send asks the approval hook first, with the card line and the running Se
     assert.match(text, /^Sent to a@b\.com/)
     assert.equal(server.state.connections, 1)
     assert.ok(server.state.commands.includes(`MAIL FROM:<${ADDRESS}>`))
+  } finally {
+    mounted.close()
+  }
+})
+
+test('a denied mailbox write opens no IMAP connection', async () => {
+  const server = imapServer()
+  const mounted = gmail.mount({
+    secrets: FIELDS,
+    redact: String,
+    level: 'write',
+    approve: async () => { throw new Error('The user denied this write.') },
+    connect: server.connect,
+  })
+  try {
+    const tool = mounted.tools.find(item => item.name === 'gmail_mark_read')
+    await assert.rejects(tool.execute({ uids: [1] }, { agent: { id: 'm1' } }), /denied/)
+    assert.equal(server.sockets.length, 0)
   } finally {
     mounted.close()
   }
