@@ -5,7 +5,7 @@
 import { createElement as h, useState } from 'react'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
-import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
+import { SettingField, declaredSettingsOf, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
 
 // Two chat bubbles of our own drawing, one weight throughout: a larger one at the upper
 // left and a smaller one at the lower right, each with two eyes and a short tail. No brand
@@ -62,7 +62,7 @@ const loginText = (login) => {
 
 // One channel: its own settings, level and connection. The module card above it holds the
 // add button and the summary; the row holds every action for this channel.
-function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = false, onToggle, lastOne = false }) {
+export function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = false, onToggle, lastOne = false }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [settingDraft, setSettingDraft] = useState(null)
@@ -203,7 +203,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
       secret: secretOf(field),
     })
   }
-  const levelBlock = levels.length > 0
+  const levelBlock = levelChoiceVisible(row)
     ? h('div', { className: 'bt-connector-setting' },
       h('div', { className: 'bt-connector-action-title' }, t('Access level')),
       h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },

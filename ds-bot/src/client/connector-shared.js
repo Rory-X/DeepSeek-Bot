@@ -30,6 +30,10 @@ export const declaredSettingsOf = (connector) => {
 
 export const levelsOfConnector = (connector) => (Array.isArray(connector.levels) ? connector.levels.filter(entry => entry !== null) : [])
 
+// A one-way channel (Telegram, WeChat push) has a single meaningful level, so its module
+// declares `card.levelChoice: false` and the card leaves the whole level block out.
+export const levelChoiceVisible = (connector) => levelsOfConnector(connector).length > 0 && connector?.card?.levelChoice !== false
+
 // How a declared setting is edited. A host that names no kind keeps the plain text field
 // every card had; `secret`, `bot` and `segmented` are the shapes a channel needs, and the
 // client never guesses a kind from a field name.
