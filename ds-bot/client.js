@@ -15114,6 +15114,12 @@ var QQMailMark = () => (0, import_react38.createElement)(
   (0, import_react38.createElement)("rect", { x: 2.8, y: 4.8, width: 14.4, height: 10.4, rx: 2 }),
   (0, import_react38.createElement)("path", { d: "M3.4 15.2 8.4 10.6M16.6 15.2 11.6 10.6" })
 );
+var WeChatMark2 = () => (0, import_react38.createElement)(
+  "svg",
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react38.createElement)("path", { d: "M8.25 9.9 L7.4 9.9 L5.2 11.9 L5.2 9.9 L5 9.9 A2.4 2.4 0 0 1 2.6 7.5 L2.6 5.9 A2.4 2.4 0 0 1 5 3.5 L9 3.5 A2.4 2.4 0 0 1 11.4 5.9 L11.4 7.9" }),
+  (0, import_react38.createElement)("path", { d: "M10.7 7.9 L14.5 7.9 A2.5 2.5 0 0 1 17 10.4 L17 11.8 A2.5 2.5 0 0 1 14.5 14.3 L14.3 14.3 L14.3 16.1 L12.4 14.3 L10.7 14.3 A2.5 2.5 0 0 1 8.2 11.8 L8.2 10.4 A2.5 2.5 0 0 1 10.7 7.9 Z" })
+);
 var GenericMark = () => (0, import_react38.createElement)(
   "svg",
   { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
@@ -15132,7 +15138,8 @@ var CARD_GLYPHS = {
   ima: ImaMark,
   weread: WeReadMark,
   gmail: GmailMark,
-  qqmail: QQMailMark
+  qqmail: QQMailMark,
+  wechat: WeChatMark2
 };
 var ABOUT = {
   github: () => t("Repositories, issues, and pull requests"),

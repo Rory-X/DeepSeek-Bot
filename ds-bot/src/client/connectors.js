@@ -53,6 +53,12 @@ export const QQMailMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 
   h('rect', { x: 2.8, y: 4.8, width: 14.4, height: 10.4, rx: 2 }),
   h('path', { d: 'M3.4 15.2 8.4 10.6M16.6 15.2 11.6 10.6' }))
 
+// The WeChat card's mark: two chat bubbles of our own drawing. The back bubble's line stops
+// on the front one's edge, so the pair reads as one chat without any brand artwork.
+export const WeChatMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('path', { d: 'M8.25 9.9 L7.4 9.9 L5.2 11.9 L5.2 9.9 L5 9.9 A2.4 2.4 0 0 1 2.6 7.5 L2.6 5.9 A2.4 2.4 0 0 1 5 3.5 L9 3.5 A2.4 2.4 0 0 1 11.4 5.9 L11.4 7.9' }),
+  h('path', { d: 'M10.7 7.9 L14.5 7.9 A2.5 2.5 0 0 1 17 10.4 L17 11.8 A2.5 2.5 0 0 1 14.5 14.3 L14.3 14.3 L14.3 16.1 L12.4 14.3 L10.7 14.3 A2.5 2.5 0 0 1 8.2 11.8 L8.2 10.4 A2.5 2.5 0 0 1 10.7 7.9 Z' }))
+
 // A mark for a connector that names a glyph this client does not draw: a plug, of our own
 // drawing, says "a service" without pretending to be any service's logo.
 export const GenericMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
@@ -74,6 +80,7 @@ const CARD_GLYPHS = {
   weread: WeReadMark,
   gmail: GmailMark,
   qqmail: QQMailMark,
+  wechat: WeChatMark,
 }
 const ABOUT = {
   github: () => t('Repositories, issues, and pull requests'),
