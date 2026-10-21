@@ -2,10 +2,11 @@
 // channel is a WeChat endpoint bound to one Bot and one transport; Webhook posts notices to a
 // receiver, ClawBot logs in through the module's own command. The host sends the fields and
 // the live bits (inbound address, login step) as data; this card only draws them.
-import { createElement as h, useState } from 'react'
+import { createElement as h, useEffect, useRef, useState } from 'react'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
 import { SettingField, declaredSettingsOf, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
+import { CONSENT_POINTS, POLL_INTERVAL_MS, POLL_LIMIT_MS, connectBlocked, consentGate, loginActions, loginDetail, loginOf, loginStateOf, loginText, qrSourceOf, shouldPoll } from './wechat-login.js'
 
 // Two chat bubbles of our own drawing, one weight throughout: a larger one at the upper
 // left and a smaller one at the lower right, each with two eyes and a short tail. No brand
@@ -53,13 +54,6 @@ const channelStatus = (row) => {
   return t('Not connected')
 }
 
-const loginText = (login) => {
-  if (login.state === 'qr') return t('Scan the QR code with WeChat to link this channel.')
-  if (login.state === 'logged-in') return login.account ? t('Logged in as {account}', { account: login.account }) : t('Credentials saved')
-  if (login.state === 'expired') return t('This QR code expired. Refresh it to try again.')
-  return t('Not logged in yet.')
-}
-
 // One channel: its own settings, level and connection. The module card above it holds the
 // add button and the summary; the row holds every action for this channel.
 export function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = false, onToggle, lastOne = false }) {
@@ -71,6 +65,8 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
   const [removeAsk, setRemoveAsk] = useState(false)
   const [confirmTransport, setConfirmTransport] = useState(false)
   const [copied, setCopied] = useState(null)
+  const [consentAcknowledged, setConsentAcknowledged] = useState(false)
+  const [consentDismissed, setConsentDismissed] = useState(false)
   const fields = declaredSettingsOf(row)
   const savedTransport = transportOf(row)
   const settingValue = (field) => {
@@ -96,7 +92,8 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
     const note = typeof levelNotes[id] === 'string' && levelNotes[id] !== '' ? levelNotes[id] : null
     return note ?? fallbackNote
   }
-  const connectNote = levelBlocked(currentLevel)
+  const clawbotConnectNote = connectBlocked(transportOf(row), loginOf(row)) ? t('Log in to link this channel first.') : null
+  const connectNote = clawbotConnectNote ?? levelBlocked(currentLevel)
   const run = (task, after) => {
     setBusy(true)
     setError(null)
@@ -146,7 +143,7 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
   const disconnect = () => { if (busy) return; void run(() => actions.connectorDisconnect(row.id)) }
   const test = () => { if (busy) return; void run(() => actions.connectorTest(row.id)) }
   const remove = () => { if (busy || lastOne) return; void run(() => actions.connectorDeleteInstance(row.id), () => setRemoveAsk(false)) }
-  const command = action => { if (busy) return; void run(() => actions.connectorCommand(row.id, action)) }
+  const command = (action, args) => { if (busy) return; void run(() => actions.connectorCommand(row.id, action, args)) }
   const copy = async (key, text) => {
     if (typeof text !== 'string' || text === '') return
     try {
@@ -243,21 +240,68 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
         h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => void copy('token', inbound.token) }, copied === 'token' ? t('Copied') : t('Copy'))),
       h('div', { className: 'bt-connector-hint' }, t('Copy these into the WeChat push settings.')))
     : null
-  const login = transportOf(row) === 'clawbot' && row.login !== null && typeof row.login === 'object' && typeof row.login.state === 'string' ? row.login : null
-  const qr = login !== null && login.state === 'qr' && typeof login.qr === 'string' && login.qr.startsWith('data:image/png;base64,') ? login.qr : null
-  const loginActions = login === null
-    ? null
-    : login.state === 'qr'
-      ? [h('button', { key: 'refresh', type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => command('login-refresh') }, t('Refresh QR')),
-        h('button', { key: 'cancel', type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => command('login-cancel') }, t('Cancel'))]
-      : login.state === 'logged-in' || login.state === 'expired'
-        ? [h('button', { key: 'refresh', type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => command('login-refresh') }, t('Re-scan'))]
-        : [h('button', { key: 'start', type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => command('login-start') }, t('Log in'))]
-  const loginBlock = login !== null
-    ? h('div', { className: 'bt-connector-setting bt-wechat-login', 'data-login-state': login.state },
-      qr !== null ? h('img', { className: 'bt-wechat-qr', src: qr, alt: t('QR code') }) : null,
-      h('div', { className: 'bt-connector-hint' }, loginText(login)),
-      loginActions !== null ? h('div', { className: 'bt-connector-form-row' }, loginActions) : null)
+  const login = transportOf(row) === 'clawbot' ? loginOf(row) : null
+  const loginState = loginStateOf(login)
+  const qr = qrSourceOf(login)
+  // The two states that wait on the phone ask the host for news until it settles. The host
+  // runs one poll at a time; this only keeps the beat, and stops at the limit.
+  const polling = transportOf(row) === 'clawbot' && shouldPoll(login)
+  const pollingRef = useRef(polling)
+  pollingRef.current = polling
+  useEffect(() => {
+    if (!polling) return undefined
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      if (Date.now() - startedAt >= POLL_LIMIT_MS) { clearInterval(timer); return }
+      actions.connectorCommand(row.id, 'login-poll').catch(() => {})
+    }, POLL_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [polling, row.id])
+  // Leaving the screen mid-sign-in stops the host's own wait too.
+  useEffect(() => () => {
+    if (pollingRef.current) actions.connectorCommand(row.id, 'login-cancel').catch(() => {})
+  }, [row.id])
+  const showConsent = transportOf(row) === 'clawbot' && consentGate(login, consentAcknowledged) && !consentDismissed
+  const startLogin = () => {
+    if (transportOf(row) === 'clawbot' && loginState === 'logged-out' && login !== null && login.consentRequired === true && consentAcknowledged !== true) {
+      setConsentDismissed(false)
+      return
+    }
+    command('login-start')
+  }
+  const consentBlock = showConsent
+    ? h('div', { className: 'bt-connector-setting bt-wechat-consent', 'data-login-consent': '' },
+      h('div', { className: 'bt-connector-action-title' }, t('Sign-in risks')),
+      h('ul', { className: 'bt-wechat-consent-points' }, CONSENT_POINTS.map(point => h('li', { key: point, className: 'bt-connector-hint' }, t(point)))),
+      h('div', { className: 'bt-connector-form-row' },
+        h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: () => setConsentDismissed(true) }, t('Cancel')),
+        h('button', {
+          type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy,
+          onClick: () => { setConsentAcknowledged(true); command('login-start', { consent: true }) },
+        }, busy ? t('Starting…') : t('I understand, continue'))))
+    : null
+  const loginActionsNow = login === null || loginState === 'logged-in' || showConsent ? [] : loginActions(login)
+  const loginButtons = loginActionsNow.map(item => h('button', {
+    key: item.id, type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy,
+    onClick: () => {
+      if (item.id === 'start') { startLogin(); return }
+      command(item.command, item.args)
+    },
+  }, busy ? t('Working…') : item.label))
+  const loginDetailText = login === null ? null : loginDetail(login)
+  const loginBlock = transportOf(row) === 'clawbot'
+    ? h('div', { className: 'bt-connector-setting bt-wechat-login', 'data-login-state': loginState ?? 'logged-out' },
+      h('div', { className: 'bt-wechat-login-head' },
+        h('span', { className: 'bt-wechat-beta' }, t('Beta')),
+        h('span', { className: 'bt-connector-hint' }, t('Scanning login is beta and has not been tested on a real device. A failure does not affect the Webhook channel.'))),
+      showConsent
+        ? consentBlock
+        : h('div', null,
+          qr !== null ? h('img', { className: 'bt-wechat-qr', src: qr, alt: t('QR code') }) : null,
+          loginText(login) !== null ? h('div', { className: 'bt-connector-hint' }, loginText(login)) : null,
+          loginDetailText !== null ? h('div', { className: 'bt-connector-hint bt-wechat-login-detail' }, loginDetailText) : null,
+          h('div', { className: 'bt-connector-hint' }, t('Incoming messages from this channel only answer you.')),
+          loginButtons.length > 0 ? h('div', { className: 'bt-connector-form-row' }, loginButtons) : null))
     : null
   const headActions = []
   if (transportOf(row) === 'webhook' && row.canTest === true && row.state === 'ready') {

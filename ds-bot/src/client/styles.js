@@ -697,6 +697,10 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-wechat-docs{padding:2px 0 0}
 .bt-wechat-transport{margin-left:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-ink-3);padding:0 6px;border-radius:6px;background:var(--hover)}
 .bt-wechat-login{display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0;min-width:0}
+.bt-wechat-login-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;text-align:center}
+.bt-wechat-beta{flex:none;font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;border:.5px solid var(--bt-line-2);color:var(--bt-ink-3);text-transform:uppercase;letter-spacing:.04em}
+.bt-wechat-consent-points{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;text-align:left}
+.bt-wechat-login-detail{color:var(--bt-ink-3)}
 .bt-wechat-qr{width:168px;height:168px;border-radius:10px;border:.5px solid var(--bt-line-2);background:var(--bt-main);padding:6px;box-sizing:border-box}
 .bt-wechat-inbound{display:flex;flex-direction:column;gap:8px;border:.5px solid var(--bt-line);border-radius:10px;padding:10px 12px;min-width:0}
 .bt-wechat-copy-row{display:flex;align-items:center;gap:8px;min-width:0}
