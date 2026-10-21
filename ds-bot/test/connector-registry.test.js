@@ -146,16 +146,38 @@ test('a broken multi-instance declaration fails at load with the file name', asy
   }
 })
 
-test('only OAuth connectors can be instances', async () => {
+test('a custom module that declares its credentials can be instances', async () => {
   const { dir, cleanup } = withModules({
-    'demo.js': `export default { id: 'demo', displayName: 'Demo', mode: 'rest-tools', api: 'https://demo.test', instances: {} }\n`,
+    'wechat.js': `export default { id: 'wechat', displayName: 'WeChat', mode: 'custom', tokenSecret: 'WECHAT_TOKEN', instances: { min: 1, max: 8 } }\n`,
+    'wecom.js': `export default { id: 'wecom', displayName: 'WeCom', mode: 'custom', credentials: [{ name: 'WECOM_KEY' }], instances: {} }\n`,
   })
   try {
-    await assert.rejects(loadConnectorModules(dir), /per-instance credentials: oauth-mcp/)
+    const loaded = await loadConnectorModules(dir)
+    assert.deepEqual(loaded.wechat.instances, { prefix: 'wechat', min: 1, max: 8 })
+    assert.deepEqual(loaded.wecom.instances, { prefix: 'wecom', min: 1, max: 8 })
   } finally {
     cleanup()
   }
 })
+
+test('instances are refused for a mode that cannot keep credentials per instance', async () => {
+  const cases = [
+    [`mode: 'rest-tools', api: 'https://demo.test', instances: {}`, 'rest-tools without declared credentials'],
+    [`mode: 'custom', instances: {}`, 'custom without declared credentials'],
+    [`mode: 'notify', instances: {}`, 'notify'],
+  ]
+  for (const [fragment, label] of cases) {
+    const { dir, cleanup } = withModules({
+      'demo.js': `export default { id: 'demo', displayName: 'Demo', ${fragment} }\n`,
+    })
+    try {
+      await assert.rejects(loadConnectorModules(dir), /instances needs per-instance credentials/, label)
+    } finally {
+      cleanup()
+    }
+  }
+})
+
 
 test('a module id may not take the id another module reserves for an instance', async () => {
   const { dir, cleanup } = withModules({

@@ -6,6 +6,7 @@
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { credentialFields } from '../connector-setup.js'
 
 export const CONNECTOR_DIR = import.meta.dirname
 export const CONNECTOR_ID = /^[a-z][a-z0-9-]{0,39}$/
@@ -99,8 +100,14 @@ const checkInstances = (file, id, connector) => {
   if (id.length + 2 > 40) {
     throw new Error(`Connector module ${file} ("${id}") instances needs an id short enough for a "-2" instance`)
   }
-  if (connector.mode !== 'oauth-mcp') {
-    throw new Error(`Connector module ${file} ("${id}") instances needs a mode with per-instance credentials: oauth-mcp`)
+  // Every instance needs credentials of its own: an OAuth grant is addressed by instance
+  // id, and a custom module declares the credentials it stores per instance (the framework
+  // keeps them under a per-instance secret name). A mode without that would make two
+  // instances share one authorization or one secret, so it is refused here.
+  const perInstanceCredentials = connector.mode === 'oauth-mcp'
+    || (connector.mode === 'custom' && credentialFields(connector).length > 0)
+  if (!perInstanceCredentials) {
+    throw new Error(`Connector module ${file} ("${id}") instances needs per-instance credentials: an OAuth grant, or declared credentials in custom mode`)
   }
   const min = instances.min ?? 1
   const max = instances.max ?? 8
