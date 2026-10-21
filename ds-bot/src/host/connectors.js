@@ -30,6 +30,27 @@ import { buildToolIndex, createCallTool, createSearchTool } from './vercel-toolb
 const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 const CHECK_TIMEOUT_MS = 15_000
 
+// A notification connector sends at most 20 messages a minute: a Bot that loops must not
+// flood the user's phone. The count lives per host and per connector, so one connector's
+// burst never blocks another's sends, and tests of different hosts never limit each other.
+const NOTIFY_SENDS_PER_MINUTE = 20
+const notifySentAt = new WeakMap()
+const takeNotifySend = (rt, id, name) => {
+  let byConnector = notifySentAt.get(rt)
+  if (byConnector === undefined) {
+    byConnector = new Map()
+    notifySentAt.set(rt, byConnector)
+  }
+  const now = Date.now()
+  const list = (byConnector.get(id) ?? []).filter(at => now - at < 60_000)
+  if (list.length >= NOTIFY_SENDS_PER_MINUTE) {
+    byConnector.set(id, list)
+    throw new Error(`${name} has sent ${NOTIFY_SENDS_PER_MINUTE} messages in the last minute; wait a moment and try again.`)
+  }
+  list.push(now)
+  byConnector.set(id, list)
+}
+
 // The read tools Vercel's server offers that DS Bot exposes. Everything else it lists
 // (write and destructive calls, environment values) is never registered.
 const VERCEL_READ_TOOLS = [
@@ -886,7 +907,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     if (levelOf(id) !== 'write') return { token: credentialKeyOf(connector), dispose: [] }
     if (connector.needsChatId === true && chatIdOf(state, id) === undefined) return { token: credentialKeyOf(connector), dispose: [] }
     const toolName = connector.notify.toolName ?? `notify_${id}`
-    const automatic = () => state.connectors?.[id]?.autoPush === true
+    // Automatic sends are the default: a notification connector exists to deliver without
+    // a card. Only an explicit `autoPush: false` turns the per-message approval back on.
+    const automatic = () => state.connectors?.[id]?.autoPush !== false
     // An automatic send skips the card; it still leaves one audit entry, never the message.
     const recordAutomatic = (result) => {
       const prior = state.connectors?.[id] ?? {}
@@ -908,6 +931,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       },
       send: async (text) => {
         try {
+          // One shared limit for an automatic send and an approved one: a connector that
+          // floods never reaches the service, and the tool error says why in words.
+          takeNotifySend(rt, id, connector.displayName)
           const sent = await connector.notify.send({
             token: secretValueOf(connector, tokenName),
             chatId: chatIdOf(state, id),
@@ -1388,7 +1414,8 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
             mode: 'notify',
             chatId: connector.needsChatId === true ? chatIdOf(state, id) ?? null : null,
             canTest: notifyTokenOf(connector) !== undefined,
-            autoPush: state.connectors?.[id]?.autoPush === true,
+            // The value in force, not just the stored switch: unset means automatic.
+            autoPush: state.connectors?.[id]?.autoPush !== false,
             inputs: credentialFields(connector),
           }
         : {}),
@@ -1855,8 +1882,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       await refresh(body.id, true)
       return connectorsView()
     },
-    // Automatic sends for one notification connector: the user turns this on once, and
-    // each later send is audited instead of asking on a card.
+    // Automatic sends for one notification connector are the default; this turns the
+    // per-message card back on (`enabled: false`) or off again. Each automatic send is
+    // audited instead of asked on a card.
     async 'connector-set-auto-push'(body) {
       known(body.id)
       const connector = options[body.id]
