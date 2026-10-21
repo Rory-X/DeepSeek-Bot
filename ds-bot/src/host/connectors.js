@@ -1593,9 +1593,18 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       }
       const plain = {}
       for (const [name, value] of Object.entries(values)) if (!secretNames.has(name)) plain[name] = value
+      // A module may refuse a save that would break a connected channel (WeChat refuses a
+      // transport change while ready or in error). The context carries the saved settings,
+      // the runtime state and the level; a one-argument module simply ignores them.
+      const prior = state.connectors?.[body.id] ?? {}
       let settings
       if (typeof connector.normalizeSettings === 'function') {
-        const normalized = connector.normalizeSettings({ ...plain }, instanceContextOf(body.id))
+        const normalized = connector.normalizeSettings({ ...plain }, {
+          ...instanceContextOf(body.id),
+          settings: prior.settings,
+          state: statuses.get(body.id)?.state ?? 'off',
+          level: levelOf(body.id),
+        })
         settings = normalized !== null && typeof normalized === 'object' && !Array.isArray(normalized) ? normalized : {}
       } else {
         settings = {}
@@ -1623,7 +1632,6 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
         const kept = rt.secretValue(write.name) !== undefined
         await rt.secretEndpoint('secret-set', { name: write.name, value: write.value, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
       }
-      const prior = state.connectors?.[body.id] ?? {}
       const authorized = connector.mode === 'oauth-mcp' && typeof connector.authorize === 'function'
         && (prior.authorizedAt !== undefined || prior.account !== undefined)
       if (authorized && grantSettingsChanged(prior.settings, settings)) {

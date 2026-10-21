@@ -48,7 +48,7 @@ export function wechatReadiness({ settings } = {}) {
   return undefined
 }
 
-export function normalizeWechatSettings(values = {}) {
+export function normalizeWechatSettings(values = {}, context = {}) {
   const given = values !== null && typeof values === 'object' ? values : {}
   const normalized = {}
   const label = trim(given.label).slice(0, 60)
@@ -56,6 +56,14 @@ export function normalizeWechatSettings(values = {}) {
   const transport = trim(given.transport)
   if (transport !== '') {
     if (!TRANSPORTS.includes(transport)) throw new Error('The transport is webhook or clawbot.')
+    // A connected channel keeps its transport: switching would leave the other transport's
+    // settings and messages dangling, so the user disconnects first. An off or never
+    // connected channel may switch freely.
+    const stateName = typeof context?.state === 'string' ? context.state : 'off'
+    const saved = trim(context?.settings?.transport) === 'clawbot' ? 'clawbot' : 'webhook'
+    if ((stateName === 'ready' || stateName === 'error') && saved !== transport) {
+      throw new Error('Disconnect this channel before changing the transport.')
+    }
     normalized.transport = transport
   }
   const botId = trim(given.botId)
