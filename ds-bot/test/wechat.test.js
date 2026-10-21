@@ -80,11 +80,12 @@ async function connectChannel(ctx, receiver, { id = 'wechat', settings = {} } = 
   return await rowOf(ctx, id)
 }
 
+const notifyNameOf = (id) => (id === 'wechat' ? 'wechat_notify' : `${id.replace('-', '_')}_notify`)
 const toWrite = async (ctx, id = 'wechat') => {
   assert.equal((await call(ctx, 'connector-set-level', { id, level: 'write' })).ok, true)
-  return until(async () => (ctx.registeredTools.has('wechat_notify') || ctx.registeredTools.has('wechat_2_notify') ? true : undefined), 'the write tool')
+  return until(async () => (ctx.registeredTools.has(notifyNameOf(id)) ? true : undefined), `the write tool of ${id}`)
 }
-const notifyToolOf = (ctx, id = 'wechat') => ctx.registeredTools.get(id === 'wechat' ? 'wechat_notify' : `${id.replace('-', '_')}_notify`)
+const notifyToolOf = (ctx, id = 'wechat') => ctx.registeredTools.get(notifyNameOf(id))
 
 // ---- test doubles (kept from the skeleton) ----
 test('the webhook receiver records a signed request and its signature verifies', async (t) => {
@@ -225,7 +226,34 @@ test.todo('P1-09 a secret given in settings is stored in Secrets, never in state
 test.todo('P1-10 deleting an instance stops its mount and leaves the other channel ready')
 test.todo('P1-11 profile wechat:false hides the rows and opens nothing')
 test.todo('P1-12 clearSecrets:[webhookSecret] clears the saved secret; text fields clear with an empty string')
-test.todo('P1-13 two instances never share a secret: wechat-2 writes WECHAT_WEBHOOK_SECRET_2 only (waits for F2b)')
+test('P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting it touches only its own', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  assert.equal((await call(ctx, 'connector-create-instance', { base: 'wechat' })).ok, true)
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat-2', values: { transport: 'webhook', botId: 'b2', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const connected = await call(ctx, 'connector-connect', { id: 'wechat-2', values: { WECHAT_WEBHOOK_SECRET: 'second-secret' } })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  await until(async () => ((await rowOf(ctx, 'wechat-2'))?.state === 'ready' ? true : undefined), 'wechat-2 ready')
+  const names = () => ((call(ctx, 'state', {})).then(view => view.value.secrets.map(secret => secret.name).sort()))
+  assert.ok((await names()).includes('WECHAT_WEBHOOK_SECRET'))
+  assert.ok((await names()).includes('WECHAT_WEBHOOK_SECRET_2'))
+  const json = JSON.stringify(await call(ctx, 'state', {}))
+  assert.equal(json.includes('second-secret'), false)
+  for (const row of await rowsOf(ctx)) {
+    assert.deepEqual(row.inputs.map(field => field.name), ['WECHAT_WEBHOOK_SECRET'])
+  }
+  await toWrite(ctx, 'wechat')
+  await toWrite(ctx, 'wechat-2')
+  assert.ok(ctx.registeredTools.has('wechat_notify') && ctx.registeredTools.has('wechat_2_notify'))
+  assert.equal((await call(ctx, 'connector-delete-instance', { id: 'wechat-2' })).ok, true)
+  assert.equal((await names()).includes('WECHAT_WEBHOOK_SECRET_2'), false)
+  assert.ok((await names()).includes('WECHAT_WEBHOOK_SECRET'))
+  assert.equal(ctx.registeredTools.has('wechat_2_notify'), false)
+})
 
 // ---- P2: inbound listener, binding and replies ----
 test.todo('P2-01 the listener binds 127.0.0.1 only: address is asserted, and no configuration can make it 0.0.0.0')
