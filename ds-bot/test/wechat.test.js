@@ -959,7 +959,20 @@ test('P2-17 the read level answers inbound while wechat_notify stays unregistere
   assert.deepEqual([answered.status, answered.json.reply], [200, 'hi'])
   assert.equal(ctx.registeredTools.has('wechat_notify'), false)
 })
-test.todo('P2-18 an unsupported connector-command action is refused: per-action allow-list, args checked, login-* only on clawbot')
+test('P2-18 the module declares no commands, so connector-command refuses every action', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  for (const action of ['login-start', 'login-refresh', 'anything']) {
+    const refused = await call(ctx, 'connector-command', { id: 'wechat', action })
+    assert.equal(refused.ok, false, action)
+    assert.match(refused.error.message, /has no commands/)
+  }
+  // The P3 login actions stay unclaimed until the ClawBot transport has something to run.
+  assert.equal((await call(ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { token: 'x' } })).ok, false)
+})
 test.todo('P2-20 visibility: channel sessions never appear in search, read_own_chat, the index, the sidebar or another session')
 test.todo('P2-22a memory: no review enumeration, no memory prompt injection and no MEMORY.md entry for channel sessions')
 test.todo('P2-22b parts: channel sessions are excluded from checkpoints and segments')
