@@ -8,6 +8,7 @@ const TIMEOUT_MS = 10_000
 const GENERIC_TEXT_MAX = 4_000
 const WECOM_TEXT_MAX = 2_048
 const SECRET_NAME = 'WECHAT_WEBHOOK_SECRET'
+const URL_SECRET = 'WECHAT_WEBHOOK_URL'
 const TEST_TEXT = 'DS Bot: the WeChat channel works.'
 const TRANSPORTS = ['webhook', 'clawbot']
 const FORMATS = ['generic', 'wecom']
@@ -22,10 +23,22 @@ export const WECHAT_SETTINGS = [
   { name: 'label', label: 'Name' },
   { name: 'transport', label: 'Transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }] },
   { name: 'botId', label: 'Bot', kind: 'bot', required: true },
-  { name: 'webhookUrl', label: 'Push webhook URL' },
+  // The push webhook URL carries its own key (a WeCom group bot URL), so it is stored as a
+  // credential: the card only ever sees saved/replace/remove, never the value.
+  { name: 'webhookUrl', label: 'Push webhook URL', kind: 'secret', secret: URL_SECRET },
   { name: 'webhookFormat', label: 'Format', kind: 'segmented', options: [{ value: 'generic', label: 'Generic JSON' }, { value: 'wecom', label: 'WeCom group bot' }] },
   { name: 'webhookSecret', label: 'Webhook secret', kind: 'secret', secret: SECRET_NAME },
 ]
+
+// Mirrors the framework's F2b per-instance naming (base for the first instance, `_2` for
+// `wechat-2`). It is used only to ask the credential store whether this instance already has
+// a URL: the framework remains the only writer and the value is never read out here.
+const secretNameFor = (instanceId, base) => {
+  const id = trim(instanceId)
+  if (id === '' || id === 'wechat') return base
+  const match = /^wechat-([1-9][0-9]*)$/.exec(id)
+  return match === null ? base : `${base}_${match[1]}`
+}
 
 const webhookOf = (settings) => {
   const raw = trim(settings?.webhookUrl)
@@ -42,14 +55,58 @@ const webhookOf = (settings) => {
 
 // A channel is ready once it knows which Bot it speaks for and where to post. P1 keeps the
 // secret optional: a receiver that cannot verify a signature still gets its notice.
-export function wechatReadiness({ settings, rt } = {}) {
+export function wechatReadiness({ settings, rt, instance } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
   if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release. Use the Webhook transport.'
   const botId = trim(values.botId)
   if (botId === '') return 'Choose a Bot for this channel.'
   if (typeof rt?.botOf === 'function' && rt.botOf(botId) === undefined) return 'The Bot this channel is bound to no longer exists. Choose another Bot.'
-  if (trim(values.webhookUrl) === '') return 'Add the push webhook URL for this channel.'
+  const stored = typeof rt?.secretValue === 'function'
+    ? rt.secretValue(secretNameFor(instance?.id, URL_SECRET))
+    : undefined
+  if (trim(values.webhookUrl) === '' && (typeof stored !== 'string' || stored === '')) return 'Add the push webhook URL for this channel.'
   return undefined
+}
+
+// The URL a read or send path should use: the legacy plain setting (before migration, or
+// after a failed migration) first, then the credential the framework resolved per instance.
+const secretValueOfField = (rt, secrets, secretName, name) => {
+  const fromMount = secrets !== null && typeof secrets === 'object' ? secrets[name] : undefined
+  if (typeof fromMount === 'string') return fromMount
+  if (typeof secretName !== 'function' || typeof rt?.secretValue !== 'function') return undefined
+  try {
+    const value = rt.secretValue(secretName(name))
+    return typeof value === 'string' ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const webhookUrlOf = (settings, secrets) => {
+  const values = settings !== null && typeof settings === 'object' ? settings : {}
+  const legacy = trim(values.webhookUrl)
+  if (legacy !== '') return legacy
+  const stored = secrets !== null && typeof secrets === 'object' ? secrets[URL_SECRET] : undefined
+  return typeof stored === 'string' ? stored : ''
+}
+
+// A URL saved by an older release lives in the settings as plain text. Move it into the
+// credential store once, and only clear the plain value after the write succeeded: a failed
+// write keeps the URL usable for outbound posts and is retried by the next mount.
+async function migrateWebhookUrl({ rt, id, settings, secretName }) {
+  const legacy = trim(settings?.webhookUrl)
+  if (legacy === '') return
+  await rt.loadSecrets?.()
+  const name = secretName(URL_SECRET)
+  if (rt.secretValue?.(name) === undefined) {
+    await rt.secretEndpoint('secret-set', { name, value: legacy, purpose: 'WeChat push webhook URL', scope: [] })
+  }
+  const prior = rt.state.connectors?.[id]?.settings
+  if (prior === null || typeof prior !== 'object' || typeof prior.webhookUrl !== 'string') return
+  const next = { ...prior }
+  delete next.webhookUrl
+  rt.state.connectors = { ...rt.state.connectors, [id]: { ...rt.state.connectors[id], settings: next } }
+  await rt.save()
 }
 
 export function normalizeWechatSettings(values = {}, context = {}) {
@@ -169,7 +226,10 @@ export default {
   // A base name only: the framework's per-instance naming (F2b) adds the `_2` suffix, so
   // two channels never share one secret. Until F5 adds optional secret fields to the
   // settings form, Connect must carry one value; readiness still treats signing as optional.
-  credentials: [{ name: SECRET_NAME, label: 'Webhook secret', required: false }],
+  credentials: [
+    { name: SECRET_NAME, label: 'Webhook secret', required: false },
+    { name: URL_SECRET, label: 'Push webhook URL', required: false },
+  ],
   normalizeSettings: normalizeWechatSettings,
   readiness: wechatReadiness,
   capabilities: [
@@ -185,14 +245,14 @@ export default {
   },
   // What the card draws besides the settings: the level descriptions, whether Test can run,
   // and (P2) the inbound address. Display only, so a failing hook never breaks the card.
-  view({ id, settings, rt }) {
+  view({ id, settings, rt, secrets }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const hub = inboundFor(rt)
     const inbound = hub.viewOf(id)
     const webhook = trim(values.transport) !== 'clawbot'
     return {
       transport: webhook ? 'webhook' : 'clawbot',
-      canTest: webhook && trim(values.webhookUrl) !== '',
+      canTest: webhook && webhookUrlOf(values, secrets) !== '',
       levels: [
         { id: 'read', title: 'Read', description: 'Only receive and answer the messages this channel brings in.' },
         { id: 'write', title: 'Full access', description: 'Also send notices for you; every notice asks for your approval first.' },
@@ -207,7 +267,7 @@ export default {
   // One test notice through the same path a real notice takes. A failure stays on the card
   // without turning the channel off.
   async test({ settings, secrets, secretValue }) {
-    const values = settings !== null && typeof settings === 'object' ? settings : {}
+    const values = { ...(settings !== null && typeof settings === 'object' ? settings : {}), webhookUrl: webhookUrlOf(settings, secrets) }
     const address = webhookOf(values)
     if (address === undefined) throw new Error('Add the push webhook URL for this channel.')
     const secret = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
@@ -222,7 +282,16 @@ export default {
     const botId = trim(values.botId)
     if (botId === '') throw new Error('Choose a Bot for this channel.')
     if (rt.botOf(botId) === undefined) throw new Error('The Bot this channel is bound to no longer exists. Choose another Bot.')
-    if (webhookOf(values) === undefined) throw new Error('Add the push webhook URL for this channel.')
+    // Older state keeps the URL as a plain setting; move it into the credential store before
+    // this mount reads anything, keeping the plain value if the write fails.
+    try {
+      if (typeof secretName === 'function') await migrateWebhookUrl({ rt, id, settings: values, secretName })
+    } catch (error) {
+      rt.warn?.('ds-bot: the WeChat push URL of %s was not moved into the credential store: %s', id, error?.message ?? error)
+    }
+    await rt.loadSecrets?.()
+    const effective = { ...values, webhookUrl: webhookUrlOf(values, { ...secrets, [URL_SECRET]: secretValueOfField(rt, secrets, secretName, URL_SECRET) }) }
+    if (webhookOf(effective) === undefined) throw new Error('Add the push webhook URL for this channel.')
     const secretValue = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
       ? secrets[SECRET_NAME]
       : (typeof token === 'string' && token !== '' ? token : undefined)
@@ -245,7 +314,7 @@ export default {
     }
     const tools = []
     if (level === 'write') {
-      tools.push(notifyTool({ channel: id, settings: values, secretOf, approve }))
+      tools.push(notifyTool({ channel: id, settings: effective, secretOf, approve }))
     }
     return { tools, close: () => { void inboundFor(rt).detach(id) } }
   },

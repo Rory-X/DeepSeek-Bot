@@ -479,7 +479,7 @@ test('P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting 
   const json = JSON.stringify(await call(ctx, 'state', {}))
   assert.equal(json.includes('second-secret'), false)
   for (const row of await rowsOf(ctx)) {
-    assert.deepEqual(row.inputs.map(field => field.name), ['WECHAT_WEBHOOK_SECRET'])
+    assert.deepEqual(row.inputs.map(field => field.name), ['WECHAT_WEBHOOK_SECRET', 'WECHAT_WEBHOOK_URL'])
   }
   await toWrite(ctx, 'wechat')
   await toWrite(ctx, 'wechat-2')
@@ -1014,6 +1014,101 @@ test('P2-11 a Bot that disappears mid-channel answers 502 or the bot-unavailable
 test.todo('P2-24 the tool denylist holds and untrusted travels in the headerFor message header')
 test.todo('P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504)')
 test.todo('P3: open the ClawBot option and its token field')
+
+// ---- G: the push webhook URL is a credential, and older state migrates once ----
+const legacyHome = (settings) => {
+  const home = teamHome()
+  writeFileSync(join(home, 'state.json'), JSON.stringify({
+    ...TEAM,
+    connectors: { wechat: { level: 'read', settings } },
+  }))
+  return home
+}
+
+test('G-1 an older plain webhook URL moves into the credential store', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const home = legacyHome({ transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' })
+  const { ctx, rt } = setup({ home })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.load()
+  await call(ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the migrated channel')
+  const row = await rowOf(ctx)
+  assert.equal(row.fields.find(field => field.name === 'webhookUrl').saved, true)
+  assert.equal(row.canTest, true)
+  // The plain value is gone from the state and the credential store has it.
+  await until(() => (readFileSync(join(home, 'state.json'), 'utf8').includes('webhookUrl') ? undefined : true), 'the legacy value to clear')
+  assert.equal(JSON.stringify(rt.state.connectors.wechat.settings).includes(receiver.url), false)
+})
+
+test('G-2 a URL that cannot be stored keeps working outbound and is retried later', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const home = legacyHome({ transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' })
+  const { ctx, rt } = setup({ home })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.load()
+  // The credential store refuses the write; the plain URL must stay usable.
+  const real = rt.secretEndpoint
+  rt.secretEndpoint = async (endpoint, body) => {
+    if (endpoint === 'secret-set' && body.name === 'WECHAT_WEBHOOK_URL') throw new Error('store down')
+    return await real(endpoint, body)
+  }
+  await call(ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the fallback channel')
+  assert.equal(rt.state.connectors.wechat.settings.webhookUrl, receiver.url)
+  await toWrite(ctx, 'wechat')
+  const pending = notifyToolOf(ctx).execute({ text: 'with the old url' }, { agent: { id: 'm1' } })
+  const shown = await until(() => card(ctx), 'the notice approval')
+  await answerCard(ctx, shown.id, ['Allow once'])
+  assert.equal(await pending, 'Sent.')
+  assert.equal(receiver.requests.at(-1).json.text, 'with the old url')
+})
+
+test('G-3 a restart does not migrate the same URL twice', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const home = legacyHome({ transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' })
+  const first = setup({ home })
+  t.after(() => rmSync(home, { recursive: true, force: true, maxRetries: 5 }))
+  await first.rt.load()
+  await call(first.ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(first.ctx))?.state === 'ready' ? true : undefined), 'the first migrate')
+  await first.ctx.dispose()
+  const second = setup({ home })
+  t.after(async () => { await second.ctx.dispose() })
+  const writes = []
+  const real = second.rt.secretEndpoint
+  second.rt.secretEndpoint = async (endpoint, body) => { if (endpoint === 'secret-set') writes.push(body.name); return await real(endpoint, body) }
+  await second.rt.load()
+  await call(second.ctx, 'connector-retry', { id: 'wechat' })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(writes.includes('WECHAT_WEBHOOK_URL'), false, 'the second mount found the credential and did not write again')
+})
+
+test('G-4 wechat-2 migrates under the _2 name and its readiness sees it', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const home = teamHome()
+  writeFileSync(join(home, 'state.json'), JSON.stringify({
+    ...TEAM,
+    connectors: { wechat: { level: 'read', settings: { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' } }, 'wechat-2': { level: 'read', settings: { transport: 'webhook', botId: 'b2', webhookUrl: receiver.url, webhookFormat: 'generic' } } },
+  }))
+  const { ctx, rt } = setup({ home })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.load()
+  await call(ctx, 'connector-retry', { id: 'wechat' })
+  await call(ctx, 'connector-retry', { id: 'wechat-2' })
+  await until(async () => { const rows = await rowsOf(ctx); return ['wechat', 'wechat-2'].every(id => rows.find(row => row.id === id)?.state === 'ready') ? true : undefined }, 'both migrated rows')
+  await until(() => {
+    const saved = readFileSync(join(home, 'secrets.json'), 'utf8')
+    return saved.includes('WECHAT_WEBHOOK_URL') && saved.includes('WECHAT_WEBHOOK_URL_2') ? true : undefined
+  }, 'both URL credentials')
+  const row = await rowOf(ctx)
+  assert.equal(row.levelNote, undefined, 'readiness sees the migrated URL')
+  assert.equal(row.levelNotes, undefined)
+})
 
 test('F4 a bound Bot that is gone shows before Connect, not only as a mount error', async (t) => {
   const receiver = await startWebhookReceiver()
