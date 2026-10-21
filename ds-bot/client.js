@@ -422,6 +422,8 @@ var ZH = {
   "Not logged in — this channel cannot send or receive yet.": "未登录，该通道暂时无法收发消息",
   "Incoming messages from this channel only answer you.": "该通道只回应你的消息",
   "Log in to link this channel first.": "请先登录再连接此通道",
+  "Automatic sends": "自动发送",
+  "Send messages as they happen. Turn this off to approve each one first.": "消息到达即发送；关闭后每条都先征求你的批准。",
   "Sign in first to send a test message.": "请先登录，才能发送测试消息。",
   "Beta": "Beta",
   "Scanning login is beta and has not been tested on a real device. A failure does not affect the Webhook channel.": "扫码登录为 beta，尚未真机验证；失败不影响 Webhook 通道",
@@ -2222,6 +2224,8 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     // a Test message found or the reader typed.
     connectorTest: (id) => after(call2("connector-test", { id })),
     connectorSetChat: (id, chatId) => after(call2("connector-set-chat", { id, chatId })),
+    // One notification connector sends without an approval card until the user turns this off.
+    connectorSetAutoPush: (id, enabled) => after(call2("connector-set-auto-push", { id, enabled })),
     // A connector whose card declares several credential fields sends them together, by the
     // secret name the host named each field with.
     connectorConnectValues: (id, values) => after(call2("connector-connect", { id, values })),
@@ -16095,6 +16099,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   })) : [{ name: "token", label: tokenFieldLabel, required: true }];
   const given = (field) => (values[field.name] ?? "").trim();
   const notify = connector.mode === "notify";
+  const autoPush = connector.autoPush === true;
   const [chatDraft, setChatDraft] = (0, import_react39.useState)(null);
   const chatValue = chatDraft ?? (typeof connector.chatId === "string" ? connector.chatId : "");
   const configured = typeof connector.clientId === "string" && connector.clientId !== "";
@@ -16365,6 +16370,42 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         }, t("Save"))
       ),
       typeof connector.chatId === "string" && connector.chatId !== "" ? null : (0, import_react39.createElement)("div", { className: "bt-connector-hint" }, t("Send the bot a message first, then press Test."))
+    ) : null,
+    // One notification connector can send without an approval card. The host decides the
+    // default; this switch only reports it and flips it.
+    notify && connector.state === "ready" ? (0, import_react39.createElement)(
+      "div",
+      { className: "bt-connector-setting bt-connector-auto-push", "data-auto-push": autoPush === true ? "on" : "off" },
+      (0, import_react39.createElement)("div", { className: "bt-connector-action-title" }, t("Automatic sends")),
+      (0, import_react39.createElement)("div", { className: "bt-connector-hint" }, t("Send messages as they happen. Turn this off to approve each one first.")),
+      (0, import_react39.createElement)(
+        "div",
+        { className: "bt-connector-form-row", role: "radiogroup", "aria-label": t("Automatic sends") },
+        (0, import_react39.createElement)("button", {
+          type: "button",
+          role: "radio",
+          "aria-checked": autoPush !== true,
+          className: "bt-soft bt-soft-sm",
+          disabled: busy,
+          "data-auto-push-choice": "off",
+          onClick: (event) => {
+            event.stopPropagation();
+            if (autoPush === true) void run(actions.connectorSetAutoPush(connector.id, false));
+          }
+        }, t("Off")),
+        (0, import_react39.createElement)("button", {
+          type: "button",
+          role: "radio",
+          "aria-checked": autoPush === true,
+          className: "bt-soft bt-soft-sm",
+          disabled: busy,
+          "data-auto-push-choice": "on",
+          onClick: (event) => {
+            event.stopPropagation();
+            if (autoPush !== true) void run(actions.connectorSetAutoPush(connector.id, true));
+          }
+        }, t("On"))
+      )
     ) : null,
     levelNote !== null ? (0, import_react39.createElement)("div", { className: "bt-connector-hint" }, levelNote) : null,
     needsReauth ? (0, import_react39.createElement)("div", { className: "bt-connector-hint" }, t("Click Connect to authorize with this access level again.")) : null,
