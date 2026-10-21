@@ -1965,3 +1965,118 @@ test('readiness receives the read-only runtime and the instance', async (t) => {
   assert.equal(typeof context.rt.botOf, 'function')
   assert.deepEqual(context.instance, { base: 'demo', id: 'demo' })
 })
+
+// A module that opens a listener can fail asynchronously; that failure must land on the
+// connector's own row instead of escaping the host, and other connectors still mount.
+test('an async mount failure becomes the connector row error', async (t) => {
+  const broken = {
+    displayName: 'Broken channel',
+    mode: 'custom',
+    tokenSecret: 'BROKEN_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    mount: async () => { throw Object.assign(new Error('listen EADDRINUSE: address already in use 127.0.0.1:8799'), { code: 'EADDRINUSE' }) },
+  }
+  const healthy = {
+    displayName: 'Healthy channel',
+    mode: 'custom',
+    tokenSecret: 'HEALTHY_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    mount: () => ({ tools: [{ name: 'healthy_ping', description: 'Ping', parameters: { type: 'object', properties: {} }, execute: async () => 'pong' }] }),
+  }
+  const state = { connectors: { demo: { level: 'read', settings: {} }, healthy: { level: 'read', settings: {} } } }
+  const { ctx, rt, home } = hostSetup({ state, definition: broken, extraDefinitions: { healthy }, secrets: { BROKEN_TOKEN: 'b', HEALTHY_TOKEN: 'h' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  await until(() => (rowOf(rt, 'demo')?.state === 'error' ? true : undefined), 'the bind failure row')
+  const row = rowOf(rt, 'demo')
+  assert.match(row.error, /EADDRINUSE/)
+  assert.match(row.error, /8799/)
+  assert.equal(rowOf(rt, 'healthy').state, 'ready')
+  assert.equal(await ctx.registeredTools.get('healthy_ping').execute({}), 'pong')
+})
+
+// F10: the async mount path must not change how the shipped connectors settle, how a
+// failure is reported, how the queue serialises mounts, or how a removal while a mount is
+// running ends.
+test('the shipped connectors still settle after the async mount path', async (t) => {
+  const { ctx } = setup()
+  t.after(async () => { await ctx.dispose() })
+  await new Promise(resolve => setTimeout(resolve, 150))
+  const rows = (await call(ctx, 'state')).value.connectors
+  assert.equal(rows.length, 10)
+  assert.deepEqual(rows.filter(row => row.state === 'error'), [])
+  assert.deepEqual(rows.filter(row => row.state === 'ready'), [])
+})
+
+test('an async mount failure is reported, never unhandled', async (t) => {
+  const rejections = []
+  const listener = reason => rejections.push(reason)
+  process.on('unhandledRejection', listener)
+  t.after(() => process.off('unhandledRejection', listener))
+  const broken = {
+    displayName: 'Broken channel',
+    mode: 'custom',
+    tokenSecret: 'BROKEN_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    mount: async () => { throw Object.assign(new Error('listen EADDRINUSE: address already in use 127.0.0.1:8799'), { code: 'EADDRINUSE' }) },
+  }
+  const { ctx, rt, home } = hostSetup({ state: { connectors: { demo: { level: 'read', settings: {} } } }, definition: broken, secrets: { BROKEN_TOKEN: 'b' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(() => (rowOf(rt, 'demo')?.state === 'error' ? true : undefined), 'the bind failure row')
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(rejections.length, 0)
+})
+
+test('async mounts still run one at a time through the queue', async (t) => {
+  const steps = []
+  const slow = {
+    displayName: 'Slow channel',
+    mode: 'custom',
+    tokenSecret: 'SLOW_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    mount: async () => {
+      steps.push('start')
+      await new Promise(resolve => setTimeout(resolve, 25))
+      steps.push('end')
+      return { tools: [] }
+    },
+  }
+  const { ctx, rt, home } = hostSetup({ state: { connectors: { demo: { level: 'read', settings: {} } } }, definition: slow, secrets: { SLOW_TOKEN: 's' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(() => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the slow mount')
+  steps.length = 0
+  await Promise.all([
+    rt.connectorEndpoint('connector-retry', { id: 'demo' }),
+    rt.connectorEndpoint('connector-retry', { id: 'demo' }),
+  ])
+  assert.deepEqual(steps, ['start', 'end', 'start', 'end'])
+})
+
+test('a removed instance whose mount was running leaves nothing behind', async (t) => {
+  const slow = {
+    displayName: 'Slow channel',
+    mode: 'custom',
+    tokenSecret: 'SLOW_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    instances: { prefix: 'demo', min: 1, max: 4 },
+    mount: async () => {
+      await new Promise(resolve => setTimeout(resolve, 40))
+      return { tools: [{ name: 'demo_ping', description: 'Ping', parameters: { type: 'object', properties: {} }, execute: async () => 'pong' }] }
+    },
+  }
+  const state = { connectors: { demo: { level: 'read', settings: {} }, 'demo-2': { level: 'read', settings: {} } } }
+  const { ctx, rt, home, disposed } = hostSetup({ state, definition: slow, secrets: { SLOW_TOKEN: 's', SLOW_TOKEN_2: 's2' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(() => (rowOf(rt, 'demo-2')?.state === 'ready' ? true : undefined), 'the slow instance')
+  const retry = rt.connectorEndpoint('connector-retry', { id: 'demo-2' })
+  const removed = rt.connectorEndpoint('connector-delete-instance', { id: 'demo-2' })
+  await Promise.all([retry, removed])
+  assert.equal(rowOf(rt, 'demo-2'), undefined)
+  // A tool the queued mount registered is disposed by the removal that follows it.
+  assert.ok(disposed.includes('demo_ping'))
+})
