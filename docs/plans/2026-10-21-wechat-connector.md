@@ -2,7 +2,7 @@
 
 - 日期：2026-10-21
 - 状态：设计稿（待 Chief 审）
-- 相关：DS Bot 0.2.0 现网源码（`~/.dsh/profiles/web/node_modules/ds-bot`）、参考实现 `wechat-clawbot`（`docs/ilink-protocol.md`）
+- 相关：DS Bot 0.2.0 现网源码（`~/.dsh/profiles/web/node_modules/ds-bot`）、协议规范：腾讯官方 `Tencent/openclaw-weixin` 的 `docs/protocol_zh_CN.md`（依据 npm `@tencent-weixin/openclaw-weixin@2.4.10`）
 - 一句话：一个多实例连接器，每个实例是一条「通道」，通道 1:1 绑定一个 Bot；P1 做通用 HTTP webhook 出站通知，P2 做入站并把回复同步回传，P3 只做个人微信 ClawBot/iLink 的可行性，P4 做卡片与媒体，P5 QA/打包。
 
 ## 1. 目标与不做什么
@@ -421,7 +421,7 @@ card: { glyph:'wechat', about, docsUrl }
 | C1 | 记忆/检索排除面列全：`memory.js:632`、`store.js:392 indexSessions()`、`chat-index.js`、`parts.js` 显式 exclude | §6.1 表（逐文件落点）；§12 F2a | Relay 设计 + Forge 实现 | Forge 1–1.5d（含在 F2a） | §11.18、新增 P2-22 |
 | C2 | v1 只做 1 条 conversation（创建者 DM）；≤8 + LRU 移 P4 | §5 粒度 | Relay（设计） | 0 | 新增 P2-23 |
 | C3 | channel session denylist 逐项点名；`untrusted` 进 `headerFor` 消息头 | §5 工具白名单/`untrusted`；§12 F2a | Relay 设计 + Forge 实现 | 含在 F2a | P2-15、新增 P2-24 |
-| C4 | P3 token 只进 0600/凭据库；协议来源=腾讯官方公开文档 `docs/protocol_zh_CN.md` + npm `@tencent-weixin/openclaw-weixin@2.4.10`（固定 commit/文档哈希）；风险按「无第三方 SLA、官方支持范围是 OpenClaw 插件、接口随版本变更、个人号风控仍存在」写明；禁止「逆向/破解」与无依据的「违反条款」表述；真机测试须用户明确书面同意；v1 不做自动登录/扫码 | §4 协议来源/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
+| C4 | P3 token 只进 0600/凭据库；协议来源=腾讯官方公开文档 `docs/protocol_zh_CN.md` + npm `@tencent-weixin/openclaw-weixin@2.4.10`（固定 commit/文档哈希）；风险按「无第三方 SLA、官方支持范围是 OpenClaw 插件、接口随版本变更、个人号风控仍存在」写明；禁止旧的低证据表述与无依据的「违反条款」说法，统一按官方协议文档口径；真机测试须用户明确书面同意；v1 不做自动登录/扫码 | §4 协议来源/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
 | C5 | `secretNameOf`：删实例只删自己、名字过校验、两实例不同名 | §2 凭据表；§12 F2b | Forge | 0.25d | P1-11、新增 P1-14 |
 | F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14 | Forge | 1d | P1-02/04/09/13 |
 | F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14 | Prism（Pixel 复核） | 0.5d | P1-02 |
