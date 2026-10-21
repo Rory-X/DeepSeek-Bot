@@ -6,7 +6,7 @@
 // docs/plans/2026-10-21-wechat-test-checklist.md. P1-14 is folded into P1-13; P2-25 is
 // covered by P2-13a/13b. Tests marked (F5) wait for the host view/test hooks.
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -36,8 +36,7 @@ const teamHome = () => {
   return home
 }
 
-function setup({ config = {} } = {}) {
-  const home = teamHome()
+function setup({ config = {}, home = teamHome() } = {}) {
   const registered = []
   const disposed = []
   const ctx = fakeContext()
@@ -614,14 +613,58 @@ test('P2-21 HMAC is mandatory and Bearer optional (default off); with Bearer on,
   assert.equal(right.status, 202)
 })
 test.todo('P2-02 a taken port leaves only that channel error with port and fix; the plugin boots and other connectors are ready (waits for the host to surface an async mount error)')
-test.todo('P2-07 a replayed msgId answers 200 duplicate and starts 0 turns; after a plugin restart it is still swallowed')
+test('P2-07 a replayed msgId answers 200 duplicate and starts 0 turns; after a restart it is still swallowed', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const first = setup()
+  t.after(() => rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }))
+  await connectChannel(first.ctx, receiver)
+  const sent = await postInbound({ url: await inboundUrl(first.ctx), secret: 'test-secret', msgId: 'm-restart', sender: 'creator', text: 'hello' })
+  assert.equal(sent.status, 202)
+  const again = await postInbound({ url: await inboundUrl(first.ctx), secret: 'test-secret', msgId: 'm-restart', sender: 'creator', text: 'hello' })
+  assert.deepEqual([again.status, again.json.duplicate], [200, true])
+
+  // The idempotency ring is persisted, so a restart still knows this msgId. The state file
+  // is flushed on unmount, not only by the five-second merge timer.
+  await first.ctx.dispose()
+  await until(() => (readFileSync(join(first.home, 'state.json'), 'utf8').includes('m-restart') ? true : undefined), 'the seen msgId to be saved')
+  const second = setup({ home: first.home })
+  t.after(async () => { await second.ctx.dispose() })
+  await connectChannel(second.ctx, receiver)
+  const replay = await postInbound({ url: await inboundUrl(second.ctx), secret: 'test-secret', msgId: 'm-restart', sender: 'creator', text: 'hello' })
+  assert.deepEqual([replay.status, replay.json.duplicate], [200, true])
+  // Neither copy reached a channel Session.
+  const state = (await call(second.ctx, 'state', {})).value
+  assert.equal(state.channels?.wechat?.conversations === undefined || Object.keys(state.channels.wechat.conversations).length === 0, true)
+})
+
 test.todo('P2-08 the same text under a new msgId starts a turn (no content-hash swallowing)')
 test.todo('P2-11 a deleted or failing Bot answers 502 bot-unavailable with the fallback sentence and no retry loop')
 test.todo('P2-12 two inbound messages are serialized: each reply answers its own msgId, correlated to that turn end')
 test.todo('P2-13a a synchronous wait over 20s answers 504 timeout; P2-13b an async turn over 120s sends a failure callback')
 test.todo('P2-14 rebinding A->B archives the A session, creates a new session for B, and answers in-flight requests 503 channel-rebound')
 test.todo('P2-15 an inbound turn that needs approval gets the WeChat notice only: the card stays unanswered and the tool runs 0 times')
-test.todo('P2-16 logs, diagnostics and state.json carry no sender text, no message body and no secret')
+test('P2-16 logs, diagnostics and state.json carry no sender text, no message body and no secret', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(() => rmSync(home, { recursive: true, force: true, maxRetries: 5 }))
+  await connectChannel(ctx, receiver)
+  const marker = 'BODY-MARKER-6f3a'
+  const sender = 'raw-sender-9c1'
+  const sent = await postInbound({ url: await inboundUrl(ctx), secret: 'test-secret', msgId: 'm-1', sender, text: marker })
+  assert.equal(sent.status, 202)
+  // The live view carries the sender hash and the id, never the sender text or the body.
+  const live = JSON.stringify((await call(ctx, 'state', {})).value)
+  assert.equal(live.includes(marker), false)
+  assert.equal(live.includes(sender), false)
+  assert.equal(live.includes('test-secret'), false)
+  await ctx.dispose()
+  const saved = readFileSync(join(home, 'state.json'), 'utf8')
+  assert.equal(saved.includes(marker), false)
+  assert.equal(saved.includes(sender), false)
+  assert.equal(saved.includes('test-secret'), false)
+})
 test.todo('P2-17 the read level still answers inbound while wechat_notify stays unregistered')
 test.todo('P2-18 an unsupported connector-command action is refused: per-action allow-list, args checked, login-* only on clawbot')
 test.todo('P2-20 visibility: channel sessions never appear in search, read_own_chat, the index, the sidebar or another session')
