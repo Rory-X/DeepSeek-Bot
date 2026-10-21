@@ -11,7 +11,7 @@
 |---|---|---|
 | P1-01 | 实例：创建 `wechat-2`、删除、再建第 9 个 | 前两者成功；第 9 个返回宿主原文，客户端禁用 Add |
 | P1-02 | 卡片字段描述符 | `fields` 带 `kind`（text/secret/bot/segmented）；`webhookSecret` 只有 `saved`，无 value |
-| P1-03 | readiness 三缺 + secret 可选 | 缺 `botId` / Bot 被删 / 缺 `webhookUrl` 三缺各给一句 `levelNotes`、无 Connect；`webhookSecret` 本批可选（设计 §3.1「secret 可选」），缺省仍 ready、出站 POST 不签名，配了才签。`connector-connect` 至少带一个凭据值是框架约束；只保存 settings 时框架会自动挂载 |
+| P1-03 | readiness 三缺 + secret 可选 | 缺 `botId` / Bot 被删 / 缺 `webhookUrl` 三缺各给一句 `levelNotes`、无 Connect；`webhookSecret` 本批可选（设计 §3.1「secret 可选」），缺省仍 ready、出站 POST 不签名，配了才签。`connector-connect` 至少带一个凭据值是框架约束；只保存 settings 时框架会自动挂载。**下一批起（F4）**：Bot 不存在由 `levelNotes` 提示、行保持 off，不再走 mount 错误 |
 | P1-04 | `connector-connect` webhook | 转 `ready`；`canTest:true`；P1 无 `inbound` 字段 |
 | P1-05 | `wechat_notify` 级别 | 仅 write 级注册；line 含通道名与 webhook host，不含完整 URL/secret |
 | P1-06 | 审批四路 | allow 只 POST 一次；deny/dismiss/timeout/cancel 各 0 请求 |
@@ -113,7 +113,7 @@
 |---|---|---|---|---|
 | P1-01 | P1-01 a channel is one instance: create adds wechat-2, delete removes it, the ninth is refused | 115 | pass | 实例上限/创建/删除/第九个拒绝 |
 | P1-02 | P1-02 the row carries the channel settings and never a secret value | 131 | pass | settings 行与 secret 不下发 |
-| P1-03 | P1-03 readiness names the missing field and a deleted Bot is a mount error | 145 | pass | readiness 文案 + Bot 不存在挂载错误 |
+| P1-03 | P1-03 readiness names the missing field and a deleted Bot before Connect | 145 | pass | readiness 文案 + Bot 不存在 → `levelNotes` + off（F4 起；P1 上线时曾为 mount 错误） |
 | P1-04 | P1-04 connect turns the channel ready and P1 has no inbound field | 167 | pass | connect 后 ready、P1 无 inbound/login |
 | P1-05 | P1-05 wechat_notify asks first, runs once on allow and never on deny | 178 | pass | 审批卡、allow 一次、deny 零请求 |
 | P1-06 | P1-06 outbound errors map to the fixed sentences and over-long text fails first | 206 | pass | 错误映射 + 4000/2048 限长 |
