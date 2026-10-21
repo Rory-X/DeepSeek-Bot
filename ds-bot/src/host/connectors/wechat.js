@@ -3,6 +3,7 @@
 // any HTTP receiver). The inbound listener, channel Sessions and ClawBot login land in P2/P3.
 import { createHmac, randomBytes } from 'node:crypto'
 import { inboundFor } from '../wechat-inbound.js'
+import { createIlinkClient, maskAccount, qrImageOf, qrStateOf } from '../wechat-ilink.js'
 
 const TIMEOUT_MS = 10_000
 // v0.2.0 refuses a tool without an output contract; a notice renders as its text.
@@ -16,6 +17,39 @@ const TRANSPORTS = ['webhook', 'clawbot']
 const FORMATS = ['generic', 'wecom']
 
 const trim = value => (typeof value === 'string' ? value.trim() : '')
+const ILINK_TOKEN = 'WECHAT_ILINK_TOKEN'
+export const CONSENT_VERSION = 1
+// Login state lives in memory only: the QR and its poll belong to the open card, the token
+// (once confirmed) lives in the credential store.
+const ilinkLogins = new WeakMap()
+const loginOf = (rt, id) => {
+  let byId = ilinkLogins.get(rt)
+  if (byId === undefined) { byId = new Map(); ilinkLogins.set(rt, byId) }
+  let login = byId.get(id)
+  if (login === undefined) { login = { state: 'logged-out', qr: null, scanned: false, account: null, error: null, expiresAt: null, qrcode: null }; byId.set(id, login) }
+  return login
+}
+const consentOf = (rt, id) => rt.state?.channels?.[id]?.ilink?.consent
+const consentCurrent = (rt, id) => consentOf(rt, id)?.version === CONSENT_VERSION
+const rememberConsent = (rt, id) => {
+  const channels = rt.state.channels ?? (rt.state.channels = {})
+  const channel = channels[id] ?? (channels[id] = {})
+  channel.ilink = { ...(channel.ilink ?? {}), consent: { at: Date.now(), version: CONSENT_VERSION } }
+  void rt.save().catch(() => {})
+}
+const loginViewOf = (rt, id) => {
+  const login = loginOf(rt, id)
+  return {
+    state: login.state,
+    qr: login.qr,
+    scanned: login.scanned === true,
+    account: login.account,
+    error: login.error,
+    expiresAt: login.expiresAt,
+    consentRequired: login.state === 'logged-out' && !consentCurrent(rt, id),
+  }
+}
+
 const textLimit = format => (format === 'wecom' ? WECOM_TEXT_MAX : GENERIC_TEXT_MAX)
 
 // The card's settings. A secret is a credential, not a setting: the framework stores it in
@@ -23,7 +57,7 @@ const textLimit = format => (format === 'wecom' ? WECOM_TEXT_MAX : GENERIC_TEXT_
 // transport only; the ClawBot option opens with P3, and the validation still accepts it.
 export const WECHAT_SETTINGS = [
   { name: 'label', label: 'Name' },
-  { name: 'transport', label: 'Transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }] },
+  { name: 'transport', label: 'Transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }, { value: 'clawbot', label: 'ClawBot (beta)' }] },
   { name: 'botId', label: 'Bot', kind: 'bot', required: true },
   // The push webhook URL carries its own key (a WeCom group bot URL), so it is stored as a
   // credential: the card only ever sees saved/replace/remove, never the value.
@@ -51,7 +85,12 @@ const webhookOf = (settings) => {
 // secret optional: a receiver that cannot verify a signature still gets its notice.
 export function wechatReadiness({ settings, rt, secretName, secretValue } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
-  if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release. Use the Webhook transport.'
+  if (trim(values.transport) === 'clawbot') {
+    const token = typeof secretName === 'function' && typeof secretValue === 'function'
+      ? secretValue(secretName(ILINK_TOKEN))
+      : undefined
+    return typeof token === 'string' && token !== '' ? undefined : 'Scan the QR code to connect this ClawBot channel. (beta; Webhook channels are not affected)'
+  }
   const botId = trim(values.botId)
   if (botId === '') return 'Choose a Bot for this channel.'
   if (typeof rt?.botOf === 'function' && rt.botOf(botId) === undefined) return 'The Bot this channel is bound to no longer exists. Choose another Bot.'
@@ -248,6 +287,76 @@ export default {
   },
   // What the card draws besides the settings: the level descriptions, whether Test can run,
   // and (P2) the inbound address. Display only, so a failing hook never breaks the card.
+  // The ClawBot login steps: the QR is fetched only by these commands, never by the view,
+  // and consent is required once per risk-text version before any code is requested.
+  commands: {
+    'login-start': { transport: 'clawbot', args: ['consent'] },
+    'login-refresh': { transport: 'clawbot', args: [] },
+    'login-cancel': { transport: 'clawbot', args: [] },
+    'login-poll': { transport: 'clawbot', args: [] },
+  },
+  async command({ id, rt, action, args, secretName }) {
+    const login = loginOf(rt, id)
+    const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
+    const client = createIlinkClient({
+      base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+      pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
+      backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
+    })
+    if (action === 'login-cancel') {
+      loginOf(rt, id).state = 'logged-out'
+      Object.assign(login, { state: 'logged-out', qr: null, scanned: false, account: null, error: null, expiresAt: null, qrcode: null })
+      return
+    }
+    if (action === 'login-start' || action === 'login-refresh') {
+      if (!consentCurrent(rt, id) && args?.consent !== true) {
+        throw Object.assign(new Error('Confirm the ClawBot login risks first'), { code: 'bot/invalid' })
+      }
+      if (args?.consent === true) rememberConsent(rt, id)
+      if (action === 'login-poll') {
+        // handled below
+      }
+      try {
+        const answer = await client.getQrCode()
+        const image = qrImageOf(answer?.qrcode_img_content)
+        Object.assign(login, {
+          state: 'qr',
+          qrcode: typeof answer?.qrcode === 'string' ? answer.qrcode : null,
+          qr: image ?? null,
+          scanned: false,
+          account: null,
+          error: image === undefined ? 'The QR code was returned in an unsupported form; update DS Bot.' : null,
+          expiresAt: typeof answer?.expires_at === 'string' ? answer.expires_at : null,
+        })
+      } catch (error) {
+        Object.assign(login, { state: 'protocol-error', qr: null, scanned: false, error: String(error?.message ?? error) })
+      }
+      return
+    }
+    if (action === 'login-poll') {
+      if (login.qrcode === null) return
+      try {
+        const answer = await client.pollQrStatus(login.qrcode)
+        const mapped = qrStateOf(answer?.status)
+        if (mapped === 'confirmed') {
+          const token = typeof answer?.bot_token === 'string' ? answer.bot_token : ''
+          const name = secretName(ILINK_TOKEN)
+          if (token !== '') await rt.secretEndpoint('secret-set', { name, value: token, purpose: 'WeChat ClawBot login', scope: [] })
+          Object.assign(login, { state: 'logged-in', qr: null, scanned: false, account: maskAccount(answer?.ilink_user_id) ?? null, error: null, expiresAt: null, qrcode: null })
+        } else if (mapped === 'scanned') {
+          Object.assign(login, { state: 'qr', scanned: true })
+        } else if (mapped === 'verified-needed') {
+          Object.assign(login, { state: 'verified-needed' })
+        } else if (mapped === 'blocked') {
+          Object.assign(login, { state: 'blocked' })
+        } else if (mapped === 'expired') {
+          Object.assign(login, { state: 'expired', qr: null, scanned: false, qrcode: null })
+        }
+      } catch (error) {
+        Object.assign(login, { state: 'protocol-error', error: String(error?.message ?? error) })
+      }
+    }
+  },
   view({ id, settings, rt, secrets }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const hub = inboundFor(rt)
@@ -264,6 +373,7 @@ export default {
       ...(Object.keys(inbound).length === 0 && webhook ? hub.needsSecret() : {}),
       ...inbound,
       ...hub.statusOf(id),
+      ...(webhook ? {} : { login: loginViewOf(rt, id) }),
     }
   },
   // One test notice through the same path a real notice takes. A failure stays on the card
@@ -284,6 +394,7 @@ export default {
     const botId = trim(values.botId)
     if (botId === '') throw new Error('Choose a Bot for this channel.')
     if (rt.botOf(botId) === undefined) throw new Error('The Bot this channel is bound to no longer exists. Choose another Bot.')
+    if (trim(values.transport) === 'clawbot') return { tools: [] }
     // Older state keeps the URL as a plain setting; move it into the credential store before
     // this mount reads anything, keeping the plain value if the write fails.
     try {

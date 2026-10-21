@@ -462,7 +462,7 @@ test('P1-15 the F5 card shape: field kinds, level descriptions, canTest and inst
   const byName = Object.fromEntries(row.fields.map(field => [field.name, field]))
   assert.equal(byName.botId.kind, 'bot')
   assert.equal(byName.botId.required, true)
-  assert.deepEqual(byName.transport.options.map(option => option.value), ['webhook']) // P1: ClawBot option comes with P3.
+  assert.deepEqual(byName.transport.options.map(option => option.value), ['webhook', 'clawbot']) // ClawBot arrives with this release (beta).
   assert.equal(byName.webhookSecret.kind, 'secret')
   assert.equal(byName.webhookSecret.saved, true)
   assert.equal('value' in byName.webhookSecret, false)
@@ -986,19 +986,25 @@ test('P2-17 the write level answers inbound and keeps wechat_notify registered',
   assert.deepEqual([answered.status, answered.json.reply], [200, 'hi'])
   assert.equal(ctx.registeredTools.has('wechat_notify'), true)
 })
-test('P2-18 the module declares no commands, so connector-command refuses every action', async (t) => {
+test('P2-18 the login commands are declared and transport-gated', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await connectChannel(ctx, receiver)
-  for (const action of ['login-start', 'login-refresh', 'anything']) {
+  for (const action of ['login-start', 'login-refresh', 'login-cancel', 'login-poll']) {
     const refused = await call(ctx, 'connector-command', { id: 'wechat', action })
     assert.equal(refused.ok, false, action)
-    assert.match(refused.error.message, /has no commands/)
+    assert.equal(refused.error.code, 'bot/unsupported-transport', action)
   }
-  // The P3 login actions stay unclaimed until the ClawBot transport has something to run.
-  assert.equal((await call(ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { token: 'x' } })).ok, false)
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'clawbot', botId: 'b1' } })).ok, true)
+  const unknown = await call(ctx, 'connector-command', { id: 'wechat', action: 'delete-everything' })
+  assert.equal(unknown.ok, false)
+  assert.equal(unknown.error.code, 'bot/unknown-action')
+  const noConsent = await call(ctx, 'connector-command', { id: 'wechat', action: 'login-start' })
+  assert.equal(noConsent.ok, false)
+  assert.equal(noConsent.error.code, 'bot/invalid')
 })
 test.todo('P2-20 visibility: channel sessions never appear in search, read_own_chat, the index, the sidebar or another session')
 test.todo('P2-22a memory: no review enumeration, no memory prompt injection and no MEMORY.md entry for channel sessions')
