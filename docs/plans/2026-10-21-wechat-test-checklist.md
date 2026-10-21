@@ -67,7 +67,7 @@
 | 缺 webhook URL | `Add the push webhook URL for this channel.` |
 | 缺 webhook secret（P2 入站才需要；P1 出站可选） | `Add a webhook secret for this channel before it can receive messages.` |
 | 端口被占 | `The inbound port <port> is already in use. Change wechat.listenPort in the profile or stop the process using that port.` |
-| clawbot 选到（P1 保留选项并标注本批不可用；登录随 P3） | `ClawBot is not available in this release; use Webhook.` |
+| clawbot 选到（P1 无 UI 入口；API 写入仍走同一 readiness，选项随 P3 开放） | `ClawBot is not available in this release. Use the Webhook transport.` |
 | 改 transport（已连接） | `Disconnect this channel before changing the transport.` |
 
 **入站 HTTP（JSON `{ok:false, code, message}`）**
@@ -125,7 +125,7 @@
 | P1-08 | P1-08 connector-test posts the fixed notice and a failure stays on the row | 326 | pass | test 钩子成功/失败/清 error |
 | P1-09 | P1-09 a secret saved on the card shows saved, never a value, and clearSecrets removes it | 349 | pass | secret saved / 不下发值 / clearSecrets |
 | P1-14 | P1-14 F2b naming invariants: bare first, _2 second, coexist, delete only its own | 367 | pass | ①裸名 ②_2 ③共存互不覆盖 ④删只删自己且首实例 ready |
-| P1-15 | P1-15 the F5 card shape: field kinds, level descriptions, canTest and instance.max | 390 | pass | F5 view/status：fields kind/levels description/canTest/instance.max/secret saved |
+| P1-15 | P1-15 the F5 card shape: field kinds, level descriptions, canTest and instance.max | 390 | pass | F5 view/status：fields kind/levels description/canTest/instance.max/secret saved；P1 只提供 Webhook 选项（ClawBot 随 P3） |
 | P1-13 | P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting it touches only its own | 409 | pass | 两通道 secret 共存 + 各自签名 + 删实例只删自己 |
 | P2-01 | P2-01 the listener binds 127.0.0.1 only: address is asserted, and no configuration can make it 0.0.0.0 | 447 | todo | 监听地址 127.0.0.1 |
 | P2-02 | P2-02 a taken port leaves only that channel error with port and fix; the plugin boots and other connectors are ready | 448 | todo | 端口被占降级（含 P1-11 的 listener 半边） |

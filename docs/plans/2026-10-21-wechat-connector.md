@@ -37,7 +37,7 @@
 | 字段 | 说明 |
 |---|---|
 | `label` | 卡片名，可空 |
-| `transport` | `webhook` 或 `clawbot`。**P1 卡片保留 ClawBot 选项，但 readiness 标注本批不可用**（登录随 P3）；内部校验与 API 写入仍接受 `clawbot` |
+| `transport` | `webhook` 或 `clawbot`。**P1 只暴露 webhook 选项，ClawBot 选项随 P3 开放**；内部校验与 API 写入仍接受 `clawbot` |
 | `botId` | **必填**，绑定一个 Bot；不存在则不 ready |
 | `webhookUrl` | webhook 模式的出站地址（企业微信群机器人 URL 或任意 HTTP 接收端） |
 | `webhookFormat` | `generic`（发送 `{text}`）或 `wecom`（发送企业微信 `{msgtype:'text',text:{content}}`） |
@@ -402,7 +402,7 @@ card: { glyph:'wechat', about, docsUrl }
 
 **readiness 与级别**
 
-- 缺 `botId`、Bot 不存在、webhook 模式缺 `webhookUrl`：通过 `levelNotes` 给每级原因（read/write 可不同），客户端禁用 Connect 与 write 级并显示宿主原文。clawbot 在 P1 不可用（登录随 P3）：卡片保留该选项，readiness 写 `ClawBot is not available in this release; use Webhook.`，不指向尚不存在的 token 输入框。
+- 缺 `botId`、Bot 不存在、webhook 模式缺 `webhookUrl`：通过 `levelNotes` 给每级原因（read/write 可不同），客户端禁用 Connect 与 write 级并显示宿主原文。clawbot 在 P1 不可用（登录随 P3）：P1 卡片只暴露 webhook 选项，API 写入 `clawbot` 时 readiness 写 `ClawBot is not available in this release. Use the Webhook transport.`，不指向尚不存在的 token 输入框。
 - `levels[].description` 用上表的文案（write 明确写「每次审批」）。
 
 **安全**
@@ -426,8 +426,8 @@ card: { glyph:'wechat', about, docsUrl }
 | C3 | channel session denylist 逐项点名；`untrusted` 进 `headerFor` 消息头 | §5 工具白名单/`untrusted`；§12 F2a | Relay 设计 + Forge 实现 | 含在 F2a | P2-15、新增 P2-24 |
 | C4 | P3 token 只进 0600/凭据库；协议来源=腾讯官方公开文档 `docs/protocol_zh_CN.md` + npm `@tencent-weixin/openclaw-weixin@2.4.10`（固定 commit/文档哈希）；风险按「无第三方 SLA、官方支持范围是 OpenClaw 插件、接口随版本变更、个人号风控仍存在」写明；禁止旧的低证据表述与无依据的额外合规指控，统一按官方协议文档口径；真机测试须用户明确书面同意；v1 不做自动登录/扫码 | §4 协议来源/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
 | C5 | `secretNameOf`：删实例只删自己、名字过校验、两实例不同名 | §2 凭据表；§12 F2b | Forge | 0.25d | P1-11、P1-14（独立命名不变量，另由 P1-13 覆盖共存/删除） |
-| F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14；§2（P1 保留 ClawBot 选项并标注本批不可用） | Forge | 1d | P1-02/04/09/13 |
-| F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14；§2（P1 保留 ClawBot 选项并标注本批不可用） | Prism（Pixel 复核） | 0.5d | P1-02 |
+| F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14；§2（P1 只暴露 Webhook 选项，ClawBot 随 P3） | Forge | 1d | P1-02/04/09/13 |
+| F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14；§2（P1 卡片只呈现 Webhook 选项，ClawBot 随 P3） | Prism（Pixel 复核） | 0.5d | P1-02 |
 | F7 | `normalizeSettings` 上下文扩展（含 `settings`/`state`/`level`），WeChat 的 P1-07 依赖它 | §12 F7；§14 设置保存 | Relay | 0.25d（已完成） | P1-07、P1-07b |
 | F8 | 自定义连接器 Disconnect 的 `off` 标记（否则可选凭据会 remount 回 ready；P1-07 断开→改 transport→重连的死结由它解开） | §12 F8；§6 状态机 | Relay | 0.25d（已完成） | P1-07；框架级：断开后重启仍 off、旧 team file 无标记行为不变、断开后行仍在且可改 transport/重连（`test/connectors.test.js`） |
 | A1 | P2 异步契约写死：`202 {ok,accepted}` + `callbackUrl`（HMAC、msgId 幂等、重试 3 次）；`wait` ≤20s；同步超时 `504 code:'timeout'` | §3.2 默认异步/同步模式 | Relay（设计）+ P2 实现 | 含在 P2 的 3d | §11.19、新增 P2-25 |
