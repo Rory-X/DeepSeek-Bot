@@ -6,7 +6,7 @@ import { createElement as h, useEffect, useRef, useState } from 'react'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
 import { SettingField, declaredSettingsOf, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
-import { CONSENT_POINTS, POLL_INTERVAL_MS, POLL_LIMIT_MS, connectBlocked, consentGate, loginActions, loginDetail, loginOf, loginStateOf, loginText, qrSourceOf, shouldPoll } from './wechat-login.js'
+import { CONSENT_POINTS, POLL_LIMIT_MS, connectBlocked, consentGate, loginActions, loginDetail, loginOf, loginStateOf, loginText, pollLoginSerially, qrSourceOf, shouldPoll } from './wechat-login.js'
 
 // Two chat bubbles of our own drawing, one weight throughout: a larger one at the upper
 // left and a smaller one at the lower right, each with two eyes and a short tail. No brand
@@ -250,12 +250,15 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
   pollingRef.current = polling
   useEffect(() => {
     if (!polling) return undefined
-    const startedAt = Date.now()
-    const timer = setInterval(() => {
-      if (Date.now() - startedAt >= POLL_LIMIT_MS) { clearInterval(timer); return }
-      actions.connectorCommand(row.id, 'login-poll').catch(() => {})
-    }, POLL_INTERVAL_MS)
-    return () => clearInterval(timer)
+    let cancelled = false
+    // One request at a time: the status call is a long poll, so a timer-driven burst would
+    // pile up behind the host. The loop asks again only after an answer comes back.
+    void pollLoginSerially({
+      poll: () => actions.connectorCommand(row.id, 'login-poll'),
+      cancelled: () => cancelled,
+      limitMs: POLL_LIMIT_MS,
+    })
+    return () => { cancelled = true }
   }, [polling, row.id])
   // Leaving the screen mid-sign-in stops the host's own wait too.
   useEffect(() => () => {
