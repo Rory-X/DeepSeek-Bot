@@ -97,7 +97,13 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     // Settings are plain values (a project id, a role name), saved in one request; the view
     // comes back with what the host normalized. A module that keeps several connections
     // takes the card's own name here too, which is why the input sits beside them.
-    connectorSetSettings: (id, values) => after(call('connector-set-settings', { id, values })),
+    // An empty secret value means "keep the stored one"; a secret the reader removed travels
+    // in `clearSecrets`, which the host applies to the stored credential.
+    connectorSetSettings: (id, values, options = {}) => after(call('connector-set-settings', {
+      id,
+      values,
+      ...(Array.isArray(options?.clearSecrets) && options.clearSecrets.length > 0 ? { clearSecrets: options.clearSecrets } : {}),
+    })),
     // One more card of a multi-instance module, and one fewer; both answer with the new view.
     connectorCreateInstance: base => after(call('connector-create-instance', { base })),
     connectorDeleteInstance: id => after(call('connector-delete-instance', { id })),
@@ -105,6 +111,9 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     // level the reader sees.
     connectorOauthStart: (id, level) => after(call('connector-oauth-start', { id, ...(typeof level === 'string' && level !== '' ? { level } : {}) })),
     connectorOauthApp: (id, clientId, clientSecret) => after(call('connector-oauth-app', { id, clientId, clientSecret })),
+    // One small module operation the generic endpoints do not cover (WeChat's ClawBot login).
+    // The action name travels as the module declares it; the host refuses unknown ones.
+    connectorCommand: (id, action, args) => after(call('connector-command', { id, action, ...(args === undefined ? {} : { args }) })),
     saveCapability: capability => after(call('capability-save', capability)),
     deleteCapability: name => after(call('capability-delete', { name })),
     approveCapability: name => after(call('capability-approve', { name })),

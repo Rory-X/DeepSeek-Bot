@@ -3,6 +3,8 @@ import { useMorph } from './motion.js'
 import { MaskedInput } from './secret-card.js'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
+import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf } from './connector-shared.js'
+import { WeChatCard } from './wechat-card.js'
 
 export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true },
   h('path', { d: 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z' }))
@@ -92,21 +94,6 @@ const TOKEN_CREATE = {
 const tokenLabel = id => (TOKEN_LABELS[id] ?? (() => t('Token')))()
 const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
 
-// A module may keep several connections — Neon keeps one per project — and then its view
-// sends one row per instance, each naming the module it belongs to. A row without
-// `instance` stays the single card every connector drew before.
-const instanceOf = (connector) => {
-  const value = connector?.instance
-  if (value === null || typeof value !== 'object') return null
-  if (typeof value.base !== 'string' || value.base === '') return null
-  if (typeof value.id !== 'string' || value.id === '') return null
-  return {
-    base: value.base,
-    id: value.id,
-    label: typeof value.label === 'string' ? value.label : '',
-    max: Number.isInteger(value.max) && value.max > 0 ? value.max : null,
-  }
-}
 // The soft cap is the host's, and only a guess when it names none.
 const INSTANCE_SOFT_MAX = 8
 const instanceMax = instance => (instance.max === null ? (instance.base === 'neon' ? INSTANCE_SOFT_MAX : null) : instance.max)
@@ -189,12 +176,6 @@ function groupStatusText(base, count) {
     ? t('Connected · 1 project authorization')
     : t('Connected · {count} project authorizations', { count })
 }
-
-const declaredSettingsOf = (connector) => (Array.isArray(connector.settings)
-  ? connector.settings.filter(field => field !== null && typeof field?.name === 'string' && field.name !== '')
-  : [])
-
-const levelsOfConnector = (connector) => (Array.isArray(connector.levels) ? connector.levels.filter(entry => entry !== null) : [])
 
 function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = useState(false)
@@ -509,10 +490,15 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
 
 // One project authorization: its own grant, its own settings and level, its own Connect. The
 // row is compact until opened; the module's card above it holds the policy in one place.
-function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded = false, onToggle }) {
+function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded = false, onToggle, bots = [] }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [settingDraft, setSettingDraft] = useState(null)
+  // A secret is never read back from the view: this map only holds a replacement while the
+  // reader is typing one, and the host keeps the stored secret when the request omits it.
+  const [secretDraft, setSecretDraft] = useState({})
+  // A saved secret can only be removed through `clearSecrets`; an empty value keeps it.
+  const [secretClears, setSecretClears] = useState([])
   const [removeAsk, setRemoveAsk] = useState(false)
   const [levelDraft, setLevelDraft] = useState(null)
   const [authorizeUrl, setAuthorizeUrl] = useState(null)
@@ -529,7 +515,10 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
     if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name]
     return typeof field.value === 'string' ? field.value : ''
   }
-  const settingsChanged = fields.some(field => settingValue(field) !== (typeof field.value === 'string' ? field.value : ''))
+  const settingsChanged = secretClears.length > 0 || fields.some((field) => {
+    if (settingKindOf(field) === 'secret') return Object.hasOwn(secretDraft, field.name) && String(secretDraft[field.name] ?? '').trim() !== ''
+    return settingValue(field) !== (typeof field.value === 'string' ? field.value : '')
+  })
   const run = (task, after) => {
     setBusy(true)
     setError(null)
@@ -537,8 +526,20 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
   }
   const saveSettings = () => {
     if (busy || !settingsChanged) return
-    const values = Object.fromEntries(fields.map(field => [field.name, settingValue(field).trim()]))
-    void run(actions.connectorSetSettings(connector.id, values), () => setSettingDraft(null))
+    const values = {}
+    for (const field of fields) {
+      if (settingKindOf(field) === 'secret') {
+        const replacement = String(secretDraft[field.name] ?? '').trim()
+        if (Object.hasOwn(secretDraft, field.name) && replacement !== '') values[field.name] = replacement
+        continue
+      }
+      values[field.name] = settingValue(field).trim()
+    }
+    void run(actions.connectorSetSettings(connector.id, values, { clearSecrets: secretClears }), () => {
+      setSettingDraft(null)
+      setSecretDraft({})
+      setSecretClears([])
+    })
   }
   const on = connector.state !== 'off'
   const levels = levelsOfConnector(connector)
@@ -548,7 +549,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
   // Unsaved settings do not unlock a level: the gate reads the saved values, so a filled but
   // unsaved form cannot switch to a level the host would refuse.
   const storedSetting = field => (typeof field.value === 'string' ? field.value : '').trim()
-  const settingsEmpty = declared.some(field => field.name !== 'label' && storedSetting(field) === '')
+  const settingsEmpty = declared.some(field => field.name !== 'label' && settingKindOf(field) !== 'secret' && storedSetting(field) === '')
   const levelBlocked = (id) => {
     const note = typeof levelNotes[id] === 'string' && levelNotes[id] !== '' ? levelNotes[id] : null
     if (note !== null) return note
@@ -589,14 +590,39 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
     if (busy) return
     void run(actions.connectorDeleteInstance(connector.id), () => setRemoveAsk(false))
   }
-  const fieldNode = field => h('label', { key: field.name, className: 'bt-connector-field' },
-    h('span', { className: 'bt-connector-field-name' }, typeof field.label === 'string' && field.label !== '' ? field.label : field.name),
-    h('div', { className: 'bt-q-field' }, h('input', {
-      className: 'bt-connector-input', value: settingValue(field), placeholder: field.placeholder ?? (typeof field.label === 'string' && field.label !== '' ? field.label : field.name), 'aria-label': field.label ?? field.name,
-      autoComplete: 'off', spellCheck: false, disabled: busy,
-      onChange: (event) => setSettingDraft(previous => ({ ...previous, [field.name]: event.target.value })),
-      onKeyDown: (event) => { if (event.key === 'Enter') saveSettings() },
-    })))
+  const fieldNode = (field) => {
+    const kind = settingKindOf(field)
+    return h(SettingField, {
+      key: field.name,
+      field,
+      value: kind === 'secret' ? '' : settingValue(field),
+      bots,
+      disabled: busy,
+      onChange: (next) => {
+        if (kind === 'secret') setSecretDraft(previous => ({ ...previous, [field.name]: next }))
+        else setSettingDraft(previous => ({ ...previous, [field.name]: next }))
+      },
+      onEnter: saveSettings,
+      secret: kind === 'secret'
+        ? {
+            editing: Object.hasOwn(secretDraft, field.name),
+            cleared: secretClears.includes(field.name),
+            value: secretDraft[field.name] ?? '',
+            onReplace: () => {
+              setSecretClears(previous => previous.filter(name => name !== field.name))
+              setSecretDraft(previous => ({ ...previous, [field.name]: '' }))
+            },
+            onCancel: () => setSecretDraft((previous) => { const next = { ...previous }; delete next[field.name]; return next }),
+            onChange: (next) => setSecretDraft(previous => ({ ...previous, [field.name]: next })),
+            onClear: () => {
+              setSecretDraft((previous) => { const next = { ...previous }; delete next[field.name]; return next })
+              setSecretClears(previous => (previous.includes(field.name) ? previous : [...previous, field.name]))
+            },
+            onUndo: () => setSecretClears(previous => previous.filter(name => name !== field.name)),
+          }
+        : null,
+    })
+  }
   const levelBlock = levels.length > 0
     ? h('div', { className: 'bt-connector-setting' },
       h('div', { className: 'bt-connector-action-title' }, t('Access level')),
@@ -761,7 +787,7 @@ function AddProjectForm({ base, baseId, existingIds, actions, onCreated, onCance
 // One card per module that keeps several connections: the base connection on top, and the
 // project authorizations it may carry inside the same panel. The list above the settings
 // shows the module once, not one card per project.
-function GroupCard({ rows, actions, readOnly = null }) {
+function GroupCard({ rows, actions, readOnly = null, bots = [] }) {
   const base = rows.find(row => row.id === instanceOf(row)?.base) ?? rows[0]
   const projects = rows.filter(row => row !== base)
   const instance = instanceOf(base)
@@ -861,6 +887,7 @@ function GroupCard({ rows, actions, readOnly = null }) {
                 readOnly,
                 expanded: openProject === row.id,
                 onToggle: () => setOpenProject(current => (current === row.id ? null : row.id)),
+                bots,
               }))),
             adding
               ? h(AddProjectForm, {
@@ -907,6 +934,7 @@ function connectorGroups(list) {
 export function ConnectorsPage({ roster, actions }) {
   const list = roster?.connectors ?? []
   const readOnly = typeof roster?.readOnly === 'string' && roster.readOnly !== '' ? roster.readOnly : null
+  const bots = Array.isArray(roster?.bots) ? roster.bots : []
   const rows = []
   for (const group of connectorGroups(list)) {
     if (group.base === null) {
@@ -914,7 +942,13 @@ export function ConnectorsPage({ roster, actions }) {
       rows.push(h(ConnectorRow, { key: connector.id, connector, actions, readOnly }))
       continue
     }
-    rows.push(h(GroupCard, { key: `${group.base}-group`, rows: group.rows, actions, readOnly }))
+    // WeChat keeps one module card with a row per channel; every other grouped module (Neon)
+    // keeps the base connection with its project authorizations inside.
+    if (group.base === 'wechat') {
+      rows.push(h(WeChatCard, { key: 'wechat-card', rows: group.rows, actions, readOnly, bots }))
+      continue
+    }
+    rows.push(h(GroupCard, { key: `${group.base}-group`, rows: group.rows, actions, readOnly, bots }))
   }
   return h('section', { className: 'bt-set-section' },
     h('div', { className: 'bt-set-card bt-connectors-card' }, rows.length === 0

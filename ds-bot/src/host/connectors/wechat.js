@@ -7,6 +7,7 @@ const TIMEOUT_MS = 10_000
 const GENERIC_TEXT_MAX = 4_000
 const WECOM_TEXT_MAX = 2_048
 const SECRET_NAME = 'WECHAT_WEBHOOK_SECRET'
+const TEST_TEXT = 'DS Bot: the WeChat channel works.'
 const TRANSPORTS = ['webhook', 'clawbot']
 const FORMATS = ['generic', 'wecom']
 
@@ -14,13 +15,15 @@ const trim = value => (typeof value === 'string' ? value.trim() : '')
 const textLimit = format => (format === 'wecom' ? WECOM_TEXT_MAX : GENERIC_TEXT_MAX)
 
 // The card's settings. A secret is a credential, not a setting: the framework stores it in
-// DSH's credential store and the card only ever sees saved/not-saved.
+// DSH's credential store and the card only ever sees saved/not-saved. P1 shows the Webhook
+// transport only; the ClawBot option opens with P3, and the validation still accepts it.
 export const WECHAT_SETTINGS = [
   { name: 'label', label: 'Name' },
-  { name: 'transport', label: 'Transport' },
-  { name: 'botId', label: 'Bot' },
+  { name: 'transport', label: 'Transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }] },
+  { name: 'botId', label: 'Bot', kind: 'bot', required: true },
   { name: 'webhookUrl', label: 'Push webhook URL' },
-  { name: 'webhookFormat', label: 'Format' },
+  { name: 'webhookFormat', label: 'Format', kind: 'segmented', options: [{ value: 'generic', label: 'Generic JSON' }, { value: 'wecom', label: 'WeCom group bot' }] },
+  { name: 'webhookSecret', label: 'Webhook secret', kind: 'secret', secret: SECRET_NAME },
 ]
 
 const webhookOf = (settings) => {
@@ -40,13 +43,13 @@ const webhookOf = (settings) => {
 // secret optional: a receiver that cannot verify a signature still gets its notice.
 export function wechatReadiness({ settings } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
-  if (trim(values.transport) === 'clawbot') return 'This ClawBot channel is not logged in. Paste its bot token in the channel settings.'
+  if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release. Use the Webhook transport.'
   if (trim(values.botId) === '') return 'Choose a Bot for this channel.'
   if (trim(values.webhookUrl) === '') return 'Add the push webhook URL for this channel.'
   return undefined
 }
 
-export function normalizeWechatSettings(values = {}) {
+export function normalizeWechatSettings(values = {}, context = {}) {
   const given = values !== null && typeof values === 'object' ? values : {}
   const normalized = {}
   const label = trim(given.label).slice(0, 60)
@@ -54,6 +57,14 @@ export function normalizeWechatSettings(values = {}) {
   const transport = trim(given.transport)
   if (transport !== '') {
     if (!TRANSPORTS.includes(transport)) throw new Error('The transport is webhook or clawbot.')
+    // A connected channel keeps its transport: switching would leave the other transport's
+    // settings and messages dangling, so the user disconnects first. An off or never
+    // connected channel may switch freely.
+    const stateName = typeof context?.state === 'string' ? context.state : 'off'
+    const saved = trim(context?.settings?.transport) === 'clawbot' ? 'clawbot' : 'webhook'
+    if ((stateName === 'ready' || stateName === 'error') && saved !== transport) {
+      throw new Error('Disconnect this channel before changing the transport.')
+    }
     normalized.transport = transport
   }
   const botId = trim(given.botId)
@@ -155,7 +166,7 @@ export default {
   // A base name only: the framework's per-instance naming (F2b) adds the `_2` suffix, so
   // two channels never share one secret. Until F5 adds optional secret fields to the
   // settings form, Connect must carry one value; readiness still treats signing as optional.
-  credentials: [{ name: SECRET_NAME, label: 'Webhook secret', required: true }],
+  credentials: [{ name: SECRET_NAME, label: 'Webhook secret', required: false }],
   normalizeSettings: normalizeWechatSettings,
   readiness: wechatReadiness,
   capabilities: [
@@ -166,13 +177,37 @@ export default {
   },
   card: {
     glyph: 'wechat',
-    about: 'A WeChat channel bound to one Bot: it can post notices, and in P2 it receives messages.',
-    docsUrl: 'https://docs.weixin.qq.com/',
+    about: 'A WeChat channel bound to one Bot: it can post notices, and incoming messages arrive in a later update. This release supports Webhook; ClawBot comes in the next batch.',
+    docsUrl: 'https://github.com/Tencent/openclaw-weixin',
+  },
+  // What the card draws besides the settings: the level descriptions, whether Test can run,
+  // and (P2) the inbound address. Display only, so a failing hook never breaks the card.
+  view({ settings }) {
+    const values = settings !== null && typeof settings === 'object' ? settings : {}
+    return {
+      transport: trim(values.transport) === 'clawbot' ? 'clawbot' : 'webhook',
+      canTest: trim(values.transport) !== 'clawbot' && trim(values.webhookUrl) !== '',
+      levels: [
+        { id: 'read', title: 'Read', description: 'Only receive and answer the messages this channel brings in.' },
+        { id: 'write', title: 'Full access', description: 'Also send notices for you; every notice asks for your approval first.' },
+      ],
+    }
+  },
+  // One test notice through the same path a real notice takes. A failure stays on the card
+  // without turning the channel off.
+  async test({ settings, secrets, secretValue }) {
+    const values = settings !== null && typeof settings === 'object' ? settings : {}
+    const address = webhookOf(values)
+    if (address === undefined) throw new Error('Add the push webhook URL for this channel.')
+    const secret = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
+      ? secrets[SECRET_NAME]
+      : (typeof secretValue === 'function' ? secretValue(SECRET_NAME) : undefined)
+    await postNotice({ address, format: values.webhookFormat, text: TEST_TEXT, secret })
   },
   mount({ rt, settings, instance, level, approve, secrets, token }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const id = instance?.id ?? 'wechat'
-    if (trim(values.transport) === 'clawbot') throw new Error('This ClawBot channel is not logged in. Paste its bot token in the channel settings.')
+    if (trim(values.transport) === 'clawbot') throw new Error('ClawBot is not available in this release. Use the Webhook transport.')
     const botId = trim(values.botId)
     if (botId === '') throw new Error('Choose a Bot for this channel.')
     if (rt.botOf(botId) === undefined) throw new Error('The Bot this channel is bound to no longer exists. Choose another Bot.')
@@ -180,7 +215,9 @@ export default {
     const secretValue = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
       ? secrets[SECRET_NAME]
       : (typeof token === 'string' && token !== '' ? token : undefined)
-    const secretOf = () => (typeof rt.secretValue?.(SECRET_NAME) === 'string' ? rt.secretValue(SECRET_NAME) : secretValue)
+    // The framework resolved this instance's credential into `secrets`; reading the bare
+    // name through rt here would sign with the first instance's secret.
+    const secretOf = () => secretValue
     const tools = []
     if (level === 'write') {
       tools.push(notifyTool({ channel: id, settings: values, secretOf, approve }))
