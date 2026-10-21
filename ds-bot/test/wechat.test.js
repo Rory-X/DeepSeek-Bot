@@ -1128,6 +1128,9 @@ test('G-5 a replaced URL in the credential store wins over the old plain value',
   await rt.load()
   await call(ctx, 'connector-retry', { id: 'wechat' })
   await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the replaced channel')
+  // Simulate the legacy value still being around (a pending or failed migration, or an old
+  // backup): the credential must still win over it.
+  rt.state.connectors.wechat.settings = { ...rt.state.connectors.wechat.settings, webhookUrl: oldReceiver.url }
   await toWrite(ctx, 'wechat')
   const pending = notifyToolOf(ctx).execute({ text: 'to the new one' }, { agent: { id: 'm1' } })
   const shown = await until(() => card(ctx), 'the notice approval')

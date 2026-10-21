@@ -79,6 +79,7 @@ class InboundHub {
     this.sockets = new Set()
     this.saveTimers = new Map()
     this.waits = new Map()
+    this.lastSettings = new Map()
     this.idleTimer = undefined
     this.stopped = false
     const ctx = rt.ctx
@@ -128,6 +129,14 @@ class InboundHub {
   async attach({ instance, botId, settings, secret, secretName, title }) {
     const id = trim(instance)
     if (id === '') throw new Error('An inbound channel needs an instance id')
+    // The framework pins a Session's tool allow-list when the Session is made (F2a), so a
+    // changed read-tools switch must start a fresh conversation. That is done when the next
+    // message arrives, not here: rebinding inside a mount would change state during the very
+    // refresh that mounted us. A first mount has nothing to compare.
+    const before = this.lastSettings.get(id)
+    const after = settings?.allowReadTools === true
+    this.lastSettings.set(id, after)
+    const restartOnNext = before !== undefined && before !== after
     this.stopped = false
     // A channel that arrives while the listener is about to close keeps it open: a remove
     // followed at once by an add must not hit a closing port.
@@ -143,6 +152,7 @@ class InboundHub {
       running: false,
       pending: new Set(),
       rebound: false,
+      restartOnNext,
       secret: String(secret),
       token: undefined,
       nonces: new Map(),
@@ -354,6 +364,10 @@ class InboundHub {
   async runOne(route, message) {
     if (typeof this.rt.channelSessionFor !== 'function' || typeof this.rt.deliver !== 'function') {
       return { code: 'bot-unavailable', message: botUnavailableText }
+    }
+    if (route.restartOnNext) {
+      route.restartOnNext = false
+      if (typeof this.rt.rebindChannel === 'function') await this.rt.rebindChannel(route.id, { reason: 'settings' }).catch(() => {})
     }
     let sessionId
     try {

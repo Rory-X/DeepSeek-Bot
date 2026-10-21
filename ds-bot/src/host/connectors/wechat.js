@@ -77,12 +77,13 @@ const secretValueOfField = (rt, secrets, secretName, name) => {
   }
 }
 
+// The credential comes first: a Replace on the card must win even while the old plain value
+// is still around (migration pending, failed, or restored from an older state); legacy is
+// only the fallback.
 const webhookUrlOf = (settings, secrets) => {
-  const values = settings !== null && typeof settings === 'object' ? settings : {}
-  const legacy = trim(values.webhookUrl)
-  if (legacy !== '') return legacy
   const stored = secrets !== null && typeof secrets === 'object' ? secrets[URL_SECRET] : undefined
-  return typeof stored === 'string' ? stored : ''
+  if (typeof stored === 'string' && stored !== '') return stored
+  return trim(settings?.webhookUrl)
 }
 
 // A URL saved by an older release lives in the settings as plain text. Move it into the
