@@ -1681,6 +1681,99 @@ test('connecting a custom instance stores its credential under its own name', as
   assert.equal(ctx.registeredTools.get('demo_probe'), undefined)
 })
 
+// A channel connector's only credential is optional: deleting it leaves the connector
+// "configured", so only the Disconnect mark keeps it off (F8).
+function channelDefinition(overrides = {}) {
+  return {
+    displayName: 'Channel',
+    mode: 'custom',
+    tokenSecret: 'CHANNEL_TOKEN',
+    credentials: [{ name: 'CHANNEL_TOKEN', required: false }],
+    levels: ['read'],
+    defaultLevel: 'read',
+    settings: [
+      { name: 'label', label: 'Name' },
+      { name: 'transport', kind: 'segmented', options: [{ value: 'webhook' }, { value: 'clawbot' }] },
+    ],
+    mount: ({ instance }) => ({
+      tools: [{
+        name: `${instance.id}_probe`,
+        description: 'Probe',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => JSON.stringify({ id: instance.id }),
+      }],
+    }),
+    ...overrides,
+  }
+}
+
+test('a disconnected channel stays off after a restart', async (t) => {
+  const store = { CHANNEL_TOKEN: 'first-token' }
+  const state = { connectors: { demo: { level: 'read', settings: { transport: 'webhook', label: 'Desk' } } } }
+  const first = hostSetup({ state, definition: channelDefinition(), secrets: store })
+  t.after(() => rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }))
+  first.rt.secretEndpoint = secretDesk(store, [])
+  await until(() => (rowOf(first.rt, 'demo')?.state === 'ready' ? true : undefined), 'the channel to mount')
+
+  // Disconnect leaves the mark in the team file, not only in memory.
+  await first.rt.connectorEndpoint('connector-disconnect', { id: 'demo' })
+  assert.equal(first.rt.state.connectors.demo.off, true)
+  assert.equal(store.CHANNEL_TOKEN, undefined)
+  assert.equal(rowOf(first.rt, 'demo').state, 'off')
+  await first.ctx.dispose()
+
+  // A second host over the same team file is a restart: the mark still keeps it off.
+  const second = hostSetup({ state: first.rt.state, home: first.home, credentials: first.credentials, definition: channelDefinition(), secrets: store })
+  await new Promise(resolve => setTimeout(resolve, 100))
+  assert.equal(rowOf(second.rt, 'demo').state, 'off')
+  assert.equal(second.registered.includes('demo_probe'), false)
+
+  // Only a new connect clears the mark and mounts the channel again.
+  await second.rt.connectorEndpoint('connector-connect', { id: 'demo', token: 'second-token' })
+  await until(() => (rowOf(second.rt, 'demo')?.state === 'ready' ? true : undefined), 'the reconnected channel')
+  assert.equal(second.rt.state.connectors.demo.off, undefined)
+  await second.ctx.dispose()
+})
+
+test('a team file without the off mark connects the channel as before', async (t) => {
+  const store = { CHANNEL_TOKEN: 'saved-token' }
+  const state = { connectors: { demo: { level: 'read', settings: { transport: 'webhook' } } } }
+  const { ctx, rt, home, registered } = hostSetup({ state, definition: channelDefinition(), secrets: store })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  // A team file saved before F8 has no mark; the saved credential still mounts the channel.
+  assert.equal(state.connectors.demo.off, undefined)
+  await until(() => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the channel to mount')
+  assert.ok(registered.includes('demo_probe'))
+})
+
+test('a disconnected channel keeps its row, its settings and its Connect action', async (t) => {
+  const store = { CHANNEL_TOKEN: 'first-token' }
+  const state = { connectors: { demo: { level: 'read', settings: { transport: 'webhook', label: 'Desk' } } } }
+  const { ctx, rt, home } = hostSetup({ state, definition: channelDefinition(), secrets: store })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  rt.secretEndpoint = secretDesk(store, [])
+  await until(() => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the channel to mount')
+  await rt.connectorEndpoint('connector-disconnect', { id: 'demo' })
+
+  // The instance does not disappear with the mark: the card still draws it, off, with its
+  // settings and a Connect to press.
+  const row = rowOf(rt, 'demo')
+  assert.ok(row, 'the disconnected channel keeps its row')
+  assert.deepEqual([row.state, row.level], ['off', 'read'])
+  assert.deepEqual(row.settings.map(field => [field.name, field.value]), [['label', 'Desk'], ['transport', 'webhook']])
+  // A retry waits as off, and the transport can change while it is off.
+  await rt.connectorEndpoint('connector-retry', { id: 'demo' })
+  await new Promise(resolve => setTimeout(resolve, 80))
+  assert.equal(rowOf(rt, 'demo').state, 'off')
+  await rt.connectorEndpoint('connector-set-settings', { id: 'demo', values: { transport: 'clawbot' } })
+  assert.deepEqual([rowOf(rt, 'demo').state, rt.state.connectors.demo.settings.transport], ['off', 'clawbot'])
+  // Connect still works and clears the mark.
+  await rt.connectorEndpoint('connector-connect', { id: 'demo', token: 'second-token' })
+  await until(() => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the reconnected channel')
+  assert.equal(rt.state.connectors.demo.off, undefined)
+})
+
 // A module's command endpoint runs only the actions it declared, with only the arguments it
 // declared, and only on the transport the action names.
 function commandDefinition() {

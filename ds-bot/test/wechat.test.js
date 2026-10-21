@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { apply } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
+import { normalizeWechatSettings } from '../src/host/connectors/wechat.js'
 import { postInbound, startWebhookReceiver, wechatHeaders } from './wechat-fakes.js'
 
 const TEAM = {
@@ -162,7 +163,7 @@ test('P1-03 readiness names the missing field and a deleted Bot is a mount error
   assert.match(failed.error, /no longer exists/)
 })
 
-// ---- P1-05: the notify tool and its approval ----
+// ---- P1-04: connect; P1-05: the notify tool and its approval ----
 test('P1-04 connect turns the channel ready and P1 has no inbound field', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
@@ -232,9 +233,84 @@ test('P1-06 outbound errors map to the fixed sentences and over-long text fails 
 })
 
 // ---- P1 remaining ----
-test.todo('P1-07 transport change while ready: needs a host settings-change hook (open gap with Forge, P2 blocker)')
-test.todo('P1-10 deleting an instance stops its mount and leaves the other channel ready')
-test.todo('P1-11 profile wechat:false hides the rows and opens nothing')
+test('P1-07 a connected channel refuses a transport change until it is disconnected', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const full = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  await connectChannel(ctx, receiver)
+  const refused = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, transport: 'clawbot' } })
+  assert.equal(refused.ok, false)
+  assert.equal(refused.error.message, 'Disconnect this channel before changing the transport.')
+  const row = await rowOf(ctx)
+  assert.deepEqual([row.state, row.transport], ['ready', 'webhook'])
+  // Other fields still save on a connected channel.
+  const relabeled = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, label: 'Desk' } })
+  assert.equal(relabeled.ok, true, JSON.stringify(relabeled))
+  assert.equal((await rowOf(ctx)).settings.find(field => field.name === 'label').value, 'Desk')
+
+  // A real disconnect turns it off and keeps it off: the secret is gone, the settings stay.
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  await until(async () => ((await rowOf(ctx))?.state === 'off' ? true : undefined), 'the channel to turn off')
+  assert.equal((await call(ctx, 'connector-retry', { id: 'wechat' })).ok, true)
+  await new Promise(resolve => setTimeout(resolve, 100))
+  assert.equal((await rowOf(ctx)).state, 'off', 'a retry does not mount a disconnected channel')
+  // The transport may change while off, and the save does not turn it back on.
+  const switchedWhileOff = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, transport: 'clawbot' } })
+  assert.equal(switchedWhileOff.ok, true, JSON.stringify(switchedWhileOff))
+  assert.deepEqual([(await rowOf(ctx)).state, (await rowOf(ctx)).transport], ['off', 'clawbot'])
+  // Back to webhook while still off, then connecting again clears the mark and mounts it.
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: full })).ok, true)
+  assert.deepEqual([(await rowOf(ctx)).state, (await rowOf(ctx)).transport], ['off', 'webhook'])
+  const reconnected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
+  assert.equal(reconnected.ok, true, JSON.stringify(reconnected))
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the channel to reconnect')
+})
+
+test('P1-07b an error channel also refuses the switch, and a never connected one may switch', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const full = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  await connectChannel(ctx, receiver)
+  // Put the channel in error through a mounted Bot that no longer exists.
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, botId: 'deleted-bot' } })).ok, true)
+  await until(async () => ((await rowOf(ctx))?.state === 'error' ? true : undefined), 'the error row')
+  const refusedInError = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, transport: 'clawbot' } })
+  assert.equal(refusedInError.ok, false)
+  assert.equal(refusedInError.error.message, 'Disconnect this channel before changing the transport.')
+  // A one-argument normalizeSettings call still works (modules that ignore the context).
+  assert.deepEqual(normalizeWechatSettings({ transport: 'webhook' }), { transport: 'webhook' })
+})
+test('P1-10 deleting one channel unmounts only it; the other stays ready', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  assert.equal((await call(ctx, 'connector-create-instance', { base: 'wechat' })).ok, true)
+  await call(ctx, 'connector-set-settings', { id: 'wechat-2', values: { transport: 'webhook', botId: 'b2', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal((await call(ctx, 'connector-connect', { id: 'wechat-2', values: { WECHAT_WEBHOOK_SECRET: 'second-secret' } })).ok, true)
+  await until(async () => ((await rowOf(ctx, 'wechat-2'))?.state === 'ready' ? true : undefined), 'wechat-2 ready')
+  await toWrite(ctx, 'wechat')
+  await toWrite(ctx, 'wechat-2')
+  assert.ok(ctx.registeredTools.has('wechat_notify') && ctx.registeredTools.has('wechat_2_notify'))
+  assert.equal((await call(ctx, 'connector-delete-instance', { id: 'wechat-2' })).ok, true)
+  assert.deepEqual((await rowsOf(ctx)).map(row => row.id), ['wechat'])
+  assert.equal(ctx.registeredTools.has('wechat_2_notify'), false)
+  assert.equal(ctx.registeredTools.has('wechat_notify'), true)
+  assert.equal((await rowOf(ctx)).state, 'ready')
+})
+
+test('P1-11 the connector turned off in the profile has no row and registers nothing', async (t) => {
+  const { ctx, home } = setup({ config: { wechat: false } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  assert.deepEqual(await rowsOf(ctx), [])
+  assert.equal(ctx.registeredTools.has('wechat_notify'), false)
+  assert.equal((await call(ctx, 'connector-connect', { id: 'wechat', values: {} })).ok, false)
+})
 test('P1-12 an empty text field clears its stored value', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
