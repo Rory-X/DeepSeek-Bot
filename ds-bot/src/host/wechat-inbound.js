@@ -338,7 +338,7 @@ class InboundHub {
     while (route.queue.length > 0) {
       const message = route.queue.shift()
       if (route.rebound) {
-        this.settle(message, { code: 'channel-rebound', message: errorTextRebound })
+        this.settle(route, message, { code: 'channel-rebound', message: errorTextRebound })
         continue
       }
       let result
@@ -347,7 +347,7 @@ class InboundHub {
       } catch (error) {
         result = { code: 'bot-unavailable', message: botUnavailableText, error: error?.message ?? String(error) }
       }
-      this.settle(message, result)
+      this.settle(route, message, result)
     }
   }
 
@@ -426,23 +426,28 @@ class InboundHub {
     })
   }
 
-  settle(message, result) {
+  settle(route, message, result) {
+    if (message.response !== undefined) {
+      // A synchronous caller hears the turn's own answer, a fixed failure, or a 504 when its
+      // wait runs out; an approval never becomes its own code here, and its wait timer keeps
+      // running so the caller still gets the 504 it was promised.
+      if (result.code === 'needs-user') return
+      if (message.timer !== undefined) {
+        clearTimeout(message.timer)
+        message.timer = undefined
+      }
+      this.answerSync(message, result)
+      return
+    }
     if (message.timer !== undefined) {
       clearTimeout(message.timer)
       message.timer = undefined
-    }
-    if (message.response !== undefined) {
-      // A synchronous caller hears the turn's own answer, a fixed failure, or a 504 when its
-      // wait runs out; an approval never becomes its own code here.
-      if (result.code === 'needs-user') return
-      this.answerSync(message, result)
-      return
     }
     if (message.callbackUrl === undefined) return
     const payload = result.text === undefined
       ? { ok: false, msgId: message.msgId, instance: message.instance ?? '', code: result.code ?? 'bot-unavailable', message: result.message ?? botUnavailableText }
       : { ok: true, msgId: message.msgId, reply: result.text, completedAt: Date.now() }
-    void this.sendCallback(message.callbackUrl, payload)
+    void this.sendCallback(message.callbackUrl, payload, route.secret)
   }
 
   answerTimeout(message) {
@@ -464,7 +469,7 @@ class InboundHub {
 
   // The gateway gets the same signed contract back, on the address it named. Only a network
   // error, a 5xx, a 408 or a 429 is retried; another 4xx is a configuration error.
-  async sendCallback(url, payload) {
+  async sendCallback(url, payload, secret) {
     const body = JSON.stringify(payload)
     const timestamp = String(Math.floor(Date.now() / 1000))
     const nonce = randomBytes(8).toString('hex')
@@ -472,7 +477,7 @@ class InboundHub {
       'content-type': 'application/json',
       'x-wechat-timestamp': timestamp,
       'x-wechat-nonce': nonce,
-      'x-wechat-signature': signatureOf(this.callbackSecret(url), timestamp, nonce, body),
+      'x-wechat-signature': signatureOf(secret, timestamp, nonce, body),
       'x-wechat-callback': '1',
     }
     for (let attempt = 0; ; attempt += 1) {
@@ -490,21 +495,20 @@ class InboundHub {
     }
   }
 
-  callbackSecret() {
-    // The callback is signed with the channel's own secret; the caller's URL never carries
-    // it, and the module only ever uses the value the framework resolved for this instance.
-    const route = this.callbackRoute
-    return route?.secret ?? ''
-  }
-
   // Rebind or close: every waiting message is answered at once with the rebound code, and
   // the queue is emptied so the new Bot's binding starts clean.
   rebound(instance, reason = 'rebind') {
-    const route = this.routes.get(trim(instance))
+    const id = trim(instance)
+    const route = this.routes.get(id)
+    if (route !== undefined) route.rebound = true
+    for (const [sessionId, waiting] of this.waits) {
+      if (waiting.route.id !== id) continue
+      this.waits.delete(sessionId)
+      waiting.finish({ code: 'channel-rebound', message: errorTextRebound })
+    }
     if (route === undefined) return
-    route.rebound = true
     for (const entry of route.pending) entry.fail({ code: 'channel-rebound', message: errorTextRebound })
-    for (const message of route.queue.splice(0)) this.settle(message, { code: 'channel-rebound', message: errorTextRebound })
+    for (const message of route.queue.splice(0)) this.settle(route, message, { code: 'channel-rebound', message: errorTextRebound })
     if (typeof this.rt.rebindChannel === 'function') void this.rt.rebindChannel(route.id, { reason }).catch(() => {})
   }
 

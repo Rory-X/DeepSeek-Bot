@@ -232,8 +232,16 @@ export default {
     // A channel with an HMAC secret gets its inbound path; without one it keeps working for
     // outbound notices and has no inbound path at all. The listener is shared by every
     // channel of this plugin, so a mount only adds or removes its own route.
+    const hub = inboundFor(rt)
+    // A different Bot on the same channel is a rebind: the old Bot's Session is archived and
+    // every message waiting on it hears the rebound code before the new binding starts.
+    const bound = Object.values(rt.state?.channels?.[id]?.conversations ?? {}).map(entry => entry?.botId).find(value => typeof value === 'string')
+    if (bound !== undefined && bound !== botId) {
+      hub.rebound(id, 'rebind')
+      if (typeof rt.rebindChannel === 'function') await rt.rebindChannel(id, { reason: 'rebind' }).catch(() => {})
+    }
     if (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '') {
-      await inboundFor(rt).attach({ instance: id, botId, settings: values, secret: secrets[SECRET_NAME], secretName })
+      await hub.attach({ instance: id, botId, settings: values, secret: secrets[SECRET_NAME], secretName })
     }
     const tools = []
     if (level === 'write') {
