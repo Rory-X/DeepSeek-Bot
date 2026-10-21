@@ -529,14 +529,27 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   // Connectors that are not a single token (REST APIs with two keys, IMAP mailboxes) keep
   // their credentials in the same named secrets and mount through hooks the module brings.
   // The mount key tracks those values so a changed credential remounts; it is never logged.
+  // A multi-instance connector keeps one credential per instance: the first instance uses
+  // the declared name, later ones append their number so two instances never share a secret.
+  const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/
+  const secretNameOf = (connector, name) => {
+    const base = connector.baseId
+    if (base === undefined || connector.id === base) return name
+    const suffix = instanceSuffix(base, connector.id)
+    if (suffix === undefined) return name
+    const scoped = `${name}_${suffix}`
+    if (!SECRET_NAME.test(scoped)) throw new Error(`${connector.displayName} cannot keep a credential named ${scoped}; shorten the declared name`)
+    return scoped
+  }
+  const secretValueOf = (connector, name) => rt.secretValue(secretNameOf(connector, name))
   const credentialFieldNames = connector => credentialFields(connector).map(field => field.name)
   const credentialKeyOf = connector => credentialFieldNames(connector)
-    .map(name => `${name}\u0000${rt.secretValue(name) ?? ''}`)
+    .map(name => `${name}\u0000${secretValueOf(connector, name) ?? ''}`)
     .join('\u0001')
-  const secretMapOf = connector => Object.fromEntries(credentialFieldNames(connector).map(name => [name, rt.secretValue(name)]))
+  const secretMapOf = connector => Object.fromEntries(credentialFieldNames(connector).map(name => [name, secretValueOf(connector, name)]))
   const configuredOf = (connector) => {
     const fields = credentialFields(connector)
-    return fields.length > 0 && fields.every((field) => (field.required === false ? true : rt.secretValue(field.name) !== undefined))
+    return fields.length > 0 && fields.every((field) => (field.required === false ? true : secretValueOf(connector, field.name) !== undefined))
   }
 
   // An access level is what the user let this connector do: read only, or read and write.
@@ -705,6 +718,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       connector,
       token: secrets[connector.tokenSecret],
       secrets,
+      // A module that writes a credential of its own (a generated inbound token) stores it
+      // under the same per-instance name the framework reads.
+      secretName: name => secretNameOf(connector, name),
       state: state.connectors?.[id],
       output,
       redact: rt.redactSecrets,
@@ -730,7 +746,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   const tokenNameOf = connector => connector.tokenSecret ?? credentialFields(connector)[0]?.name
   const notifyTokenOf = (connector) => {
     const name = tokenNameOf(connector)
-    return name === undefined ? undefined : rt.secretValue(name)
+    return name === undefined ? undefined : secretValueOf(connector, name)
   }
   // A module asks its service which chat wrote to the bot. A failure leaves the connector
   // connected: the card asks the user to message the bot and Test looks again.
@@ -779,7 +795,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       send: async (text) => {
         try {
           const sent = await connector.notify.send({
-            token: rt.secretValue(tokenName),
+            token: secretValueOf(connector, tokenName),
             chatId: chatIdOf(state, id),
             text,
             secrets: secretMapOf(connector),
@@ -1053,7 +1069,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       } else if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom' || connector.mode === 'notify') {
         token = configuredOf(connector) ? credentialKeyOf(connector) : undefined
       } else {
-        token = rt.secretValue(connector.tokenSecret)
+        token = secretValueOf(connector, connector.tokenSecret)
       }
     }
     if (!force && previous === token) return
@@ -1199,7 +1215,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       return configuredOf(connector) ? state.connectors?.[id]?.account ?? null : null
     }
     if (connector.mode === 'notify') return notifyTokenOf(connector) === undefined ? null : state.connectors?.[id]?.account ?? null
-    if (rt.secretValue(connector.tokenSecret) === undefined) return null
+    if (secretValueOf(connector, connector.tokenSecret) === undefined) return null
     return state.connectors?.[id]?.[connector.accountField] ?? null
   }
 
@@ -1316,8 +1332,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
         state.connectors = { ...state.connectors, [body.id]: { ...switchesOf(body.id), ...account, connectedAt: Date.now() } }
         try {
           for (const [name, value] of Object.entries(values)) {
-            const kept = rt.secretValue(name) !== undefined
-            await rt.secretEndpoint('secret-set', { name, value, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
+            const stored = secretNameOf(connector, name)
+            const kept = rt.secretValue(stored) !== undefined
+            await rt.secretEndpoint('secret-set', { name: stored, value, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
           }
         } catch (error) {
           if (prior === undefined) delete state.connectors[body.id]
@@ -1340,13 +1357,14 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       if (token === '') throw new Error('Paste a token first')
       await rt.loadSecrets()
       const prior = state.connectors?.[body.id]
-      const kept = rt.secretValue(connector.tokenSecret) !== undefined
+      const stored = secretNameOf(connector, connector.tokenSecret)
+      const kept = rt.secretValue(stored) !== undefined
       const account = await signIn(body.id, token, { api: connector.api })
       // The account is written before the secret, so the mount the secret change starts
       // already knows the default team it hands to the read tools.
       state.connectors = { ...state.connectors, [body.id]: { ...switchesOf(body.id), ...account, connectedAt: Date.now() } }
       try {
-        await rt.secretEndpoint('secret-set', { name: connector.tokenSecret, value: token, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
+        await rt.secretEndpoint('secret-set', { name: stored, value: token, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
       } catch (error) {
         if (prior === undefined) delete state.connectors[body.id]
         else state.connectors = { ...state.connectors, [body.id]: prior }
@@ -1404,7 +1422,11 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       }
       await rt.loadSecrets()
       const names = new Set([...credentialFieldNames(connector), ...(connector.tokenSecret === undefined ? [] : [connector.tokenSecret])])
-      for (const name of names) {
+      for (const field of names) {
+        // A name a lockout instance could not have stored in the first place never blocks
+        // the removal: only this instance's own secret is cleared.
+        let name
+        try { name = secretNameOf(connector, field) } catch { continue }
         if (rt.secretValue(name) !== undefined) await rt.secretEndpoint('secret-delete', { name })
       }
       const remaining = kept(body.id)
@@ -1535,11 +1557,28 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       const label = instanceNameOf(base, id)
       storeAttempts.delete(id)
       await unmount(id)
-      if (connector.mode === 'oauth-mcp' && oauth !== undefined) {
-        try {
-          await oauth.disconnect(id)
-        } catch (error) {
-          rt.warn('ds-bot: could not clear the %s authorization of %s: %s', definition.displayName, id, reason(error))
+      if (connector.mode === 'oauth-mcp') {
+        if (oauth !== undefined) {
+          try {
+            await oauth.disconnect(id)
+          } catch (error) {
+            rt.warn('ds-bot: could not clear the %s authorization of %s: %s', definition.displayName, id, reason(error))
+          }
+        }
+      } else {
+        // A removed instance takes its own credentials with it; another instance's name
+        // differs, so a shared secret is never touched here.
+        await rt.loadSecrets()
+        const fields = new Set([...credentialFieldNames(connector), ...(connector.tokenSecret === undefined ? [] : [connector.tokenSecret])])
+        for (const field of fields) {
+          let name
+          try { name = secretNameOf(connector, field) } catch { continue }
+          if (rt.secretValue(name) === undefined) continue
+          try {
+            await rt.secretEndpoint('secret-delete', { name })
+          } catch (error) {
+            rt.warn('ds-bot: could not clear the %s credential of %s: %s', definition.displayName, id, reason(error))
+          }
         }
       }
       if (state.connectors?.[id] !== undefined) delete state.connectors[id]
