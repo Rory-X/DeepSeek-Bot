@@ -583,7 +583,15 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     const connector = options[id]
     if (typeof connector.readiness !== 'function') return undefined
     try {
-      const note = connector.readiness({ level, settings, instance: instanceContextOf(id), rt })
+      const note = connector.readiness({
+        level,
+        settings,
+        instance: instanceContextOf(id),
+        rt,
+        // The same per-instance naming a mount gets, so a module never mirrors it.
+        secretName: name => secretNameOf(connector, name),
+        secretValue: name => secretValueOf(connector, name),
+      })
       return typeof note === 'string' && note !== '' ? note : undefined
     } catch (error) {
       return reason(error)
@@ -1846,9 +1854,12 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
 
   // Every endpoint that changes a connector runs in the host queue, whether it mounts,
   // authorizes, adds, removes or reconfigures: no two changes ever interleave.
-  const connectorEndpoint = (endpoint, body, meta) => {
+  // A change or a view may be the first thing this host serves. The credential store is
+  // read first, so readiness never mistakes "not loaded yet" for "not configured".
+  const connectorEndpoint = async (endpoint, body, meta) => {
     ensureInstances()
-    return serialise(() => endpoints[endpoint](body ?? {}, meta ?? {}))
+    await rt.loadSecrets().catch(error => rt.warn('ds-bot: secrets not loaded before %s: %s', endpoint, reason(error)))
+    return await serialise(() => endpoints[endpoint](body ?? {}, meta ?? {}))
   }
 
   ctx.effect(() => {
