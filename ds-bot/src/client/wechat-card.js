@@ -3,7 +3,7 @@
 // receiver, ClawBot logs in through the module's own command. The host sends the fields and
 // the live bits (inbound address, login step) as data; this card only draws them.
 import { createElement as h, useState } from 'react'
-import { t } from './i18n.js'
+import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
 import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
 
@@ -11,6 +11,14 @@ import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settin
 export const WeChatMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
   h('path', { d: 'M3 6.2c0-1.6 1.6-2.9 3.7-2.9s3.7 1.3 3.7 2.9-1.6 2.9-3.7 2.9c-.4 0-.9-.1-1.3-.2L3.6 10l.5-1.6C3.4 7.9 3 7.1 3 6.2z' }),
   h('path', { d: 'M9.6 12.8c0-1.6 1.6-2.9 3.7-2.9s3.7 1.3 3.7 2.9-1.6 2.9-3.7 2.9c-.4 0-.9-.1-1.3-.2L10.2 16.6l.5-1.6c-.7-.5-1.1-1.3-1.1-2.2z' }))
+
+const aboutOf = (row) => {
+  const about = row?.card?.about
+  if (typeof about !== 'string' || about === '') return null
+  const chinese = row.card?.zh?.about
+  return language().startsWith('zh') && typeof chinese === 'string' && chinese !== '' ? chinese : about
+}
+const docsUrlOf = (row) => (typeof row?.card?.docsUrl === 'string' && row.card.docsUrl !== '' ? row.card.docsUrl : null)
 
 const TRANSPORTS = { webhook: () => t('Webhook'), clawbot: () => t('ClawBot') }
 const transportOf = connector => (connector?.transport === 'clawbot' ? 'clawbot' : 'webhook')
@@ -81,10 +89,6 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     return note ?? fallbackNote
   }
   const connectNote = levelBlocked(currentLevel)
-  // The level rows already print their host reason; drawing the same sentence again above the
-  // remove block reads like a second error.
-  const connectNoteAlreadyShown = connectNote !== null
-    && levels.some(item => item.id !== currentLevel && levelBlocked(item.id) === connectNote)
   const run = (task, after) => {
     setBusy(true)
     setError(null)
@@ -198,6 +202,9 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
         levels.map((item) => {
           const current = item.id === currentLevel
           const blocked = current ? null : levelBlocked(item.id)
+          // The current level's reason is drawn once, above the level rows; an identical note
+          // under another level would read like a second error.
+          const blockedShown = blocked !== null && blocked !== connectNote ? blocked : null
           return h('div', { key: item.id, className: 'bt-connector-level-wrap' },
             h('button', {
               type: 'button', role: 'radio', 'aria-checked': current,
@@ -210,7 +217,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
             },
             h('span', { className: 'bt-connector-level-title' }, item.title),
             item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null),
-            blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
+            blockedShown !== null ? h('span', { className: 'bt-connector-level-blocked' }, blockedShown) : null)
         })),
       h('div', { className: 'bt-connector-hint' }, t('Changing the access level changes what this channel can do.')))
     : null
@@ -301,7 +308,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
             h('div', { className: 'bt-connector-form-row' },
               h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || !settingsChanged, onClick: save }, t('Save settings'))),
             h('div', { className: 'bt-connector-hint' }, t('The name changes only this channel; the binding and its credentials stay the same.')))),
-        connectNote !== null && row.state !== 'ready' && !connectNoteAlreadyShown ? h('div', { className: 'bt-connector-hint' }, connectNote) : null,
+        connectNote !== null && row.state !== 'ready' ? h('div', { className: 'bt-connector-hint' }, connectNote) : null,
         loginBlock,
         inboundBlock,
         confirmTransport
@@ -322,6 +329,8 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
 // only when its own row asks to.
 export function WeChatCard({ rows, actions, readOnly = null, bots = [] }) {
   const first = rows[0] ?? null
+  const about = first === null ? null : aboutOf(first)
+  const docsUrl = first === null ? null : docsUrlOf(first)
   const instance = first === null ? null : instanceOf(first)
   const max = instance === null ? null : instance.max
   const ready = rows.filter(row => row.state === 'ready').length
@@ -362,11 +371,16 @@ export function WeChatCard({ rows, actions, readOnly = null, bots = [] }) {
         h('span', { className: 'bt-connector-mark' }, h(WeChatMark)),
         h('span', { className: 'bt-connector-text' },
           h('span', { className: 'bt-connector-name' }, t('WeChat')),
-          h('span', { className: 'bt-connector-status' }, status)),
+          h('span', { className: 'bt-connector-status' }, status),
+          about !== null ? h('span', { className: 'bt-connector-about' }, about) : null),
         h('span', { className: 'bt-connector-chevron', 'aria-hidden': true }, h(ChevronRightIcon)))),
     expanded
       ? h('div', { className: 'bt-connector-panel', role: 'group', 'aria-label': t('Connector settings') },
         h('div', { className: 'bt-connector-panel-inner' },
+          docsUrl !== null
+            ? h('div', { className: 'bt-wechat-docs' },
+              h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation')))
+            : null,
           rows.length === 0
             ? h('div', { className: 'bt-connector-hint' }, t('No WeChat channels yet. Add one to send notices.'))
             : h('div', { className: 'bt-connector-project-list' }, rows.map(row => h(WeChatChannel, {

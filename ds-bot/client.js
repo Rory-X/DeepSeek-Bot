@@ -3538,6 +3538,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* The WeChat card: a transport badge on each channel, the login step and the inbound
    address inside the row, and the QR image only when the host sends one as a data URL. */
 .bt-wechat-error{padding:0 12px 10px;font-size:12px;line-height:16px;color:var(--bt-danger);overflow-wrap:anywhere}
+.bt-connector-about{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+.bt-wechat-docs{padding:2px 0 0}
 .bt-wechat-transport{margin-left:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-ink-3);padding:0 6px;border-radius:6px;background:var(--hover)}
 .bt-wechat-login{display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0;min-width:0}
 .bt-wechat-qr{width:168px;height:168px;border-radius:10px;border:.5px solid var(--bt-line-2);background:var(--bt-main);padding:6px;box-sizing:border-box}
@@ -14541,6 +14543,13 @@ var WeChatMark = () => (0, import_react37.createElement)(
   (0, import_react37.createElement)("path", { d: "M3 6.2c0-1.6 1.6-2.9 3.7-2.9s3.7 1.3 3.7 2.9-1.6 2.9-3.7 2.9c-.4 0-.9-.1-1.3-.2L3.6 10l.5-1.6C3.4 7.9 3 7.1 3 6.2z" }),
   (0, import_react37.createElement)("path", { d: "M9.6 12.8c0-1.6 1.6-2.9 3.7-2.9s3.7 1.3 3.7 2.9-1.6 2.9-3.7 2.9c-.4 0-.9-.1-1.3-.2L10.2 16.6l.5-1.6c-.7-.5-1.1-1.3-1.1-2.2z" })
 );
+var aboutOf = (row) => {
+  const about = row?.card?.about;
+  if (typeof about !== "string" || about === "") return null;
+  const chinese = row.card?.zh?.about;
+  return language().startsWith("zh") && typeof chinese === "string" && chinese !== "" ? chinese : about;
+};
+var docsUrlOf = (row) => typeof row?.card?.docsUrl === "string" && row.card.docsUrl !== "" ? row.card.docsUrl : null;
 var TRANSPORTS = { webhook: () => t("Webhook"), clawbot: () => t("ClawBot") };
 var transportOf = (connector) => connector?.transport === "clawbot" ? "clawbot" : "webhook";
 var transportLabel = (id) => (TRANSPORTS[id] ?? TRANSPORTS.webhook)();
@@ -14602,7 +14611,6 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     return note ?? fallbackNote;
   };
   const connectNote = levelBlocked(currentLevel);
-  const connectNoteAlreadyShown = connectNote !== null && levels.some((item) => item.id !== currentLevel && levelBlocked(item.id) === connectNote);
   const run = (task, after) => {
     setBusy(true);
     setError(null);
@@ -14740,6 +14748,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
       levels.map((item) => {
         const current = item.id === currentLevel;
         const blocked = current ? null : levelBlocked(item.id);
+        const blockedShown = blocked !== null && blocked !== connectNote ? blocked : null;
         return (0, import_react37.createElement)(
           "div",
           { key: item.id, className: "bt-connector-level-wrap" },
@@ -14760,7 +14769,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
             (0, import_react37.createElement)("span", { className: "bt-connector-level-title" }, item.title),
             item.description !== null ? (0, import_react37.createElement)("span", { className: "bt-connector-level-note" }, item.description) : null
           ),
-          blocked !== null ? (0, import_react37.createElement)("span", { className: "bt-connector-level-blocked" }, blocked) : null
+          blockedShown !== null ? (0, import_react37.createElement)("span", { className: "bt-connector-level-blocked" }, blockedShown) : null
         );
       })
     ),
@@ -14905,7 +14914,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
           (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, t("The name changes only this channel; the binding and its credentials stay the same."))
         )
       ),
-      connectNote !== null && row.state !== "ready" && !connectNoteAlreadyShown ? (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, connectNote) : null,
+      connectNote !== null && row.state !== "ready" ? (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, connectNote) : null,
       loginBlock,
       inboundBlock,
       confirmTransport ? (0, import_react37.createElement)(
@@ -14927,6 +14936,8 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
 }
 function WeChatCard({ rows, actions, readOnly = null, bots = [] }) {
   const first = rows[0] ?? null;
+  const about = first === null ? null : aboutOf(first);
+  const docsUrl = first === null ? null : docsUrlOf(first);
   const instance = first === null ? null : instanceOf(first);
   const max = instance === null ? null : instance.max;
   const ready = rows.filter((row) => row.state === "ready").length;
@@ -14973,7 +14984,8 @@ function WeChatCard({ rows, actions, readOnly = null, bots = [] }) {
           "span",
           { className: "bt-connector-text" },
           (0, import_react37.createElement)("span", { className: "bt-connector-name" }, t("WeChat")),
-          (0, import_react37.createElement)("span", { className: "bt-connector-status" }, status)
+          (0, import_react37.createElement)("span", { className: "bt-connector-status" }, status),
+          about !== null ? (0, import_react37.createElement)("span", { className: "bt-connector-about" }, about) : null
         ),
         (0, import_react37.createElement)("span", { className: "bt-connector-chevron", "aria-hidden": true }, (0, import_react37.createElement)(ChevronRightIcon))
       )
@@ -14984,6 +14996,11 @@ function WeChatCard({ rows, actions, readOnly = null, bots = [] }) {
       (0, import_react37.createElement)(
         "div",
         { className: "bt-connector-panel-inner" },
+        docsUrl !== null ? (0, import_react37.createElement)(
+          "div",
+          { className: "bt-wechat-docs" },
+          (0, import_react37.createElement)("a", { className: "bt-connector-link", href: docsUrl, target: "_blank", rel: "noopener noreferrer" }, t("Documentation"))
+        ) : null,
         rows.length === 0 ? (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, t("No WeChat channels yet. Add one to send notices.")) : (0, import_react37.createElement)("div", { className: "bt-connector-project-list" }, rows.map((row) => (0, import_react37.createElement)(WeChatChannel, {
           key: row.id,
           row,

@@ -691,6 +691,8 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* The WeChat card: a transport badge on each channel, the login step and the inbound
    address inside the row, and the QR image only when the host sends one as a data URL. */
 .bt-wechat-error{padding:0 12px 10px;font-size:12px;line-height:16px;color:var(--bt-danger);overflow-wrap:anywhere}
+.bt-connector-about{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
+.bt-wechat-docs{padding:2px 0 0}
 .bt-wechat-transport{margin-left:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-ink-3);padding:0 6px;border-radius:6px;background:var(--hover)}
 .bt-wechat-login{display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0;min-width:0}
 .bt-wechat-qr{width:168px;height:168px;border-radius:10px;border:.5px solid var(--bt-line-2);background:var(--bt-main);padding:6px;box-sizing:border-box}
