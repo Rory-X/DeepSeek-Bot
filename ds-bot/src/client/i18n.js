@@ -193,6 +193,7 @@ const ZH = {
   'Not logged in — this channel cannot send or receive yet.': '未登录，该通道暂时无法收发消息',
   'Incoming messages from this channel only answer you.': '该通道只回应你的消息',
   'Log in to link this channel first.': '请先登录再连接此通道',
+  'Sign in first to send a test message.': '请先登录，才能发送测试消息。',
   'Beta': 'Beta',
   'Scanning login is beta and has not been tested on a real device. A failure does not affect the Webhook channel.': '扫码登录为 beta，尚未真机验证；失败不影响 Webhook 通道',
   'Sign-in risks': '登录前须知',

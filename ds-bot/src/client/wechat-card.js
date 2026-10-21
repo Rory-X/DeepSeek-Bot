@@ -304,10 +304,16 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
           loginText(login) !== null ? h('div', { className: 'bt-connector-hint' }, loginText(login)) : null,
           shownDetail !== null ? h('div', { className: 'bt-connector-hint bt-wechat-login-detail' }, shownDetail) : null,
           h('div', { className: 'bt-connector-hint' }, t('Incoming messages from this channel only answer you.')),
+          loginState !== 'logged-in' ? h('div', { className: 'bt-connector-hint' }, t('Sign in first to send a test message.')) : null,
           loginButtons.length > 0 ? h('div', { className: 'bt-connector-form-row' }, loginButtons) : null))
     : null
+  // A notification channel can prove its path with one message. Webhook has always offered
+  // that on a connected channel; a ClawBot channel offers it once the sign-in finished.
+  const canTestNow = transportOf(row) === 'webhook'
+    ? row.state === 'ready' && row.canTest === true
+    : loginState === 'logged-in' && row.canTest === true
   const headActions = []
-  if (transportOf(row) === 'webhook' && row.canTest === true && row.state === 'ready') {
+  if (canTestNow) {
     headActions.push(h('button', { key: 'test', type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); test() } }, busy ? t('Testing…') : t('Test message')))
   }
   if (row.state === 'error') {
