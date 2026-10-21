@@ -5,6 +5,8 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { inboundFor } from '../wechat-inbound.js'
 
 const TIMEOUT_MS = 10_000
+// v0.2.0 refuses a tool without an output contract; a notice renders as its text.
+const textOutput = { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] }
 const GENERIC_TEXT_MAX = 4_000
 const WECOM_TEXT_MAX = 2_048
 const SECRET_NAME = 'WECHAT_WEBHOOK_SECRET'
@@ -191,6 +193,7 @@ function notifyTool({ channel, settings, secretOf, approve }) {
       required: ['text'],
       additionalProperties: false,
     },
+    output: textOutput,
     async execute(args, exec) {
       const text = trim(args?.text)
       if (text === '') throw new Error('Write the notice to send first.')

@@ -595,7 +595,9 @@ test('P2-03 dispose closes the inbound listener', async (t) => {
   await connectChannel(ctx, receiver)
   const url = await inboundUrl(ctx)
   await ctx.dispose()
-  // The port refuses connections once the plugin is gone.
+  // The port refuses connections once the plugin is gone, and quickly: a silent leak would
+  // leave the loopback port open after the user removed the last channel.
+  const started = Date.now()
   await until(async () => {
     try {
       await fetch(url, { method: 'POST' })
@@ -604,6 +606,29 @@ test('P2-03 dispose closes the inbound listener', async (t) => {
       return true
     }
   }, 'the inbound listener to close')
+  assert.ok(Date.now() - started < 2_000, `the port took ${Date.now() - started}ms to close`)
+})
+
+test('P2-28 disconnect closes the port and a disable keeps it closed', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const port = await freePort()
+  const { ctx, home } = setup({ config: { wechat: { listenPort: port } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  await inboundUrl(ctx)
+  const url = `http://127.0.0.1:${port}/wechat/wechat/inbound`
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  const started = Date.now()
+  await until(async () => {
+    try {
+      await fetch(url, { method: 'POST' })
+      return undefined
+    } catch {
+      return true
+    }
+  }, 'the port to close after a disconnect')
+  assert.ok(Date.now() - started < 2_000, `disconnect left the port open for ${Date.now() - started}ms`)
 })
 
 test('P2-04 a missing or wrong signature answers 401 bad-signature and starts 0 turns', async (t) => {

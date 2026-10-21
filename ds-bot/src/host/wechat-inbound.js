@@ -80,6 +80,15 @@ class InboundHub {
     this.saveTimers = new Map()
     this.waits = new Map()
     this.toolState = new Map()
+    this.lastMount = new Map()
+    this.watchdog = setInterval(() => {
+      const now = Date.now()
+      for (const id of this.routes.keys()) {
+        const seen = this.lastMount.get(id) ?? 0
+        if (now - seen > 5_000) void this.detach(id)
+      }
+    }, 1_000)
+    this.watchdog.unref?.()
     this.idleTimer = undefined
     this.stopped = false
     const ctx = rt.ctx
@@ -175,6 +184,7 @@ class InboundHub {
       error: undefined,
     }
     this.routes.set(id, route)
+    this.lastMount.set(id, Date.now())
     await this.ensureToken(route, secretName)
     try {
       await this.ensureStarted()
@@ -191,6 +201,7 @@ class InboundHub {
     const route = this.routes.get(id)
     if (route === undefined) return
     this.routes.delete(id)
+    this.lastMount.delete(id)
     this.flush(id)
     if (this.routes.size > 0) return
     // The last channel leaves: close soon, not instantly, so a new channel mounted in the
@@ -203,7 +214,7 @@ class InboundHub {
     const timer = setTimeout(() => {
       this.idleTimer = undefined
       if (this.routes.size === 0) void this.stop()
-    }, 3_000)
+    }, 500)
     timer.unref?.()
     this.idleTimer = timer
   }
@@ -284,6 +295,10 @@ class InboundHub {
   }
 
   async stop() {
+    if (this.routes.size === 0 && this.watchdog !== undefined) {
+      clearInterval(this.watchdog)
+      this.watchdog = undefined
+    }
     if (this.idleTimer !== undefined) {
       clearTimeout(this.idleTimer)
       this.idleTimer = undefined
