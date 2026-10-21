@@ -503,10 +503,8 @@ export default {
             Object.assign(login, { state: 'confirm-failed', qr: null, scanned: true, error: 'The phone did not confirm the login. Scan again.' })
             return
           }
-          // Persist the identity before the credential write: writing the token makes the
-          // framework reconcile and mount again, which bumps the login epoch and replaces the
-          // in-memory object. The remounted channel must already know its account id, or its
-          // notify tool and Test path would address an empty target.
+          // The credential write remounts the channel (a new login epoch), so the scanned
+          // identity goes into state first: the remount must already know who the owner is.
           const channels = rt.state.channels ?? (rt.state.channels = {})
           const channel = channels[id] ?? (channels[id] = {})
           channel.ilink = {
@@ -514,14 +512,18 @@ export default {
             ...(typeof answer?.ilink_user_id === 'string' ? { ilinkUserId: answer.ilink_user_id } : {}),
             ...(typeof answer?.ilink_bot_id === 'string' ? { ilinkBotId: answer.ilink_bot_id } : {}),
           }
+          // Keep the identity on disk before the token, in case the process stops in between.
           await rt.save().catch(() => {})
           if (token !== '') {
             const name = secretName(ILINK_TOKEN)
             await rt.secretEndpoint('secret-set', { name, value: token, purpose: 'WeChat ClawBot login', scope: [] })
           }
-          // That write may have remounted the channel: finish on whatever login object owns
-          // the id now (a token alone also reads as logged-in, this adds the masked account).
-          Object.assign(loginOf(rt, id), { state: 'logged-in', qr: null, scanned: false, account: maskAccount(answer?.ilink_user_id) ?? null, error: null, expiresAt: null, qrcode: null })
+          // Never write through the old reference after the remount; the token alone makes the
+          // view read as logged-in, this only adds the masked account to a login still ours.
+          if (current()) {
+            Object.assign(login, { state: 'logged-in', qr: null, scanned: false, account: maskAccount(answer?.ilink_user_id) ?? null, error: null, expiresAt: null, qrcode: null })
+          }
+          void rt.save().catch(() => {})
         } else if (mapped === 'wait') {
           Object.assign(login, { state: 'qr', scanned: false, error: null })
         } else if (mapped === 'scanned') {

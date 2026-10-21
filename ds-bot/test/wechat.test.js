@@ -800,8 +800,10 @@ test('CB-08 a logged-in channel keeps its inbound long poll and its cursor, and 
   // The first poll has no cursor; a restart continues from the saved one.
   assert.equal(polls()[0].json.get_updates_buf === undefined || polls()[0].json.get_updates_buf === '', true)
   await until(async () => (polls().some(entry => entry.json?.get_updates_buf === 'cursor-1') ? true : undefined), 'a poll carrying the saved cursor')
-  const state = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8'))
-  assert.equal(state.channels?.wechat?.ilink?.cursor, 'cursor-1')
+  await until(async () => {
+    const state = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8'))
+    return state.channels?.wechat?.ilink?.cursor === 'cursor-1' ? true : undefined
+  }, 'the cursor to reach the state file')
   // A settings save remounts the channel: keepalive must start again, not stop.
   const before = polls().length
   const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'clawbot', botId: 'b1', label: 'Live' } })
@@ -867,7 +869,7 @@ const commandHost = (base, wechat = {}) => {
   return host
 }
 const runWechat = (host, action, args) => wechatConnector.command({ id: 'wechat', rt: host, action, args, secretName: name => name })
-const loginViewOfHost = (host) => wechatConnector.view({ id: 'wechat', settings: { transport: 'clawbot' }, rt: host, secrets: {} }).login
+const loginViewOfHost = (host, secrets = {}) => wechatConnector.view({ id: 'wechat', settings: { transport: 'clawbot' }, rt: host, secrets }).login
 const closeCommandHost = (host) => { void inboundFor(host).dispose() }
 
 test('CB-10 one QR poll per channel: ten concurrent asks make one upstream call', async (t) => {
@@ -1095,7 +1097,8 @@ test('CB-17 a remount during the token write still persists the account and fini
   assert.equal(host.savedSecrets[0].accountAtWrite, 'ilink_user_123456')
   assert.equal(host.state.channels.wechat.ilink.ilinkUserId, 'ilink_user_123456')
   assert.equal(host.state.channels.wechat.ilink.ilinkBotId, 'bot-1')
-  assert.equal(loginViewOfHost(host).state, 'logged-in')
+  // The remount owns a new login object; the stored token is what reads as logged-in.
+  assert.equal(loginViewOfHost(host, { WECHAT_ILINK_TOKEN: 'ilink-token' }).state, 'logged-in')
 })
 
 // ---- P2: inbound listener and its gate ----
