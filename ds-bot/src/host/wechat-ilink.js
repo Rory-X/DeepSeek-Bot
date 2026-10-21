@@ -96,6 +96,18 @@ export function createIlinkClient({
     if (failures >= 3) pausedUntil = now() + pauseMs
   }
 
+  // The lifecycle ping only carries base_info: no token state, no message. It tells WeChat the
+  // bot is there (or going away); a failure is never allowed to block a mount or a close.
+  const notifyLifecycle = async (action, { token, signal } = {}) => {
+    const response = await request(`${baseUrl}/ilink/bot/msg/${action}`, {
+      method: 'POST',
+      headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
+      body: JSON.stringify({ base_info: { channel_version: '1', bot_agent: 'ds-bot' } }),
+      signal: signalOf(limits.send, signal),
+    })
+    return await answer(response)
+  }
+
   return {
     baseUrl,
     clientVersion,
@@ -162,6 +174,10 @@ export function createIlinkClient({
       })
       return await answer(response)
     },
+
+    // Tell WeChat the bot is online/offline; callers swallow a failure, it never blocks.
+    notifyStart(options = {}) { return notifyLifecycle('notifystart', options) },
+    notifyStop(options = {}) { return notifyLifecycle('notifystop', options) },
 
     // `-14` is the login paused code: hold every call until the pause passes.
     noteError(code) {

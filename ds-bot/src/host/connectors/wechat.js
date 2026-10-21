@@ -108,6 +108,21 @@ const ilinkTimeoutsOf = (config) => {
   }
   return Object.keys(timeouts).length === 0 ? undefined : timeouts
 }
+// A Bot answer is sent back as texts: WeChat has no long-message type, and one turn should
+// not become an unbounded burst, so the answer stops after four parts with an ellipsis.
+const REPLY_CHUNK = 4_000
+const REPLY_MAX_CHUNKS = 4
+const FALLBACK_REPLY = 'The Bot could not answer this message.'
+const replyChunks = (text) => {
+  const value = typeof text === 'string' ? text.trim() : ''
+  if (value === '') return []
+  const pieces = []
+  for (let at = 0; at < value.length; at += REPLY_CHUNK) pieces.push(value.slice(at, at + REPLY_CHUNK))
+  if (pieces.length <= REPLY_MAX_CHUNKS) return pieces
+  const kept = pieces.slice(0, REPLY_MAX_CHUNKS)
+  kept[kept.length - 1] = `${kept[kept.length - 1].slice(0, REPLY_CHUNK - 1)}…`
+  return kept
+}
 // The live iLink answer is a page URL, not an image: encode that URL into a QR ourselves
 // with the vendored MIT encoder and a tiny zlib PNG writer (no runtime dependency). A PNG
 // data URL is passed through; anything else is not renderable on the card.
@@ -394,7 +409,7 @@ export default {
   },
   card: {
     glyph: 'wechat',
-    about: 'A WeChat channel bound to one Bot: it sends messages to the channel owner, and a Webhook channel also takes incoming messages. Both the Webhook and the ClawBot (beta) transport are supported.',
+    about: 'A WeChat channel bound to one Bot: it sends messages to the channel owner and takes the messages they send back. Both the Webhook and the ClawBot (beta) transport are supported.',
     docsUrl: 'https://github.com/Tencent/openclaw-weixin',
     levelChoice: false,
   },
@@ -618,7 +633,9 @@ export default {
     if (rt.botOf(botId) === undefined) throw new Error('The Bot this channel is bound to no longer exists. Choose another Bot.')
     if (trim(values.transport) === 'clawbot') {
       // A connect or settings change starts a fresh login card: the state carries an epoch,
-      // so an in-memory QR from an earlier mount can never be shown again.
+      // so an in-memory QR from an earlier mount can never be shown again. The token stays in
+      // the credential store and the scanned ids stay in the channel state, so a restart
+      // returns as logged-in and the long poll below resumes on mount.
       const channels = rt.state.channels ?? (rt.state.channels = {})
       const channel = channels[id] ?? (channels[id] = {})
       channel.ilink = { ...(channel.ilink ?? {}), epoch: (channel.ilink?.epoch ?? 0) + 1 }
@@ -629,53 +646,134 @@ export default {
       const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
       const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
       const ilink = channel.ilink ?? {}
+      const account = typeof ilink.ilinkUserId === 'string' ? ilink.ilinkUserId : undefined
       const controller = new AbortController()
       const tools = []
-      if (typeof token === 'string' && token !== '' && level === 'write') {
-        tools.push(notifyToolClawbot({
-          channel: id,
-          token,
-          rt,
-          account: typeof ilink.ilinkUserId === 'string' ? ilink.ilinkUserId : undefined,
-          client: createIlinkClient({
-            base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
-            pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
-            backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
-            timeouts: ilinkTimeoutsOf(config),
-          }),
-        }))
+      if (typeof token !== 'string' || token === '') {
+        return { tools, close: () => { controller.abort(); ilinkLogins.get(rt)?.delete(id) } }
       }
-      if (typeof token === 'string' && token !== '') {
-        const client = createIlinkClient({
-          base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
-          pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
-          backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
-          timeouts: ilinkTimeoutsOf(config),
-        })
-        // Keep the session alive: WeChat drops a login whose getUpdates loop stops, so a
-        // mounted channel with a token always polls. The cursor only advances on a non-empty
-        // one, and a `-14` ("session timeout") ends the loop with an expired login.
+      const client = createIlinkClient({
+        base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+        pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
+        backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
+        timeouts: ilinkTimeoutsOf(config),
+      })
+      if (level === 'write') tools.push(notifyToolClawbot({ channel: id, token, rt, account, client }))
+      // Messages: the long poll hands each accepted one to this channel's queue, and the
+      // queue answers it behind the poll, one Bot turn at a time. The poll never waits for a
+      // turn, because a stopped poll is what makes WeChat drop the session.
+      const hub = inboundFor(rt)
+      const routeSettings = { ...values, allowReadTools: trim(values.allowReadTools) === 'on' }
+      const seen = new Set()
+      const deliveries = []
+      let delivering = false
+      const auditReply = (length, result) => auditSend(rt, id, length, result)
+      const sendReply = async (message, reply) => {
+        for (const chunk of replyChunks(reply)) {
+          // A channel that was disconnected while its turn ran answers nowhere.
+          if (controller.signal.aborted) return
+          try {
+            await client.sendMessage({ token, toUserId: message.fromUserId, text: chunk, contextToken: message.contextToken })
+            auditReply(chunk.length, 'ok')
+          } catch (error) {
+            auditReply(chunk.length, resultCodeOf(error))
+            const failure = ilinkFailure(rt, id, error)
+            rt.warn?.('ds-bot: WeChat channel %s could not answer a message: %s', id, failure.message)
+            return
+          }
+        }
+      }
+      const deliverOne = async (message) => {
+        let result
+        try {
+          result = await hub.deliverLocal({
+            instance: id,
+            botId,
+            settings: routeSettings,
+            title: typeof values.label === 'string' ? values.label : undefined,
+            sender: message.fromUserId,
+            text: message.text,
+          })
+        } catch (error) {
+          rt.warn?.('ds-bot: WeChat channel %s could not hand a message to its Bot: %s', id, error?.message ?? error)
+          result = { code: 'bot-unavailable', message: FALLBACK_REPLY }
+        }
+        const answered = typeof result?.text === 'string' && result.text.trim() !== ''
+        const reply = answered ? result.text.trim() : String(result?.message ?? FALLBACK_REPLY)
+        // A failed or timed-out turn still gets a readable answer in WeChat; the audit keeps
+        // the code only, never the words.
+        if (!answered) auditReply(reply.length, String(result?.code ?? 'bot-unavailable'))
+        await sendReply(message, reply)
+      }
+      const pump = () => {
+        if (delivering) return
+        delivering = true
         void (async () => {
-          while (!controller.signal.aborted) {
-            try {
-              const answer = await client.getUpdates({ token, cursor: channel.ilink?.cursor, signal: controller.signal })
-              if (controller.signal.aborted) return
-              if (typeof answer?.get_updates_buf === 'string' && answer.get_updates_buf !== '' && answer.get_updates_buf !== channel.ilink.cursor) {
-                channel.ilink.cursor = answer.get_updates_buf
-                void rt.save().catch(() => {})
-              }
-            } catch (error) {
-              if (controller.signal.aborted) return
-              if (error?.paused === true || Number(error?.status) === 401 || Number(error?.status) === 403) {
-                ilinkFailure(rt, id, error)
-                return
-              }
-              await new Promise(resolve => setTimeout(resolve, client.backoffMs()))
-            }
+          try {
+            while (deliveries.length > 0 && !controller.signal.aborted) await deliverOne(deliveries.shift())
+          } finally {
+            delivering = false
           }
         })()
       }
-      return { tools, close: () => { controller.abort(); ilinkLogins.get(rt)?.delete(id) } }
+      const accept = (message) => {
+        if (message === null || typeof message !== 'object') return
+        if (Number(message.message_type) !== 1) return
+        if (message.message_state !== undefined && Number(message.message_state) !== 0) return
+        // Only the account that scanned the code talks to this channel; anyone else is
+        // ignored without a delivery or a reply.
+        if (account === undefined || message.from_user_id !== account) return
+        const item = (Array.isArray(message.item_list) ? message.item_list : []).find(entry => Number(entry?.type) === 1 && typeof entry?.text_item?.text === 'string')
+        const text = typeof item?.text_item?.text === 'string' ? item.text_item.text.trim() : ''
+        if (text === '') {
+          rt.diagnostics?.record?.({ source: 'wechat-inbound', text: `${id} ignored a message without text` })
+          return
+        }
+        // A replayed cursor must not start the same turn twice; the ring is memory only and
+        // bounded, which is enough for a 35s poll's own replays.
+        const key = message.message_id !== undefined ? `id:${message.message_id}` : (message.seq !== undefined ? `seq:${message.seq}` : undefined)
+        if (key !== undefined) {
+          if (seen.has(key)) return
+          seen.add(key)
+          if (seen.size > 200) seen.delete(seen.values().next().value)
+        }
+        deliveries.push({ fromUserId: message.from_user_id, text, contextToken: message.context_token })
+        pump()
+      }
+      // Best effort: WeChat learns the bot is online. A failure only warns.
+      void client.notifyStart({ token }).catch(error => rt.warn?.('ds-bot: WeChat channel %s did not report it is online: %s', id, error?.message ?? error))
+      // Keep the session alive: WeChat drops a login whose getUpdates loop stops, so a
+      // mounted channel with a token always polls. The cursor only advances on a non-empty
+      // one, and a `-14` ("session timeout") ends the loop with an expired login.
+      void (async () => {
+        while (!controller.signal.aborted) {
+          try {
+            const answer = await client.getUpdates({ token, cursor: channel.ilink?.cursor, signal: controller.signal })
+            if (controller.signal.aborted) return
+            if (typeof answer?.get_updates_buf === 'string' && answer.get_updates_buf !== '' && answer.get_updates_buf !== channel.ilink.cursor) {
+              channel.ilink.cursor = answer.get_updates_buf
+              void rt.save().catch(() => {})
+            }
+            for (const message of Array.isArray(answer?.msgs) ? answer.msgs : []) accept(message)
+          } catch (error) {
+            if (controller.signal.aborted) return
+            if (error?.paused === true || Number(error?.status) === 401 || Number(error?.status) === 403) {
+              ilinkFailure(rt, id, error)
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, client.backoffMs()))
+          }
+        }
+      })()
+      return {
+        tools,
+        close: () => {
+          controller.abort()
+          hub.forgetLocal(id)
+          ilinkLogins.get(rt)?.delete(id)
+          void client.notifyStop({ token }).catch(() => {})
+        },
+      }
     }
     // Older state keeps the URL as a plain setting; move it into the credential store before
     // this mount reads anything, keeping the plain value if the write fails.
