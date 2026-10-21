@@ -194,7 +194,7 @@ export function install(rt) {
   async function indexedParts(botId, askingId) {
     const index = await openIndex()
     if (index === null) return { index }
-    const parts = rt.partsOf(botId)
+    const parts = rt.partsOf(botId).filter(part => rt.isChannelSession?.(part.sessionId) !== true).filter(part => rt.isChannelSession?.(part.sessionId) !== true)
     // A part that cannot be read now is searched as far as it was indexed.
     for (const part of parts) await catchUp(index, part).catch(error => rt.warn('ds-bot: indexing %s failed: %s', part.sessionId, error))
     const turn = askingId !== undefined && askingId === parts.at(-1)?.sessionId ? index.mark.get(askingId)?.turn : undefined

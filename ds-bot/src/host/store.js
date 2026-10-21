@@ -388,11 +388,14 @@ export function install(rt) {
   const groupOwners = new Map()
   /** @type {Map<string, {botId:string, roomId?:string}>} */
   const pastOwners = new Map()
+  /** @type {Map<string, {botId:string, instance:string, conversationId?:string}>} */
+  const channelOwners = new Map()
   const chatOf = botId => botOf(botId)?.sessionId ?? botId
   const indexSessions = () => {
     chatOwners.clear()
     groupOwners.clear()
     pastOwners.clear()
+    channelOwners.clear()
     for (const bot of Object.values(state.bots)) {
       for (const segment of bot.segments ?? []) pastOwners.set(segment.sessionId, { botId: bot.id })
       chatOwners.set(chatOf(bot.id), bot.id)
@@ -403,14 +406,27 @@ export function install(rt) {
       }
       for (const [botId, sessionId] of Object.entries(room.sessions ?? {})) groupOwners.set(sessionId, { botId, roomId: room.id })
     }
+    // A channel Session belongs to the Bot its channel was bound to when the conversation
+    // started. It is rebuilt from the channel state, so a restart finds it again.
+    for (const [instance, channel] of Object.entries(state.channels ?? {})) {
+      const conversations = channel?.conversations
+      if (conversations === null || typeof conversations !== 'object') continue
+      for (const [conversationId, entry] of Object.entries(conversations)) {
+        if (typeof entry?.sessionId !== 'string' || typeof entry?.botId !== 'string') continue
+        channelOwners.set(entry.sessionId, { botId: entry.botId, instance, conversationId })
+      }
+    }
     // The agents module owns the DSH Agent session index; it installs after this.
     rt.indexAgents?.()
   }
   // The Bot a Session speaks for: its own chat, one of its group Sessions, or an
   // earlier segment of either.
-  const selfOf = id => chatOwners.get(id) ?? groupOwners.get(id)?.botId ?? pastOwners.get(id)?.botId
-  // A Session where the Bot speaks now, as opposed to an archived segment.
+  const selfOf = id => chatOwners.get(id) ?? groupOwners.get(id)?.botId ?? channelOwners.get(id)?.botId ?? pastOwners.get(id)?.botId
+  // A Session where the Bot speaks now, as opposed to an archived segment. A channel
+  // Session is not one of these: it is an external conversation the Bot answers, with no
+  // roster row and no memory.
   const isBotSession = id => chatOwners.has(id) || groupOwners.has(id)
+  const isChannelSession = id => channelOwners.has(id)
   const groupSessionsOf = botId => Object.values(state.rooms).map(room => room.sessions?.[botId]).filter(Boolean)
   const dropGroupSession = (room, botId) => {
     const sessionId = room.sessions?.[botId]
@@ -455,7 +471,7 @@ export function install(rt) {
   Object.assign(rt, {
     state, load, save, refresh, readOnly, own,
     botOf, roomOf, isMain, chatOf, selfOf, isBotSession,
-    chatOwners, groupOwners, pastOwners,
+    chatOwners, groupOwners, pastOwners, channelOwners, isChannelSession,
     groupSessionsOf, dropGroupSession, retireGroupSession, findBot, findRooms, isAdminOf,
   })
 }

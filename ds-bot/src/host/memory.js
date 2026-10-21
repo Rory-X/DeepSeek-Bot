@@ -678,7 +678,7 @@ export function install(rt) {
   const frozen = new Map()
   const snapshotPath = sessionId => join(root, 'snapshots', `${safeId(sessionId)}.md`)
   function sectionFor(sessionId) {
-    if (sessionId === undefined) return ''
+    if (sessionId === undefined || rt.isChannelSession?.(sessionId) === true) return ''
     const bot = rt.botOf(rt.selfOf(sessionId))
     if (bot === undefined) return ''
     // A section frozen under another role (made a Main Bot or a group admin since, or no
@@ -705,7 +705,7 @@ export function install(rt) {
   }
   // The Session's next render freezes the memory as it is then.
   function renewMemory(sessionId) {
-    if (sessionId === undefined) return
+    if (sessionId === undefined || rt.isChannelSession?.(sessionId) === true) return
     frozen.delete(sessionId)
     try { unlinkSync(snapshotPath(sessionId)) } catch { /* none saved */ }
   }
@@ -722,6 +722,7 @@ export function install(rt) {
 
   const callerOf = (exec) => {
     const sessionId = exec.agent?.id
+    if (rt.isChannelSession?.(sessionId) === true) return undefined
     const bot = rt.botOf(rt.selfOf(sessionId))
     return bot === undefined ? undefined : { bot, sessionId }
   }
@@ -1205,6 +1206,7 @@ export function install(rt) {
 
   // The Bot a Session speaks for, and a copy of its room's log, as of now.
   const ownerOf = (sessionId) => {
+    if (rt.isChannelSession?.(sessionId) === true) return undefined
     const chat = rt.chatOwners.get(sessionId)
     if (chat !== undefined) return { botId: chat }
     const owner = rt.groupOwners.get(sessionId) ?? rt.pastOwners.get(sessionId)
@@ -1221,7 +1223,7 @@ export function install(rt) {
   // Sessions, so one that has come back since speaks from new ones: only a Session
   // the group still holds, current or an earlier segment, is still a member.
   async function reviewSession(sessionId, seen) {
-    if (rt.readOnly() !== undefined) return
+    if (rt.readOnly() !== undefined || rt.isChannelSession?.(sessionId) === true) return
     const owner = ownerOf(sessionId) ?? seen
     if (owner === undefined) return
     const bot = rt.botOf(owner.botId)
@@ -1347,7 +1349,7 @@ export function install(rt) {
     // A turn that starts again before the delay is over is reviewed when it ends.
     ctx.on('agent/status', ({ agent, status }) => {
       const id = agent?.id
-      if (id === undefined || (!rt.isBotSession(id) && !turnOwners.has(id))) return
+      if (id === undefined || rt.isChannelSession?.(id) === true || (!rt.isBotSession(id) && !turnOwners.has(id))) return
       clearTimeout(reviewTimers.get(id))
       reviewTimers.delete(id)
       if (status !== 'idle') {
