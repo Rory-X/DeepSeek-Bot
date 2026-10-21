@@ -249,6 +249,23 @@ test('P1-07 a connected channel refuses a transport change until it is disconnec
   const relabeled = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, label: 'Desk' } })
   assert.equal(relabeled.ok, true, JSON.stringify(relabeled))
   assert.equal((await rowOf(ctx)).settings.find(field => field.name === 'label').value, 'Desk')
+
+  // A real disconnect turns it off and keeps it off: the secret is gone, the settings stay.
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  await until(async () => ((await rowOf(ctx))?.state === 'off' ? true : undefined), 'the channel to turn off')
+  assert.equal((await call(ctx, 'connector-retry', { id: 'wechat' })).ok, true)
+  await new Promise(resolve => setTimeout(resolve, 100))
+  assert.equal((await rowOf(ctx)).state, 'off', 'a retry does not mount a disconnected channel')
+  // The transport may change while off, and the save does not turn it back on.
+  const switchedWhileOff = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, transport: 'clawbot' } })
+  assert.equal(switchedWhileOff.ok, true, JSON.stringify(switchedWhileOff))
+  assert.deepEqual([(await rowOf(ctx)).state, (await rowOf(ctx)).transport], ['off', 'clawbot'])
+  // Back to webhook while still off, then connecting again clears the mark and mounts it.
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: full })).ok, true)
+  assert.deepEqual([(await rowOf(ctx)).state, (await rowOf(ctx)).transport], ['off', 'webhook'])
+  const reconnected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
+  assert.equal(reconnected.ok, true, JSON.stringify(reconnected))
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the channel to reconnect')
 })
 
 test('P1-07b an error channel also refuses the switch, and a never connected one may switch', async (t) => {
@@ -264,11 +281,6 @@ test('P1-07b an error channel also refuses the switch, and a never connected one
   const refusedInError = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, transport: 'clawbot' } })
   assert.equal(refusedInError.ok, false)
   assert.equal(refusedInError.error.message, 'Disconnect this channel before changing the transport.')
-  // A channel that was never connected may switch transport.
-  assert.equal((await call(ctx, 'connector-create-instance', { base: 'wechat' })).ok, true)
-  const switched = await call(ctx, 'connector-set-settings', { id: 'wechat-2', values: { transport: 'clawbot', botId: 'b2' } })
-  assert.equal(switched.ok, true, JSON.stringify(switched))
-  assert.equal((await rowOf(ctx, 'wechat-2')).transport, 'clawbot')
   // A one-argument normalizeSettings call still works (modules that ignore the context).
   assert.deepEqual(normalizeWechatSettings({ transport: 'webhook' }), { transport: 'webhook' })
 })

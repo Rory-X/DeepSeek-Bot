@@ -551,6 +551,10 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     const fields = credentialFields(connector)
     return fields.length > 0 && fields.every((field) => (field.required === false ? true : secretValueOf(connector, field.name) !== undefined))
   }
+  // A custom connector whose credentials are all optional would look configured again the
+  // moment its secret is deleted, so Disconnect leaves an explicit mark; only a new connect
+  // clears it. Other modes keep their old behavior.
+  const disconnectedOf = (connector, id) => connector.mode === 'custom' && state.connectors?.[id]?.off === true
 
   // An access level is what the user let this connector do: read only, or read and write.
   // The level is stored in the team file. An older file with the `actions` or `toolbox`
@@ -1162,7 +1166,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
           return
         }
       } else if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom' || connector.mode === 'notify') {
-        token = configuredOf(connector) ? credentialKeyOf(connector) : undefined
+        token = configuredOf(connector) && !disconnectedOf(connector, id) ? credentialKeyOf(connector) : undefined
       } else {
         token = secretValueOf(connector, connector.tokenSecret)
       }
@@ -1307,7 +1311,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     const connector = options[id]
     if (connector.mode === 'oauth-mcp') return state.connectors?.[id]?.account ?? null
     if (connector.mode === 'rest-tools' || connector.mode === 'imap' || connector.mode === 'custom') {
-      return configuredOf(connector) ? state.connectors?.[id]?.account ?? null : null
+      return configuredOf(connector) && !disconnectedOf(connector, id) ? state.connectors?.[id]?.account ?? null : null
     }
     if (connector.mode === 'notify') return notifyTokenOf(connector) === undefined ? null : state.connectors?.[id]?.account ?? null
     if (secretValueOf(connector, connector.tokenSecret) === undefined) return null
@@ -1514,6 +1518,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
         return {
           ...(prior.settings === undefined ? {} : { settings: prior.settings }),
           ...(prior.level === undefined ? {} : { level: prior.level }),
+          // A custom connector may have no required credential at all; without this mark
+          // the next reconcile would mount it right back.
+          ...(connector.mode === 'custom' ? { off: true } : {}),
         }
       }
       if (connector.mode === 'oauth-mcp') {
