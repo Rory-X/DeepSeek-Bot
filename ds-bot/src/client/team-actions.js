@@ -118,6 +118,8 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     // a Test message found or the reader typed.
     connectorTest: id => after(call('connector-test', { id })),
     connectorSetChat: (id, chatId) => after(call('connector-set-chat', { id, chatId })),
+    // One notification connector sends without an approval card until the user turns this off.
+    connectorSetAutoPush: (id, enabled) => after(call('connector-set-auto-push', { id, enabled })),
     // A connector whose card declares several credential fields sends them together, by the
     // secret name the host named each field with.
     connectorConnectValues: (id, values) => after(call('connector-connect', { id, values })),
