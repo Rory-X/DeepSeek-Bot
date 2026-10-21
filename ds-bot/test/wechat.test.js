@@ -2,7 +2,9 @@
 // contract and the module has to make them pass. P2 cases (inbound listener, sessions,
 // isolation) stay todos until P2 starts.
 //
-// Checklist: docs/plans/2026-10-21-wechat-test-checklist.md
+// Checklist and the ID -> test -> status table live in
+// docs/plans/2026-10-21-wechat-test-checklist.md. P1-14 is folded into P1-13; P2-25 is
+// covered by P2-13a/13b. Tests marked (F5) wait for the host view/test hooks.
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -218,7 +220,13 @@ test('P1-06 outbound errors map to the fixed sentences and over-long text fails 
   assert.equal(receiver.requests.length, before)
 })
 
-// ---- P1-10 later: connector-test; P2 todos keep the plan visible ----
+// ---- P1 remaining: F5-dependent host surface ----
+test.todo('P1-07 (F5) transport change while ready: the host refuses with the fixed sentence, disconnect then saves')
+test.todo('P1-08 (F5) connector-test posts the fixed notice through the module test hook and returns the view')
+test.todo('P1-09 (F5) a secret saved from the settings card shows saved:true, never a value, and stays out of state')
+test.todo('P1-12 (F5) clearSecrets:[webhookSecret] clears the saved secret; an empty text field clears its value')
+test.todo('P1-14 (F5) view/status: fields.kind, instance.max, status block from the module view hook')
+test.todo('P1-11 profile wechat:false hides the rows and opens nothing')
 test.todo('P1-04 connector-connect on a webhook channel turns it ready and P1 has no inbound field')
 test.todo('P1-07 changing transport while ready is refused with the fixed sentence; after disconnect it saves')
 test.todo('P1-08 connector-test posts the fixed test notice and returns the whole view')
@@ -275,4 +283,9 @@ test.todo('P2-16 logs, diagnostics and state.json carry no sender text, no messa
 test.todo('P2-17 the read level still answers inbound while wechat_notify stays unregistered')
 test.todo('P2-18 an unsupported connector-command action is refused: per-action allow-list, args checked, login-* only on clawbot')
 test.todo('P2-19 body over 64KB is refused while streaming (chunked included) and callbackUrl outside the loopback literals is refused')
-test.todo('P2-20 channel sessions never appear in search, read_own_chat, MEMORY.md, the sidebar or another session')
+test.todo('P2-20 visibility: channel sessions never appear in search, read_own_chat, the index, the sidebar or another session')
+test.todo('P2-21 HMAC is mandatory and Bearer optional (default off); with Bearer on, a missing one answers 401')
+test.todo('P2-22 memory: channel sessions get no review enumeration, no memory prompt injection and no MEMORY.md entry')
+test.todo('P2-23 v1 keeps exactly one conversation session (the creator DM); no group session is pre-created')
+test.todo('P2-24 the tool denylist holds and untrusted travels in the headerFor message header')
+test.todo('P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504)')
