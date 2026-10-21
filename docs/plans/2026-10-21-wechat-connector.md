@@ -380,24 +380,28 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 4. **客户端契约**：`d2e53ad` 的 `wechat-card.js` 已支持 `transport==='clawbot'` + `login.qr`（要求 `data:image/png;base64,` 前缀）与三态渲染；按此返回 QR。
 5. **F12（已批，P2 打包后 Forge 落）**：`unmount` 会 `await close()`；模块 `close` 必须**立即 abort**（`AbortController` 取消 fetch + `clearTimeout`），不得在 close 里等 35s 长轮询。
 
-**UI 登录态（`view.login.state`，宿主 8 态；cancelled 纯客户端）**
+**UI 登录态（`view.login.state`，10 态定稿）**
 
-| state | 触发（协议态 / 宿主判定） | 卡片文案（宿主英文原文） | 可重试动作 |
+| state | 触发 | 卡片文案（宿主英文原文） | 动作 |
 |---|---|---|---|
-| `logged-out` | 无 token / 用户登出 | `Scan a QR code with WeChat to connect this channel.`（未 consent 时加风险说明） | Start |
-| `qr` | `wait`；`scaned`/`scaned_but_redirect` 时附加 `scanned:true` | `Scan this QR code with WeChat.` | Refresh / Cancel |
-| `verified-needed` | `need_verifycode`（验证码在手机输入，无卡片输入框） | `Enter the verification code shown on your phone.` | Refresh / Cancel |
+| `logged-out` | 无 token / 登出 / Cancel 后的下一 view | `Scan a QR code with WeChat to connect this channel.`（未 consent 附风险说明） | Start |
+| `qr` | `wait`；`scaned`/`scaned_but_redirect` 时 `scanned:true` | `Scan this QR code with WeChat.` | Refresh / Cancel |
+| `verified-needed` | `need_verifycode`（手机输入，无卡片输入框） | `Enter the verification code shown on your phone.` | Refresh / Cancel |
 | `blocked` | `verify_code_blocked` | `WeChat blocked this verification. Try again later.` | Refresh / Cancel |
 | `expired` | `expired` | `The QR code expired. Refresh to try again.` | Refresh / Cancel |
-| `invalid` | 鉴权失败 / 协议变更 / token 失效 | `The WeChat login expired. Webhook channels are not affected; scan the QR code again.` | Start |
-| `protocol-error` | 命令/网络失败（**不设 row error**，返回 `login.error` 原文） | `The WeChat login service is not available right now.` | Retry / Refresh |
-| `logged-in` | `confirmed` / `binded_redirect`（`account` 可 null） | `Connected${account ? ` as ${account}` : ''}.` | — |
+| `cancelled` | `login-cancel` 成功后一次性返回 | `Login cancelled.` | Start |
+| `confirm-failed` | 已 `scanned` 后轮询异常 / 确认超时（协议无显式态，宿主判定） | `The phone did not confirm the login. Scan again.` | Start / Retry |
+| `protocol-error` | 网络 / HTTP / 登录服务不可用；原文进 `login.error` | `The WeChat login service is not available right now.` | Retry / Refresh |
+| `logged-in` | `confirmed` / `binded_redirect`（account 可 null） | `Connected${account ? ` as ${account}` : ''}.` | — |
+| `login-expired` | 已登录后 token 失效 / 协议变更 / 鉴权错（**唯一打 row error 的状态**） | `The WeChat login expired. Webhook channels are not affected; scan the QR code again.` | Start |
 
-- **`cancelled` 不落 view**：用户点 Cancel 后宿主回 `logged-out`，客户端本地显示「已取消 + Start login」即可。
-- **`invalid`** 才把该通道 `row.state:'error'`（Webhook 不受影响、不自动重登）；`protocol-error` 仅 view + error，通道不转 error。
-- `login-poll`：无参、仅 clawbot、返回完整 view；客户端 `qr`/`verified-needed` 时 2s 轮询、上限 5 分钟，到 `logged-in`/`expired`/`blocked`/`invalid` 或 Cancel 即停，卡片卸载/切 transport 立即停（客户端 effect cleanup）。`login-poll` 自身出错回 view + `login.error`，不打 row error。
-- QR 只返回 `https://` 图片 URL 或 `data:` URL；内容串 → `qr:null` + `error:'The QR code was returned in an unsupported form; update DS Bot.'`，客户端绝不渲染原始串。
-- Disconnect：清登录态 + `WECHAT_ILINK_TOKEN`，回 `logged-out`；Webhook 不受影响。`account` 脱敏（前 4 后 2）；consent 持久化 `state.channels[instance].ilink.consent`（`rt.save`）；`expiresAt` ISO 或 null。
+- **一次性 UI 态不持久**：`cancelled`/`confirm-failed`/`protocol-error` 只在当次命令/view 返回；页面刷新后按真实状态（`logged-out`/`qr`/`logged-in`/`login-expired`）显示。
+- `cancelled`：`login-cancel` 成功后宿主给一次 `cancelled`，**下一次 view 必须回 `logged-out`**；客户端可乐观回 logged-out，最终以服务端为准。
+- `login-expired` 才置该通道 `row.state:'error'`，Webhook 不受影响、不自动重登；其它 9 个状态 row 保持 off/ready。
+- `protocol-error` 不设 row error；客户端遇到未知 state 一律按 `protocol-error` 兜底，不白屏。
+- `login-poll`：无参、仅 clawbot、返回完整 view；客户端 `qr`/`verified-needed` 时 2s 轮询、上限 5 分钟，终态或 Cancel 即停，卡片卸载/切 transport 立即停；自身出错只回 view + `login.error`。
+- QR 只回 `https://` 图片 URL 或 `data:` URL；内容串 → `qr:null` + `error:'The QR code was returned in an unsupported form; update DS Bot.'`；客户端绝不渲染原始串。
+- Disconnect 清登录态 + `WECHAT_ILINK_TOKEN`，回 `logged-out`；`account` 脱敏（前 4 后 2）；consent 持久化 `state.channels[instance].ilink.consent`；`expiresAt` ISO 或 null。
 
 **发布约束（Chief 四条，ClawBot v1 必须满足）**
 
