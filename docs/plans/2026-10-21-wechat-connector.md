@@ -403,6 +403,12 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 - QR 只回 `https://` 图片 URL 或 `data:` URL；内容串 → `qr:null` + `error:'The QR code was returned in an unsupported form; update DS Bot.'`；客户端绝不渲染原始串。
 - Disconnect 清登录态 + `WECHAT_ILINK_TOKEN`，回 `logged-out`；`account` 脱敏（前 4 后 2）；consent 持久化 `state.channels[instance].ilink.consent`；`expiresAt` ISO 或 null。
 
+**consent 版本化**：`state.channels[instance].ilink = { consent: { at, version } }`（不是布尔）；模块定义 `CONSENT_VERSION` 常量，风险文案版本递增；`consentRequired = consent.version !== CONSENT_VERSION`——文案升级/协议变更时必须能再弹一次。取消/过期/刷新不重置 consent；删通道重建才重置。
+
+**`login-poll` 服务端护栏**：同一实例同一时间只允许一个轮询在飞（并发调用复用同一 promise 或直接返回当前 view）；没有进行中的登录（无 QR 会话）时直接返回当前 view、不重新生成二维码；≥500ms 内重复调用只回当前 view，防高频。
+
+**错误脱敏**：QR 串、token、`X-WECHAT-UIN` 一律不得出现在 `error`/日志/view；`login-expired` 原文保留「Webhook channels are not affected」那句。
+
 **ClawBot 可配置项（Probe mock 矩阵用）**：`wechat.ilinkBase` 默认 `https://ilinkai.weixin.qq.com`（测试指向本地 mock HTTP loopback，走真实 fetch 路径，不做 fake fetch 注入）；`wechat.ilinkPauseMs` 默认 `3600000`（`-14` 暂停，测试设小值验证恢复）；`wechat.ilinkBackoffMaxMs` 默认 `60000`（退避封顶）。
 
 **命令形状定稿**：`connector-command {id, action, args}`；`commands` 声明 `login-start:{transport:'clawbot',args:['consent']}`，`login-refresh`/`login-cancel`/`login-poll` 均 `args:[]`。未带 `consent` 或参数不合法 → `bot/invalid`，**不出码、0 次取码请求**；`consent:true` 才调 `get_bot_qrcode`；consent 持久化 `state.channels[instance].ilink.consent`。
