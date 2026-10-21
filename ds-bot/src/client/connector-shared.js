@@ -84,10 +84,22 @@ export function SettingField({ field, value, bots = [], disabled = false, onChan
       bots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))))
   }
   if (kind === 'segmented') {
+    const options = settingOptionsOf(field)
+    // One option is not a choice: a lone button reads like a broken control. Show the value
+    // as a plain line; the switch appears once there is something to switch to.
+    if (options.length < 2) {
+      const only = options[0]
+      const shown = only === undefined
+        ? (typeof value === 'string' ? value : '')
+        : (typeof only.label === 'string' && only.label !== '' ? only.label : only.value)
+      return h('div', { className: 'bt-connector-field', 'data-field': field.name, 'data-kind': 'segmented' },
+        h('span', { className: 'bt-connector-field-name' }, label),
+        h('span', { className: 'bt-connector-field-value' }, shown))
+    }
     return h('div', { className: 'bt-connector-field', 'data-field': field.name, 'data-kind': 'segmented' },
       h('span', { className: 'bt-connector-field-name' }, label),
       h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': label },
-        settingOptionsOf(field).map(option => h('button', {
+        options.map(option => h('button', {
           key: option.value, type: 'button', role: 'radio', 'aria-checked': value === option.value,
           className: 'bt-connector-level', 'data-current': value === option.value || undefined, disabled,
           onClick: () => { if (!disabled && value !== option.value) onChange(option.value) },

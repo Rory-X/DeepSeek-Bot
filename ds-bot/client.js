@@ -3495,6 +3495,7 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-field-control .bt-q-field{flex:1 1 auto;min-width:0}
 .bt-connector-field-control .bt-connector-link{flex:none}
 .bt-connector-field-state{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+.bt-connector-field-value{font-size:13px;line-height:20px;color:var(--bt-ink);min-height:20px;overflow-wrap:anywhere}
 .bt-connector-field .bt-select{min-width:0}
 /* Several instances of one module: each is a card of its own, the panel names the fields the
    instance keeps, and one more instance is added from the bottom of the group. */
@@ -14493,6 +14494,17 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
     );
   }
   if (kind === "segmented") {
+    const options = settingOptionsOf(field);
+    if (options.length < 2) {
+      const only = options[0];
+      const shown = only === void 0 ? typeof value === "string" ? value : "" : typeof only.label === "string" && only.label !== "" ? only.label : only.value;
+      return (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-field", "data-field": field.name, "data-kind": "segmented" },
+        (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, label),
+        (0, import_react36.createElement)("span", { className: "bt-connector-field-value" }, shown)
+      );
+    }
     return (0, import_react36.createElement)(
       "div",
       { className: "bt-connector-field", "data-field": field.name, "data-kind": "segmented" },
@@ -14500,7 +14512,7 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
       (0, import_react36.createElement)(
         "div",
         { className: "bt-connector-levels", role: "radiogroup", "aria-label": label },
-        settingOptionsOf(field).map((option) => (0, import_react36.createElement)("button", {
+        options.map((option) => (0, import_react36.createElement)("button", {
           key: option.value,
           type: "button",
           role: "radio",
