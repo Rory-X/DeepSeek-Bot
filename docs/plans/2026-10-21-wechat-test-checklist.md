@@ -22,7 +22,7 @@
 | P1-11 | 删除实例 | 停监听/清 secret（F2b 命名）；另一个实例仍 ready |
 | P1-12 | profile `wechat:false` | 无行、无端口、无 secret 读写 |
 | P1-13 | `connector-set-settings` 的 `clearSecrets:['webhookSecret']` | secret 被清除，`fields.saved` 转 false；文本空串仍只清文本 |
-| P1-14 | 两个实例的 secret 命名 | 首实例裸名、`wechat-2` 为 `_2`；两实例互不覆盖；删 `wechat-2` 只删自己的 secret |
+| P1-14 | 两个实例的 secret 命名 | **已并入 P1-13**（同一测试断言首实例裸名、`_2` 后缀、互不覆盖、删实例只删自己），不单列 |
 
 ## P2 用例（入站监听、绑定、回复）
 
@@ -45,11 +45,14 @@
 | P2-15 | 入站触发审批 | 微信只收到「请回 DS Bot 处理」；审批卡未被回答；工具 0 调用 |
 | P2-16 | 脱敏 | 日志/diagnostics/state.json 无 sender 原文、正文、secret；sender 只有哈希/长度 |
 | P2-17 | read 级入站 | 入站可收发；`wechat_notify` 未注册 |
+| P2-18 | `connector-command` 边界 | 未声明的 action / 参数不合法 / 非 clawbot 调 `login-*` → 拒绝；不允许任意 action 透传 |
+| P2-19 | 体积与回调地址 | body 超 64KB 流式累计即拒（含 chunked）；`callbackUrl` 只接受 https 或三个 loopback 字面值 |
 | P2-21 | Bearer 开关 | 默认关：不带 Bearer 也通过（只要有 HMAC）；打开后缺/错 Bearer → 401 |
-| P2-22 | 隔离面 | 外部消息不出现在 search / `read_own_chat` / 会话索引 / MEMORY.md / 侧栏 / 工作区列表；其它 session 看不到 |
+| P2-20 | 可见性隔离 | 外部消息不出现在 search / `read_own_chat` / 会话索引 / 侧栏 / 工作区列表；其它 session 看不到 |
+| P2-22 | 记忆面隔离 | channel session 不进 memory review 枚举、不注入记忆 prompt、不写 MEMORY.md（与 P2-20 拆开：P2-20 管可检索/可见，P2-22 管记忆写入与注入） |
 | P2-23 | 单 conversation | 每个通道只有创建者 DM 一条 conversation session；不会为 group 预建会话 |
 | P2-24 | 工具与消息头 | channel session 无任何工具（allowReadTools 只放 `web_search`）；denylist 各项不可用；注入正文含 `untrusted` 段 |
-| P2-25 | 异步与 `wait` | 默认 202 + 回调（HMAC/msgId 幂等）；`wait` ≤20s 内 200 且不发回调；超时 504 `code:'timeout'` 且仍发回调 |
+| P2-25 | 异步与 `wait` | **= P2-13a + P2-13b**：默认 202 + 回调（HMAC/msgId 幂等）；`wait` ≤20s 内 200 且不发回调；同步超时 504 `code:'timeout'`，异步 120s 未完成发 failure callback |
 | P3-01 | token 与合规 | token 只在 0600 文件或凭据库，state/日志/设置页无明文；未获用户明确同意时 P3 不启用 |
 
 ## 错误文案矩阵（宿主给用户/调用方的原文）
@@ -98,3 +101,54 @@
 - 端口被占：测试里先 `listen` 同端口再 `apply()`；断言通道 error、其他连接器 ready、`apply()` 不抛。
 - 零路由：`ctx.dispose()` 后 `fetch` 端口应 `ECONNREFUSED`；同时检查 DSH 侧 `connection.fetch` 路由表无 wechat 路径（用 fakeContext 记录）。
 - 审批不代答：入站消息触发需要审批的工具 → 等微信侧提示文本出现，断言 `state.questions` 未被回答、工具 0 调用。
+
+
+## 清单 ID ↔ 测试名 ↔ 状态（P2 验收前定稿）
+
+测试文件：`ds-bot/test/wechat.test.js`（P1 已实现；P2 全为 todo，P2 开工后逐条转绿）。
+
+| 清单 ID | 测试名（简） | 状态 |
+|---|---|---|
+| P1-01 | a channel is one instance: create/delete/ninth refused | pass |
+| P1-02 | the row carries the settings and never a secret value | pass |
+| P1-03 | readiness names the missing field; deleted Bot is a mount error | pass |
+| P1-04 | connect turns ready; P1 has no inbound field | todo |
+| P1-05 | wechat_notify asks first, runs once on allow, never on deny | pass |
+| P1-06 | outbound errors map to fixed sentences; over-long text fails first | pass |
+| P1-07 | changing transport while ready is refused; saves after disconnect | todo |
+| P1-08 | connector-test posts the fixed notice and returns the view | todo |
+| P1-09 | a secret given in settings is stored in Secrets, never in state/view | todo |
+| P1-10 | deleting an instance stops its mount; other channel stays ready | todo |
+| P1-11 | profile wechat:false hides rows and opens nothing | todo |
+| P1-12 | clearSecrets clears the saved secret; empty text clears a field | todo |
+| P1-13 | two channels keep separate secrets; `_2`; delete only its own | pass |
+| P1-14 | **并入 P1-13**，不单列 | merged |
+| P2-01 | listener binds 127.0.0.1 only | todo |
+| P2-02 | taken port: only that channel errors; plugin boots | todo |
+| P2-03 | dispose closes listener + unregisters routes | todo |
+| P2-04 | bad/missing HMAC → 401, 0 turns | todo |
+| P2-05 | stale timestamp → 401, 0 turns | todo |
+| P2-06 | replayed nonce → 401, 0 turns | todo |
+| P2-07 | replayed msgId → duplicate, 0 turns; survives restart | todo |
+| P2-08 | new msgId same text starts a turn | todo |
+| P2-09 | rate limit → 429 + retry_after | todo |
+| P2-10 | sender not allowed → 403 | todo |
+| P2-11 | Bot deleted/failing → 502 bot-unavailable | todo |
+| P2-12 | two inbound messages serialized, each reply to its msgId | todo |
+| P2-13a | synchronous wait over 20s → 504 timeout | todo |
+| P2-13b | async turn over 120s → failure callback | todo |
+| P2-14 | rebind archives A, new session for B, in-flight 503 | todo |
+| P2-15 | approval needed on inbound: WeChat notice only, 0 tool calls | todo |
+| P2-16 | logs/state carry no sender text/body/secret | todo |
+| P2-17 | read level answers inbound while notify stays unregistered | todo |
+| P2-18 | connector-command allow-list/args/clawbot-only | todo |
+| P2-19 | body >64KB streamed refuse; callbackUrl loopback-only | todo |
+| P2-20 | visibility: search/read_own_chat/index/sidebar/other sessions | todo |
+| P2-21 | HMAC mandatory, Bearer optional (default off); 401 when enabled and missing | todo |
+| P2-22 | memory: no review enumeration, no prompt injection, no MEMORY.md | todo |
+| P2-23 | v1: exactly one conversation session (creator DM) | todo |
+| P2-24 | tool denylist + `untrusted` in headerFor message header | todo |
+| P2-25 | **= P2-13a + P2-13b** | alias |
+| P3-01 | ClawBot token only in 0600/credential store; consent gate | todo（P3） |
+
+**偏差规则**：P1-14 并入 P1-13；P2-25 由 P2-13a/13b 覆盖；P2-20 与 P2-22 按「可见 vs 记忆」拆开。新增用例先加清单 ID 再改测试文件，两边同步。
