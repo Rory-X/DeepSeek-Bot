@@ -160,8 +160,9 @@ export default {
   displayName: 'WeChat',
   mode: 'custom',
   instances: { prefix: 'wechat', min: 1, max: 8 },
-  levels: ['read', 'write'],
-  defaultLevel: 'read',
+  // A messaging channel only sends: the level choice is hidden and write is the only level.
+  levels: ['write'],
+  defaultLevel: 'write',
   settings: WECHAT_SETTINGS.map(field => ({ ...field })),
   // A base name only: the framework's per-instance naming (F2b) adds the `_2` suffix, so
   // two channels never share one secret. Until F5 adds optional secret fields to the
@@ -173,12 +174,13 @@ export default {
     { key: 'notify', title: 'Send notices through the webhook', risk: 'write' },
   ],
   permissions: {
-    summary: 'Read level receives and answers messages; write level also posts notices, and every notice asks for your approval first.',
+    summary: 'Sends notices through this channel, and every notice asks for your approval first.',
   },
   card: {
     glyph: 'wechat',
     about: 'A WeChat channel bound to one Bot: it can post notices, and incoming messages arrive in a later update. This release supports Webhook; ClawBot comes in the next batch.',
     docsUrl: 'https://github.com/Tencent/openclaw-weixin',
+    levelChoice: false,
   },
   // What the card draws besides the settings: the level descriptions, whether Test can run,
   // and (P2) the inbound address. Display only, so a failing hook never breaks the card.
@@ -188,8 +190,7 @@ export default {
       transport: trim(values.transport) === 'clawbot' ? 'clawbot' : 'webhook',
       canTest: trim(values.transport) !== 'clawbot' && trim(values.webhookUrl) !== '',
       levels: [
-        { id: 'read', title: 'Read', description: 'Only receive and answer the messages this channel brings in.' },
-        { id: 'write', title: 'Full access', description: 'Also send notices for you; every notice asks for your approval first.' },
+        { id: 'write', title: 'Full access', description: 'Send notices for you; every notice asks for your approval first.' },
       ],
     }
   },
