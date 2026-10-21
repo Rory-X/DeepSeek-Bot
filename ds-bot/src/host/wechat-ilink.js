@@ -44,6 +44,10 @@ export const maskAccount = (value) => {
 
 const jsonHeaders = (extra = {}) => ({ 'content-type': 'application/json', ...extra })
 
+// Every call gets a deadline: a stuck socket must not pin a command or a mount. The QR status
+// call is a 30s long poll on the service side, so its deadline has to be longer than that.
+export const CALL_TIMEOUTS = { qr: 20_000, poll: 40_000, send: 25_000, updates: 60_000 }
+
 export function createIlinkClient({
   base = DEFAULT_BASE,
   fetch: request = fetch,
@@ -51,12 +55,18 @@ export function createIlinkClient({
   uin = () => Math.floor(Math.random() * 0xffffffff) >>> 0,
   pauseMs = DEFAULT_PAUSE_MS,
   backoffMaxMs = DEFAULT_BACKOFF_MAX_MS,
+  timeouts = {},
   now = () => Date.now(),
 } = {}) {
   const baseUrl = String(base).replace(/\/+$/, '')
   const clientVersion = String(clientVersionOf(version))
   const common = { 'iLink-App-Id': APP_ID, 'iLink-App-ClientVersion': clientVersion }
   const uinHeader = () => ({ 'X-WECHAT-UIN': Buffer.from(String(uin()), 'utf8').toString('base64') })
+  const limits = { ...CALL_TIMEOUTS, ...timeouts }
+  // A cancel signal (the mount's) and the deadline both end the call; either one aborts it.
+  const signalOf = (ms, cancel) => cancel === undefined
+    ? AbortSignal.timeout(ms)
+    : AbortSignal.any([cancel, AbortSignal.timeout(ms)])
   let pausedUntil = 0
   let failures = 0
 
@@ -99,6 +109,7 @@ export function createIlinkClient({
         method: 'POST',
         headers: jsonHeaders({ ...common, AuthorizationType: 'ilink_bot_token', ...uinHeader() }),
         body: '{}',
+        signal: signalOf(limits.qr),
       })
       return await answer(response)
     },
@@ -109,6 +120,7 @@ export function createIlinkClient({
       const response = await request(`${baseUrl}/ilink/bot/get_qrcode_status?${query}`, {
         method: 'GET',
         headers: { ...common, ...(routeTag === undefined ? {} : { SKRouteTag: String(routeTag) }) },
+        signal: signalOf(limits.poll),
       })
       return await answer(response)
     },
@@ -122,7 +134,7 @@ export function createIlinkClient({
           base_info: { channel_version: String(channelVersion), bot_agent: 'ds-bot' },
           ...(cursor === undefined ? {} : { get_updates_buf: String(cursor) }),
         }),
-        signal,
+        signal: signalOf(limits.updates, signal),
       })
       return await answer(response)
     },
@@ -146,7 +158,7 @@ export function createIlinkClient({
             item_list: [{ type: 1, text_item: { text: String(text ?? '') } }],
           },
         }),
-        signal,
+        signal: signalOf(limits.send, signal),
       })
       return await answer(response)
     },
