@@ -42,7 +42,7 @@ const webhookOf = (settings) => {
 // secret optional: a receiver that cannot verify a signature still gets its notice.
 export function wechatReadiness({ settings } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
-  if (trim(values.transport) === 'clawbot') return 'This ClawBot channel is not logged in. Paste its bot token in the channel settings.'
+  if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release; use Webhook.'
   if (trim(values.botId) === '') return 'Choose a Bot for this channel.'
   if (trim(values.webhookUrl) === '') return 'Add the push webhook URL for this channel.'
   return undefined
@@ -176,7 +176,7 @@ export default {
   },
   card: {
     glyph: 'wechat',
-    about: 'A WeChat channel bound to one Bot: it can post notices, and in P2 it receives messages.',
+    about: 'A WeChat channel bound to one Bot: it can post notices, and in P2 it receives messages. This release supports Webhook; ClawBot comes in the next batch.',
     docsUrl: 'https://github.com/Tencent/openclaw-weixin',
   },
   // What the card draws besides the settings: the level descriptions, whether Test can run,
@@ -206,7 +206,7 @@ export default {
   mount({ rt, settings, instance, level, approve, secrets, token }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const id = instance?.id ?? 'wechat'
-    if (trim(values.transport) === 'clawbot') throw new Error('This ClawBot channel is not logged in. Paste its bot token in the channel settings.')
+    if (trim(values.transport) === 'clawbot') throw new Error('ClawBot is not available in this release; use Webhook.')
     const botId = trim(values.botId)
     if (botId === '') throw new Error('Choose a Bot for this channel.')
     if (rt.botOf(botId) === undefined) throw new Error('The Bot this channel is bound to no longer exists. Choose another Bot.')
