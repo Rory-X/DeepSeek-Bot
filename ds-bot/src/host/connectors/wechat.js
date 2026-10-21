@@ -15,10 +15,11 @@ const trim = value => (typeof value === 'string' ? value.trim() : '')
 const textLimit = format => (format === 'wecom' ? WECOM_TEXT_MAX : GENERIC_TEXT_MAX)
 
 // The card's settings. A secret is a credential, not a setting: the framework stores it in
-// DSH's credential store and the card only ever sees saved/not-saved.
+// DSH's credential store and the card only ever sees saved/not-saved. P1 shows the Webhook
+// transport only; the ClawBot option opens with P3, and the validation still accepts it.
 export const WECHAT_SETTINGS = [
   { name: 'label', label: 'Name' },
-  { name: 'transport', label: 'Transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }, { value: 'clawbot', label: 'ClawBot' }] },
+  { name: 'transport', label: 'Transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }] },
   { name: 'botId', label: 'Bot', kind: 'bot', required: true },
   { name: 'webhookUrl', label: 'Push webhook URL' },
   { name: 'webhookFormat', label: 'Format', kind: 'segmented', options: [{ value: 'generic', label: 'Generic JSON' }, { value: 'wecom', label: 'WeCom group bot' }] },
@@ -42,7 +43,7 @@ const webhookOf = (settings) => {
 // secret optional: a receiver that cannot verify a signature still gets its notice.
 export function wechatReadiness({ settings } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
-  if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release; use Webhook.'
+  if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release. Use the Webhook transport.'
   if (trim(values.botId) === '') return 'Choose a Bot for this channel.'
   if (trim(values.webhookUrl) === '') return 'Add the push webhook URL for this channel.'
   return undefined
@@ -206,7 +207,7 @@ export default {
   mount({ rt, settings, instance, level, approve, secrets, token }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const id = instance?.id ?? 'wechat'
-    if (trim(values.transport) === 'clawbot') throw new Error('ClawBot is not available in this release; use Webhook.')
+    if (trim(values.transport) === 'clawbot') throw new Error('ClawBot is not available in this release. Use the Webhook transport.')
     const botId = trim(values.botId)
     if (botId === '') throw new Error('Choose a Bot for this channel.')
     if (rt.botOf(botId) === undefined) throw new Error('The Bot this channel is bound to no longer exists. Choose another Bot.')
