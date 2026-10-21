@@ -320,6 +320,7 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 
 ### 12.1 iLink 客户端附录（P3 可行性）
 
+- **规范与基线**：以 §4 的官方协议文档为准——[`docs/protocol_zh_CN.md`](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)，基线 npm `@tencent-weixin/openclaw-weixin@2.4.10`、仓库 commit `874637a0`、文档 sha256 `774ecb258ec9147d833335711cbb0d51fb40de3cb26113394b2427c191a735a0`；风险按 §4 合规门槛执行（MIT 只覆盖代码复用，官方支持范围是 OpenClaw 插件，后端接口对第三方无 SLA）。
 - **实现规模**：核心客户端约 **600–800 行 + 测试**，**无新 npm 依赖**（`fetch`/`crypto` 足够）。
 - **协议要点**：认证头三件套（`iLink-App-Id: bot`、`iLink-App-ClientVersion`、`AuthorizationType: ilink_bot_token` + Bearer + `X-WECHAT-UIN`）；`getUpdates` 35s 长轮询 + `get_updates_buf` 游标**持久化**（重启恢复，否则重收）；`sendMessage` 回传 `context_token`；`getconfig`/`sendtyping` 可选；指数退避重连；`errcode=-14` 暂停 1h 再试；入站 `msgId` 幂等复用 P2 的 `seenMsgIds`。
 - **二维码**：接口直接返回 data URL，**不需要二维码库**；P3 v1 用「官方 CLI 登录拿 bot_token 粘到卡片」，卡内 QR 留 P4。
@@ -421,7 +422,7 @@ card: { glyph:'wechat', about, docsUrl }
 | C1 | 记忆/检索排除面列全：`memory.js:632`、`store.js:392 indexSessions()`、`chat-index.js`、`parts.js` 显式 exclude | §6.1 表（逐文件落点）；§12 F2a | Relay 设计 + Forge 实现 | Forge 1–1.5d（含在 F2a） | §11.18、新增 P2-22 |
 | C2 | v1 只做 1 条 conversation（创建者 DM）；≤8 + LRU 移 P4 | §5 粒度 | Relay（设计） | 0 | 新增 P2-23 |
 | C3 | channel session denylist 逐项点名；`untrusted` 进 `headerFor` 消息头 | §5 工具白名单/`untrusted`；§12 F2a | Relay 设计 + Forge 实现 | 含在 F2a | P2-15、新增 P2-24 |
-| C4 | P3 token 只进 0600/凭据库；协议来源=腾讯官方公开文档 `docs/protocol_zh_CN.md` + npm `@tencent-weixin/openclaw-weixin@2.4.10`（固定 commit/文档哈希）；风险按「无第三方 SLA、官方支持范围是 OpenClaw 插件、接口随版本变更、个人号风控仍存在」写明；禁止旧的低证据表述与无依据的「违反条款」说法，统一按官方协议文档口径；真机测试须用户明确书面同意；v1 不做自动登录/扫码 | §4 协议来源/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
+| C4 | P3 token 只进 0600/凭据库；协议来源=腾讯官方公开文档 `docs/protocol_zh_CN.md` + npm `@tencent-weixin/openclaw-weixin@2.4.10`（固定 commit/文档哈希）；风险按「无第三方 SLA、官方支持范围是 OpenClaw 插件、接口随版本变更、个人号风控仍存在」写明；禁止旧的低证据表述与无依据的额外合规指控，统一按官方协议文档口径；真机测试须用户明确书面同意；v1 不做自动登录/扫码 | §4 协议来源/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
 | C5 | `secretNameOf`：删实例只删自己、名字过校验、两实例不同名 | §2 凭据表；§12 F2b | Forge | 0.25d | P1-11、新增 P1-14 |
 | F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14 | Forge | 1d | P1-02/04/09/13 |
 | F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14 | Prism（Pixel 复核） | 0.5d | P1-02 |
