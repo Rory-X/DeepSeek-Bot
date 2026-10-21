@@ -1102,8 +1102,8 @@ test('a multi-instance connector gives each instance its own row, grant and tool
   assert.deepEqual(rows.map(row => row.id), ['demo', 'demo-2'])
   assert.deepEqual(rows.map(row => row.name), ['Demo', 'Demo 2'])
   assert.deepEqual(rows.map(row => row.instance), [
-    { base: 'demo', id: 'demo', label: 'Demo' },
-    { base: 'demo', id: 'demo-2', label: 'Demo 2' },
+    { base: 'demo', id: 'demo', label: 'Demo', max: 2 },
+    { base: 'demo', id: 'demo-2', label: 'Demo 2', max: 2 },
   ])
   assert.deepEqual(rows.map(row => row.settings.find(field => field.name === 'projectId').value), ['proj-a', 'proj-b'])
   // Each instance mounted with its own grant and registered its own prefixed tools.
@@ -1143,7 +1143,7 @@ test('a saved single-instance authorization becomes the default instance without
   await until(async () => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the default instance to mount')
   const rows = rt.connectorsView()
   assert.equal(rows.length, 1)
-  assert.deepEqual([rows[0].id, rows[0].name, rows[0].level, rows[0].instance], ['demo', 'Demo', 'write', { base: 'demo', id: 'demo', label: 'Demo' }])
+  assert.deepEqual([rows[0].id, rows[0].name, rows[0].level, rows[0].instance], ['demo', 'Demo', 'write', { base: 'demo', id: 'demo', label: 'Demo', max: 2 }])
   assert.deepEqual(rows[0].settings.find(field => field.name === 'projectId').value, 'proj-1')
   // The old grant mounts the old instance, and nothing was rewritten or re-authorized.
   await ctx.registeredTools.get('demo_ping').execute({})
@@ -1162,7 +1162,7 @@ test('creating, renaming and removing an instance never authorizes it and never 
   const created = await rt.connectorEndpoint('connector-create-instance', { base: 'demo' })
   assert.deepEqual(created.map(row => row.id), ['demo', 'demo-2'])
   const added = created[1]
-  assert.deepEqual([added.name, added.state, added.level, added.instance], ['Demo 2', 'off', 'read', { base: 'demo', id: 'demo-2', label: 'Demo 2' }])
+  assert.deepEqual([added.name, added.state, added.level, added.instance], ['Demo 2', 'off', 'read', { base: 'demo', id: 'demo-2', label: 'Demo 2', max: 2 }])
   assert.deepEqual(rt.state.connectors['demo-2'], { level: 'read', settings: {} })
   // No authorization was started and no tool was mounted for the new instance.
   assert.equal(credentials.records.has('ds-bot/connector-demo-2'), false)
@@ -1205,7 +1205,7 @@ test('a new instance skips an id another connector module already uses', async (
   // demo-2 belongs to another module, so the framework's instance starts at demo-3.
   assert.deepEqual(created.map(row => row.id), ['demo', 'demo-2', 'demo-3'])
   assert.equal(rowOf(rt, 'demo-2').instance, undefined)
-  assert.deepEqual(rowOf(rt, 'demo-3').instance, { base: 'demo', id: 'demo-3', label: 'Demo 3' })
+  assert.deepEqual(rowOf(rt, 'demo-3').instance, { base: 'demo', id: 'demo-3', label: 'Demo 3', max: 2 })
 })
 
 test('two instance creations queue behind each other and the limit holds', async (t) => {
@@ -1679,4 +1679,181 @@ test('connecting a custom instance stores its credential under its own name', as
   assert.equal(JSON.parse(await two.execute({})).token, 'typed-token')
   // The first instance never sees the second one's credential.
   assert.equal(ctx.registeredTools.get('demo_probe'), undefined)
+})
+
+// A module's command endpoint runs only the actions it declared, with only the arguments it
+// declared, and only on the transport the action names.
+function commandDefinition() {
+  return {
+    displayName: 'Channel',
+    mode: 'custom',
+    tokenSecret: 'CHANNEL_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    settings: [{ name: 'transport', kind: 'segmented', options: [{ value: 'webhook' }, { value: 'clawbot' }] }],
+    commands: {
+      'login-start': { transport: 'clawbot' },
+      'login-info': { transport: 'clawbot', args: ['refresh'] },
+    },
+    command: async (context) => { context.calls?.push({ action: context.action, args: context.args }) },
+    mount: () => ({ tools: [] }),
+  }
+}
+
+test('a module command runs only the action it declares', async (t) => {
+  const calls = []
+  const definition = commandDefinition()
+  const command = definition.command
+  definition.command = async (context) => { await command({ ...context, calls }) }
+  const state = { connectors: { demo: { level: 'read', settings: { transport: 'clawbot' } } } }
+  const { ctx, rt, home } = hostSetup({ state, definition, secrets: { CHANNEL_TOKEN: 'tok' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+
+  const rows = await rt.connectorEndpoint('connector-command', { id: 'demo', action: 'login-start' })
+  assert.deepEqual(rows.map(row => row.id), ['demo'])
+  assert.deepEqual(calls, [{ action: 'login-start', args: {} }])
+
+  // A declared argument travels; an undeclared one is refused before the hook runs.
+  await rt.connectorEndpoint('connector-command', { id: 'demo', action: 'login-info', args: { refresh: true } })
+  assert.deepEqual(calls.at(-1), { action: 'login-info', args: { refresh: true } })
+  await assert.rejects(rt.connectorEndpoint('connector-command', { id: 'demo', action: 'login-info', args: { refresh: 'yes', extra: 1 } }), /Unknown argument "extra"/)
+  await assert.rejects(rt.connectorEndpoint('connector-command', { id: 'demo', action: 'login-start', args: { nested: { a: 1 } } }), /Unknown argument "nested"/)
+  await assert.rejects(rt.connectorEndpoint('connector-command', { id: 'demo', action: 'delete-everything' }), error => error.code === 'bot/unknown-action')
+  assert.equal(calls.length, 2)
+
+  // The same action on another transport is refused, not passed through.
+  await rt.connectorEndpoint('connector-set-settings', { id: 'demo', values: { transport: 'webhook' } })
+  await assert.rejects(rt.connectorEndpoint('connector-command', { id: 'demo', action: 'login-start' }), error => error.code === 'bot/unsupported-transport')
+  assert.equal(calls.length, 2)
+})
+
+// A declared secret field lives in the credential store: the view says only whether it is
+// saved, an empty value keeps it, and only clearSecrets removes it.
+test('a declared secret field is stored as a credential', async (t) => {
+  const store = {}
+  const calls = []
+  const definition = {
+    displayName: 'Channel',
+    mode: 'custom',
+    tokenSecret: 'CHANNEL_TOKEN',
+    credentials: [{ name: 'CHANNEL_TOKEN', required: false }],
+    levels: ['read'],
+    defaultLevel: 'read',
+    settings: [
+      { name: 'label', label: 'Name' },
+      { name: 'webhookSecret', kind: 'secret', secret: 'CHANNEL_SECRET', label: 'Secret' },
+      { name: 'transport', kind: 'segmented', options: [{ value: 'webhook' }, { value: 'clawbot' }] },
+    ],
+    mount: () => ({ tools: [] }),
+  }
+  const state = { connectors: { demo: { level: 'read', settings: { transport: 'webhook' } } } }
+  const { ctx, rt, home } = hostSetup({ state, definition, secrets: store })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  rt.secretEndpoint = secretDesk(store, calls)
+
+  // The object-shaped field list is what the client reads; a secret carries no value.
+  const secretField = () => rowOf(rt, 'demo').fields.find(field => field.name === 'webhookSecret')
+  const transportField = () => rowOf(rt, 'demo').fields.find(field => field.name === 'transport')
+  assert.deepEqual([secretField().kind, secretField().saved], ['secret', false])
+  assert.equal('value' in secretField(), false)
+  assert.deepEqual([transportField().kind, transportField().value], ['segmented', 'webhook'])
+
+  // An omitted or empty secret keeps what is stored.
+  await rt.connectorEndpoint('connector-set-settings', { id: 'demo', values: { webhookSecret: '' } })
+  assert.deepEqual(calls.filter(call => call.endpoint === 'secret-set'), [])
+  await rt.connectorEndpoint('connector-set-settings', { id: 'demo', values: { webhookSecret: 'secret-1' } })
+  assert.deepEqual(calls.map(call => [call.endpoint, call.name, call.value]).filter(call => call[0] === 'secret-set'), [['secret-set', 'CHANNEL_SECRET', 'secret-1']])
+  assert.equal(secretField().saved, true)
+  assert.ok(!JSON.stringify(rt.connectorsView()).includes('secret-1'))
+
+  // Only clearSecrets removes a stored secret, and an unknown field is refused.
+  await rt.connectorEndpoint('connector-set-settings', { id: 'demo', clearSecrets: ['webhookSecret'] })
+  assert.deepEqual(calls.at(-1), { endpoint: 'secret-delete', name: 'CHANNEL_SECRET' })
+  assert.equal(secretField().saved, false)
+  await assert.rejects(rt.connectorEndpoint('connector-set-settings', { id: 'demo', clearSecrets: ['token'] }), /Unknown secret field "token"/)
+})
+
+// A module's test runs its own path: a failure shows on the card, which stays connected.
+test('a module test failure shows on the ready card', async (t) => {
+  let failure
+  const definition = {
+    displayName: 'Channel',
+    mode: 'custom',
+    tokenSecret: 'CHANNEL_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    mount: () => ({ tools: [] }),
+    test: async () => { if (failure !== undefined) throw new Error(failure) },
+  }
+  const state = { connectors: { demo: { level: 'read', settings: {} } } }
+  const { ctx, rt, home } = hostSetup({ state, definition, secrets: { CHANNEL_TOKEN: 'tok' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(() => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the channel to mount')
+
+  failure = 'the webhook answered 404'
+  await rt.connectorEndpoint('connector-test', { id: 'demo' })
+  assert.equal(rowOf(rt, 'demo').state, 'ready')
+  assert.match(rowOf(rt, 'demo').error, /webhook answered 404/)
+
+  failure = undefined
+  await rt.connectorEndpoint('connector-test', { id: 'demo' })
+  assert.equal(rowOf(rt, 'demo').state, 'ready')
+  assert.equal(rowOf(rt, 'demo').error, undefined)
+})
+
+// A module's view adds card data (inbound address, login step), and the row names the
+// module's instance cap so the client knows when Add is exhausted.
+test('a module view adds row data and the instance cap', async (t) => {
+  const definition = {
+    displayName: 'Channel',
+    mode: 'custom',
+    tokenSecret: 'CHANNEL_TOKEN',
+    levels: ['read', 'write'],
+    defaultLevel: 'read',
+    instances: { prefix: 'demo', min: 1, max: 4 },
+    settings: [{ name: 'transport', kind: 'segmented', options: [{ value: 'webhook' }, { value: 'clawbot' }] }],
+    mount: () => ({ tools: [] }),
+    view: ({ settings, instance }) => ({
+      levels: [{ id: 'read', title: 'Read', description: 'Receive messages' }],
+      canTest: true,
+      inbound: settings.transport === 'webhook' ? { url: `http://127.0.0.1:8799/wechat/${instance.id}/inbound`, token: 'inbound-1' } : undefined,
+      login: { state: settings.transport === 'clawbot' ? 'logged-in' : 'logged-out' },
+      status: { lastInboundAt: 5 },
+    }),
+  }
+  const state = { connectors: { demo: { level: 'read', settings: { transport: 'webhook' } }, 'demo-2': { level: 'read', settings: { transport: 'clawbot' } } } }
+  const { ctx, rt, home } = hostSetup({ state, definition, secrets: { CHANNEL_TOKEN: 'tok', CHANNEL_TOKEN_2: 'tok-2' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(() => (rowOf(rt, 'demo')?.state === 'ready' && rowOf(rt, 'demo-2')?.state === 'ready' ? true : undefined), 'both instances to mount')
+
+  const first = rowOf(rt, 'demo')
+  assert.equal(first.instance.max, 4)
+  assert.deepEqual(first.levels, [{ id: 'read', title: 'Read', description: 'Receive messages' }])
+  assert.deepEqual(first.inbound, { url: 'http://127.0.0.1:8799/wechat/demo/inbound', token: 'inbound-1' })
+  assert.deepEqual(first.login, { state: 'logged-out' })
+  assert.equal(first.canTest, true)
+  assert.deepEqual(first.status, { lastInboundAt: 5 })
+  assert.deepEqual(rowOf(rt, 'demo-2').login, { state: 'logged-in' })
+  assert.equal(rowOf(rt, 'demo-2').inbound, undefined)
+})
+
+// A view that throws hides its data instead of the card.
+test('a failing view hides only its own data', async (t) => {
+  const definition = {
+    displayName: 'Channel',
+    mode: 'custom',
+    tokenSecret: 'CHANNEL_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    mount: () => ({ tools: [] }),
+    view: () => { throw new Error('view broke') },
+  }
+  const state = { connectors: { demo: { level: 'read', settings: {} } } }
+  const { ctx, rt, home } = hostSetup({ state, definition, secrets: { CHANNEL_TOKEN: 'tok' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(() => (rowOf(rt, 'demo')?.state === 'ready' ? true : undefined), 'the channel to mount')
+  const row = rowOf(rt, 'demo')
+  assert.equal(row.id, 'demo')
+  assert.equal(row.inbound, undefined)
+  assert.equal(row.login, undefined)
 })

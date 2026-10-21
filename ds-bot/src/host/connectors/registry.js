@@ -7,6 +7,7 @@ import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { credentialFields } from '../connector-setup.js'
+import { SECRET_NAME } from '../secrets.js'
 
 export const CONNECTOR_DIR = import.meta.dirname
 export const CONNECTOR_ID = /^[a-z][a-z0-9-]{0,39}$/
@@ -23,8 +24,10 @@ export const INSTANCE_LIMIT = 64
 export const CONNECTOR_LEVELS = ['read', 'write']
 // This file and test-only helpers stay out of the registry.
 const NOT_A_CONNECTOR = /^(registry\.js|_.*|.*\.test\.js)$/
-const LEVEL_HOOKS = ['authorize', 'toolsOf', 'readiness', 'normalizeSettings', 'actionApproval']
+const LEVEL_HOOKS = ['authorize', 'toolsOf', 'readiness', 'normalizeSettings', 'actionApproval', 'view', 'status', 'test', 'command']
 const CAPABILITY_RISKS = ['read', 'write', 'destructive']
+const SETTING_KINDS = ['text', 'secret', 'bot', 'segmented']
+const COMMAND_ID = /^[a-z][a-z0-9-]{0,31}$/
 
 // Display-only additions: what the connector can do, and one line about the grant it asks
 // for. Missing pieces hide that block on the card; nothing here enables a tool.
@@ -69,9 +72,52 @@ const checkLevels = (file, id, connector) => {
       throw new Error(`Connector module ${file} ("${id}") needs ${hook} to be a function`)
     }
   }
-  if (connector.settings !== undefined
-    && (!Array.isArray(connector.settings) || connector.settings.some(field => field === null || typeof field !== 'object' || typeof field.name !== 'string' || field.name === ''))) {
-    throw new Error(`Connector module ${file} ("${id}") settings must list fields with a name`)
+  if (connector.settings !== undefined) {
+    if (!Array.isArray(connector.settings) || connector.settings.some(field => field === null || typeof field !== 'object' || typeof field.name !== 'string' || field.name === '')) {
+      throw new Error(`Connector module ${file} ("${id}") settings must list fields with a name`)
+    }
+    for (const field of connector.settings) {
+      const kind = field.kind === undefined ? 'text' : field.kind
+      if (!SETTING_KINDS.includes(kind)) {
+        throw new Error(`Connector module ${file} ("${id}") settings field "${field.name}" has an unknown kind; use ${SETTING_KINDS.join(', ')}`)
+      }
+      if (field.required !== undefined && typeof field.required !== 'boolean') {
+        throw new Error(`Connector module ${file} ("${id}") settings field "${field.name}" needs required to be true or false`)
+      }
+      if (field.options !== undefined
+        && (!Array.isArray(field.options)
+          || field.options.some(option => option === null || typeof option !== 'object' || typeof option.value !== 'string' || option.value === ''))) {
+        throw new Error(`Connector module ${file} ("${id}") settings field "${field.name}" options must list values`)
+      }
+      if (kind === 'secret') {
+        const credential = field.secret === undefined ? field.name : field.secret
+        if (typeof credential !== 'string' || !SECRET_NAME.test(credential)) {
+          throw new Error(`Connector module ${file} ("${id}") settings field "${field.name}" needs a credential name for its secret`)
+        }
+      }
+    }
+  }
+  if (connector.commands !== undefined && typeof connector.command !== 'function') {
+    throw new Error(`Connector module ${file} ("${id}") needs a command function for its commands`)
+  }
+  if (connector.commands !== undefined) {
+    if (connector.commands === null || typeof connector.commands !== 'object' || Array.isArray(connector.commands)) {
+      throw new Error(`Connector module ${file} ("${id}") commands must map an action to its transport and arguments`)
+    }
+    for (const [action, spec] of Object.entries(connector.commands)) {
+      if (!COMMAND_ID.test(action)) {
+        throw new Error(`Connector module ${file} ("${id}") command "${action}" needs lowercase letters, digits and hyphens`)
+      }
+      if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
+        throw new Error(`Connector module ${file} ("${id}") command "${action}" must describe itself`)
+      }
+      if (spec.transport !== undefined && typeof spec.transport !== 'string') {
+        throw new Error(`Connector module ${file} ("${id}") command "${action}" transport must be a string`)
+      }
+      if (spec.args !== undefined && (!Array.isArray(spec.args) || spec.args.some(arg => typeof arg !== 'string' || arg === ''))) {
+        throw new Error(`Connector module ${file} ("${id}") command "${action}" args must list argument names`)
+      }
+    }
   }
   if (connector.blockedTools !== undefined
     && (!Array.isArray(connector.blockedTools)

@@ -601,6 +601,101 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     }
     return notes
   }
+  // A module's settings may say how each field is edited: plain text, a Bot picker, a
+  // segmented choice, or a secret the DSH credential store holds. A secret field names the
+  // credential base name it keeps; the view says whether it is saved, never its value.
+  const SETTING_KINDS = new Set(['text', 'secret', 'bot', 'segmented'])
+  const settingKindOf = field => (SETTING_KINDS.has(field?.kind) ? field.kind : 'text')
+  const secretFieldCredentialOf = field => (settingKindOf(field) !== 'secret' ? undefined
+    : typeof field?.secret === 'string' && field.secret !== '' ? field.secret : field.name)
+  const settingOptionsOf = field => (Array.isArray(field?.options)
+    ? field.options
+      .filter(option => option !== null && typeof option === 'object' && typeof option.value === 'string' && option.value !== '')
+      .map(option => ({ value: option.value, ...(typeof option.label === 'string' && option.label !== '' ? { label: option.label } : {}) }))
+    : [])
+  // The object-shaped field list only for a module that says how its fields are edited; an
+  // older card keeps its `settings` array and its rendering.
+  const settingsFieldsOf = (id) => {
+    const connector = options[id]
+    const declared = Array.isArray(connector.settings) ? connector.settings : []
+    if (declared.length === 0 || !declared.some(field => field.kind !== undefined || field.secret !== undefined)) return undefined
+    const stored = settingsOf(id)
+    return declared.map((field) => {
+      const kind = settingKindOf(field)
+      const options = settingOptionsOf(field)
+      const common = {
+        name: field.name,
+        ...(typeof field.label === 'string' && field.label !== '' ? { label: field.label } : {}),
+        ...(kind === 'text' ? {} : { kind }),
+        ...(field.required === true ? { required: true } : {}),
+        ...(options.length === 0 ? {} : { options }),
+      }
+      if (kind === 'secret') {
+        const credential = secretFieldCredentialOf(field)
+        return { ...common, saved: rt.secretValue(secretNameOf(connector, credential)) !== undefined }
+      }
+      return { ...common, ...(typeof stored[field.name] === 'string' ? { value: stored[field.name] } : {}) }
+    })
+  }
+  // What a module adds to its row for the card: live channel state (an inbound address, a
+  // login step) is display-only. A failing hook hides its data, not the card.
+  const VIEW_KEYS = ['fields', 'levels', 'inbound', 'login', 'canTest', 'transport', 'status']
+  const hookWarned = new Set()
+  const hookContextOf = (id) => {
+    const connector = options[id]
+    return {
+      id,
+      instance: instanceContextOf(id),
+      settings: settingsOf(id),
+      level: levelOf(id),
+      levels: levelsOf(connector),
+      state: state.connectors?.[id],
+      secrets: secretMapOf(connector),
+      secretName: name => secretNameOf(connector, name),
+      secretValue: name => secretValueOf(connector, name),
+      rt,
+    }
+  }
+  const hookValueOf = (id, hook, label) => {
+    const connector = options[id]
+    if (typeof connector[hook] !== 'function') return undefined
+    try {
+      const value = connector[hook](hookContextOf(id))
+      return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
+    } catch (error) {
+      if (!hookWarned.has(`${id}:${hook}`)) {
+        hookWarned.add(`${id}:${hook}`)
+        rt.warn('ds-bot: %s %s failed: %s', connector.displayName, label, reason(error))
+      }
+      return undefined
+    }
+  }
+  const viewExtrasOf = (id) => {
+    const extra = hookValueOf(id, 'view', 'view') ?? {}
+    const out = {}
+    for (const key of VIEW_KEYS) if (extra[key] !== undefined) out[key] = extra[key]
+    const status = hookValueOf(id, 'status', 'status')
+    if (status !== undefined) out.status = status
+    return out
+  }
+  // What one command may receive: only the arguments the module declared for that action,
+  // each a scalar. Anything else is refused before the module function is called.
+  const commandArgsOf = (spec, given) => {
+    const source = given !== null && typeof given === 'object' && !Array.isArray(given) ? given : {}
+    const allowed = Array.isArray(spec.args) ? spec.args : []
+    for (const key of Object.keys(source)) {
+      if (!allowed.includes(key)) throw Object.assign(new Error(`Unknown argument "${key}" for this command`), { code: 'bot/invalid' })
+    }
+    const args = {}
+    for (const key of allowed) {
+      const value = source[key]
+      if (value === undefined) continue
+      if (!['string', 'number', 'boolean'].includes(typeof value)) throw Object.assign(new Error(`Argument "${key}" must be a string, a number or a boolean`), { code: 'bot/invalid' })
+      args[key] = value
+    }
+    return args
+  }
+
   // `label` only names the card; every other settings field feeds the grant or the mount, so
   // only a change to one of those needs a new authorization. A rename keeps the grant.
   const DISPLAY_SETTINGS = new Set(['label'])
@@ -1224,9 +1319,17 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     const status = statuses.get(id) ?? { state: 'off' }
     const oauthConnector = connector.mode === 'oauth-mcp'
     // One row per instance: the client groups rows by `instance.base`, keys them by
-    // `instance.id` and shows `instance.label` as the card name.
-    const instance = connector.baseId === undefined ? undefined : { base: connector.baseId, id, label: instanceNameOf(connector.baseId, id) }
-    return {
+    // `instance.id` and shows `instance.label` as the card name; `max` is the module's own
+    // instance cap, so the card knows when Add is exhausted.
+    const cap = connector.baseId === undefined ? undefined : definitionOf(connector.baseId)?.instances?.max
+    const instance = connector.baseId === undefined ? undefined : {
+      base: connector.baseId,
+      id,
+      label: instanceNameOf(connector.baseId, id),
+      ...(cap === undefined ? {} : { max: cap }),
+    }
+    const fields = settingsFieldsOf(id)
+    const row = {
       id,
       name: instance === undefined ? connector.displayName : instance.label,
       ...(instance === undefined ? {} : { instance }),
@@ -1248,6 +1351,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
             })),
           }
         : {}),
+      ...(fields === undefined ? {} : { fields }),
       ...(levelNoteOf(id) === undefined ? {} : { levelNote: levelNoteOf(id) }),
       ...(Object.keys(levelNotesOf(id)).length === 0 ? {} : { levelNotes: levelNotesOf(id) }),
       ...(state.connectors?.[id]?.needsReauth === true ? { needsReauth: true } : {}),
@@ -1281,6 +1385,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
           }
         : {}),
     }
+    return { ...row, ...viewExtrasOf(id) }
   }
 
   const connectorsView = () => {
@@ -1471,21 +1576,52 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       return connectorsView()
     },
     // Plain configuration a connector needs (a project id, a role). It is not a secret, so
-    // it lives in the team file; a module may normalize and refuse the values.
+    // it lives in the team file; a module may normalize and refuse the values. A field the
+    // module calls a secret is written to the credential store instead, and only
+    // `clearSecrets` removes a stored one — an omitted or empty value keeps it.
     async 'connector-set-settings'(body) {
       known(body.id)
       const connector = options[body.id]
-      if (!Array.isArray(connector.settings) || connector.settings.length === 0) throw new Error(`${connector.displayName} has no settings`)
+      const declared = Array.isArray(connector.settings) ? connector.settings : []
+      if (declared.length === 0) throw new Error(`${connector.displayName} has no settings`)
       const values = body.values !== null && typeof body.values === 'object' && !Array.isArray(body.values) ? body.values : {}
+      const secretFields = declared.filter(field => settingKindOf(field) === 'secret')
+      const secretNames = new Set(secretFields.map(field => field.name))
+      const clearSecrets = Array.isArray(body.clearSecrets) ? body.clearSecrets.filter(name => typeof name === 'string') : []
+      for (const name of clearSecrets) {
+        if (!secretNames.has(name)) throw Object.assign(new Error(`Unknown secret field "${name}" for ${connector.displayName}`), { code: 'bot/invalid' })
+      }
+      const plain = {}
+      for (const [name, value] of Object.entries(values)) if (!secretNames.has(name)) plain[name] = value
       let settings
       if (typeof connector.normalizeSettings === 'function') {
-        const normalized = connector.normalizeSettings({ ...values }, instanceContextOf(body.id))
+        const normalized = connector.normalizeSettings({ ...plain }, instanceContextOf(body.id))
         settings = normalized !== null && typeof normalized === 'object' && !Array.isArray(normalized) ? normalized : {}
       } else {
         settings = {}
-        for (const field of connector.settings) {
-          if (typeof values[field.name] === 'string') settings[field.name] = values[field.name].trim()
+        for (const field of declared) {
+          if (secretNames.has(field.name)) continue
+          if (typeof plain[field.name] === 'string') settings[field.name] = plain[field.name].trim()
         }
+      }
+      await rt.loadSecrets()
+      const secretWrites = []
+      for (const field of secretFields) {
+        const name = secretNameOf(connector, secretFieldCredentialOf(field))
+        if (clearSecrets.includes(field.name)) {
+          if (rt.secretValue(name) !== undefined) secretWrites.push({ endpoint: 'secret-delete', name })
+          continue
+        }
+        const typed = values[field.name]
+        if (typeof typed === 'string' && typed.trim() !== '') secretWrites.push({ endpoint: 'secret-set', name, value: typed.trim() })
+      }
+      for (const write of secretWrites) {
+        if (write.endpoint === 'secret-delete') {
+          await rt.secretEndpoint('secret-delete', { name: write.name })
+          continue
+        }
+        const kept = rt.secretValue(write.name) !== undefined
+        await rt.secretEndpoint('secret-set', { name: write.name, value: write.value, purpose: `${connector.displayName} connector`, ...(kept ? {} : { scope: [] }) })
       }
       const prior = state.connectors?.[body.id] ?? {}
       const authorized = connector.mode === 'oauth-mcp' && typeof connector.authorize === 'function'
@@ -1599,11 +1735,42 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       await refresh(body.id, true)
       return connectorsView()
     },
-    // One test message through the module's real send path. The token is good, so a
-    // failure shows on the card without turning the connector off.
+    // One module operation the fixed endpoints do not cover (a login step, a refresh). The
+    // module names the actions it serves and the arguments each one takes; an unknown
+    // action, an undeclared argument or a command on the wrong transport is refused here,
+    // so a card cannot reach any other module function.
+    async 'connector-command'(body) {
+      known(body.id)
+      const connector = options[body.id]
+      if (typeof connector.command !== 'function' || connector.commands === undefined) throw new Error(`${connector.displayName} has no commands`)
+      const action = typeof body.action === 'string' ? body.action : ''
+      const spec = Object.hasOwn(connector.commands, action) ? connector.commands[action] : undefined
+      if (spec === undefined) throw Object.assign(new Error(`Unknown command "${action}" for ${connector.displayName}`), { code: 'bot/unknown-action' })
+      const settings = settingsOf(body.id)
+      if (typeof spec.transport === 'string' && settings.transport !== spec.transport) {
+        throw Object.assign(new Error(`This command is only available on the ${spec.transport} transport`), { code: 'bot/unsupported-transport' })
+      }
+      const args = commandArgsOf(spec, body.args)
+      await rt.loadSecrets()
+      await connector.command({ ...hookContextOf(body.id), action, args })
+      return connectorsView()
+    },
+    // One test run through the module's real path (a notification's send, a channel's test
+    // post). A failure shows on the card and does not turn the connector off.
     async 'connector-test'(body) {
       known(body.id)
       const connector = options[body.id]
+      if (typeof connector.test === 'function') {
+        await rt.loadSecrets()
+        try {
+          await connector.test(hookContextOf(body.id))
+          statuses.set(body.id, { state: statuses.get(body.id)?.state === 'off' ? 'off' : 'ready' })
+        } catch (error) {
+          const prior = statuses.get(body.id) ?? { state: 'off' }
+          statuses.set(body.id, { ...prior, error: reason(error) })
+        }
+        return connectorsView()
+      }
       if (connector.mode !== 'notify') throw new Error('This connector has no test message')
       await rt.loadSecrets()
       const token = notifyTokenOf(connector)
