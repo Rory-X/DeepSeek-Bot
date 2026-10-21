@@ -205,7 +205,11 @@ test('P1-03 readiness names the missing field and a deleted Bot before Connect',
   assert.match(JSON.stringify(row.levelNotes ?? row.levelNote), /Choose a Bot/)
   const missingUrl = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1' } })
   assert.equal(missingUrl.ok, true)
-  assert.match(JSON.stringify((await rowOf(ctx)).levelNotes ?? (await rowOf(ctx)).levelNote), /webhook URL/)
+  // P2 stores the URL as a credential and readiness runs before the store may be loaded, so
+  // "unknown" is not "missing": the mount names the missing URL once it can tell.
+  assert.equal(JSON.stringify((await rowOf(ctx)).levelNotes ?? (await rowOf(ctx)).levelNote ?? '').includes('webhook URL'), false)
+  const noUrl = await until(async () => ((await rowOf(ctx))?.state === 'error' ? await rowOf(ctx) : undefined), 'the missing URL mount error')
+  assert.match(noUrl.error, /Add the push webhook URL/)
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
   const ghost = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'deleted-bot', webhookUrl: receiver.url } })
