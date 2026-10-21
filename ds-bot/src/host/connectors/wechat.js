@@ -2,6 +2,7 @@
 // outbound half — a channel posts a notice to a webhook (an enterprise WeChat group bot or
 // any HTTP receiver). The inbound listener, channel Sessions and ClawBot login land in P2/P3.
 import { createHmac, randomBytes } from 'node:crypto'
+import { inboundFor } from '../wechat-inbound.js'
 
 const TIMEOUT_MS = 10_000
 const GENERIC_TEXT_MAX = 4_000
@@ -184,8 +185,9 @@ export default {
   },
   // What the card draws besides the settings: the level descriptions, whether Test can run,
   // and (P2) the inbound address. Display only, so a failing hook never breaks the card.
-  view({ settings }) {
+  view({ id, settings, rt }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
+    const hub = inboundFor(rt)
     return {
       transport: trim(values.transport) === 'clawbot' ? 'clawbot' : 'webhook',
       canTest: trim(values.transport) !== 'clawbot' && trim(values.webhookUrl) !== '',
@@ -193,6 +195,8 @@ export default {
         { id: 'read', title: 'Read', description: 'Only receive and answer the messages this channel brings in.' },
         { id: 'write', title: 'Full access', description: 'Also send notices for you; every notice asks for your approval first.' },
       ],
+      ...hub.viewOf(id),
+      ...hub.statusOf(id),
     }
   },
   // One test notice through the same path a real notice takes. A failure stays on the card
@@ -206,7 +210,7 @@ export default {
       : (typeof secretValue === 'function' ? secretValue(SECRET_NAME) : undefined)
     await postNotice({ address, format: values.webhookFormat, text: TEST_TEXT, secret })
   },
-  mount({ rt, settings, instance, level, approve, secrets, token }) {
+  mount({ rt, settings, instance, level, approve, secrets, token, secretName }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const id = instance?.id ?? 'wechat'
     if (trim(values.transport) === 'clawbot') throw new Error('ClawBot is not available in this release. Use the Webhook transport.')
@@ -220,10 +224,16 @@ export default {
     // The framework resolved this instance's credential into `secrets`; reading the bare
     // name through rt here would sign with the first instance's secret.
     const secretOf = () => secretValue
+    // A channel with an HMAC secret gets its inbound path; without one it keeps working for
+    // outbound notices and has no inbound path at all. The listener is shared by every
+    // channel of this plugin, so a mount only adds or removes its own route.
+    if (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '') {
+      inboundFor(rt).attach({ instance: id, botId, settings: values, secret: secrets[SECRET_NAME], secretName })
+    }
     const tools = []
     if (level === 'write') {
       tools.push(notifyTool({ channel: id, settings: values, secretOf, approve }))
     }
-    return { tools }
+    return { tools, close: () => { void inboundFor(rt).detach(id) } }
   },
 }

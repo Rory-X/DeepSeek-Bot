@@ -49,7 +49,9 @@ function setup({ config = {} } = {}) {
   }
   const route = ctx.connection.fetch.register
   ctx.connection.fetch.register = (handled) => { ctx.route = handled; return route(handled) }
-  apply(ctx, { home, ...config })
+  // Every test host gets an ephemeral inbound port: two hosts must never race for a fixed
+  // one, and a developer machine may already serve the production port.
+  apply(ctx, { home, wechat: { listenPort: 0 }, ...config })
   registered.length = 0
   disposed.length = 0
   return { ctx, home, registered, disposed }
@@ -70,6 +72,11 @@ async function until(check, label) {
 const rowsOf = async (ctx) => (await call(ctx, 'state', {})).value.connectors.filter(row => row.id === 'wechat' || row.id.startsWith('wechat-'))
 const rowOf = async (ctx, id = 'wechat') => (await rowsOf(ctx)).find(row => row.id === id)
 const card = async (ctx) => (await call(ctx, 'state', {})).value.questions.m1
+// The inbound address the card draws once the shared listener serves this channel.
+const inboundUrl = async (ctx, id = 'wechat') => {
+  const inbound = await until(async () => (await rowOf(ctx, id))?.inbound, `the inbound address of ${id}`)
+  return inbound.url
+}
 const answerCard = (ctx, questionId, selected) => call(ctx, 'answer-question', { sessionId: 'm1', questionId, answer: { selected } })
 
 // Connect a webhook channel bound to b1; the callback receiver is the fake.
@@ -163,14 +170,15 @@ test('P1-03 readiness names the missing field and a deleted Bot before Connect',
 })
 
 // ---- P1-04: connect; P1-05: the notify tool and its approval ----
-test('P1-04 connect turns the channel ready and P1 has no inbound field', async (t) => {
+test('P1-04 connect turns the channel ready; P2 serves it a loopback inbound address', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const row = await connectChannel(ctx, receiver)
   assert.deepEqual([row.state, row.level], ['ready', 'read'])
-  assert.equal(row.inbound, undefined)
+  const inbound = await until(async () => (await rowOf(ctx))?.inbound, 'the inbound address')
+  assert.match(inbound.url, /^http:\/\/127\.0\.0\.1:\d+\/wechat\/wechat\/inbound$/)
   assert.equal(row.login, undefined)
 })
 
@@ -441,17 +449,173 @@ test('P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting 
   assert.equal(ctx.registeredTools.has('wechat_2_notify'), false)
 })
 
-// ---- P2: inbound listener, binding and replies ----
-test.todo('P2-01 the listener binds 127.0.0.1 only: address is asserted, and no configuration can make it 0.0.0.0')
-test.todo('P2-02 a taken port leaves only that channel error with port and fix; the plugin boots and other connectors are ready')
-test.todo('P2-03 dispose closes the listener and unregisters every route: the port refuses connections, nothing stays in the route table')
-test.todo('P2-04 a missing or wrong HMAC signature answers 401 bad-signature and starts 0 Bot turns')
-test.todo('P2-05 a timestamp outside ±300s answers 401 stale-timestamp and starts 0 turns')
-test.todo('P2-06 a replayed nonce answers 401 replayed-nonce and starts 0 turns')
+// ---- P2: inbound listener and its gate ----
+test('P2-01 the inbound listener binds 127.0.0.1 only', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup({ config: { wechat: { listenPort: 0, bindAddress: '0.0.0.0' } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  // A bind address is not a knob the profile owns: the address is loopback, whatever it says.
+  const url = await inboundUrl(ctx)
+  assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/wechat\/wechat\/inbound$/)
+  const accepted = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hello' })
+  assert.deepEqual([accepted.status, accepted.json.accepted], [202, true])
+})
+
+test('P2-03 dispose closes the inbound listener', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(() => rmSync(home, { recursive: true, force: true, maxRetries: 5 }))
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  await ctx.dispose()
+  // The port refuses connections once the plugin is gone.
+  await until(async () => {
+    try {
+      await fetch(url, { method: 'POST' })
+      return undefined
+    } catch {
+      return true
+    }
+  }, 'the inbound listener to close')
+})
+
+test('P2-04 a missing or wrong signature answers 401 bad-signature and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const unsigned = await postInbound({ url, msgId: 'm-1', sender: 'creator' })
+  assert.deepEqual([unsigned.status, unsigned.json.code], [401, 'bad-signature'])
+  const wrong = await postInbound({ url, secret: 'another-secret', msgId: 'm-2', sender: 'creator' })
+  assert.deepEqual([wrong.status, wrong.json.code], [401, 'bad-signature'])
+  // Nothing was written for a refused message: no channel state, no Session.
+  const state = (await call(ctx, 'state', {})).value
+  assert.equal(state.channels === undefined || Object.keys(state.channels).length === 0, true)
+})
+
+test('P2-05 a timestamp outside ±300s answers 401 stale-timestamp and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const now = Math.floor(Date.now() / 1000)
+  const old = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', timestamp: now - 301 })
+  assert.deepEqual([old.status, old.json.code], [401, 'stale-timestamp'])
+  const future = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', timestamp: now + 301 })
+  assert.deepEqual([future.status, future.json.code], [401, 'stale-timestamp'])
+  const fresh = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', timestamp: now })
+  assert.equal(fresh.status, 202)
+})
+
+test('P2-06 a replayed nonce answers 401 replayed-nonce and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const first = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', nonce: 'fixed-nonce' })
+  assert.equal(first.status, 202)
+  const replay = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', nonce: 'fixed-nonce' })
+  assert.deepEqual([replay.status, replay.json.code], [401, 'replayed-nonce'])
+})
+
+test('P2-09 over the per-channel rate limit answers 429 with retry_after and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  for (let index = 1; index <= 10; index += 1) {
+    const accepted = await postInbound({ url, secret: 'test-secret', msgId: `m-${index}`, sender: 'creator', text: 'hello' })
+    assert.equal(accepted.status, 202, `request ${index}`)
+  }
+  const limited = await postInbound({ url, secret: 'test-secret', msgId: 'm-11', sender: 'creator', text: 'hello' })
+  assert.equal(limited.status, 429)
+  assert.equal(limited.json.code, 'rate-limited')
+  assert.ok(Number.isInteger(limited.json.retry_after) && limited.json.retry_after >= 1, JSON.stringify(limited.json))
+})
+
+test('P2-10 a sender outside the allowlist answers 403 sender-not-allowed and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  // The first sender owns the channel conversation; a different sender is refused.
+  const creator = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hello' })
+  assert.equal(creator.status, 202)
+  const other = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'someone-else', text: 'hello' })
+  assert.deepEqual([other.status, other.json.code], [403, 'sender-not-allowed'])
+})
+
+test('P2-19 body over 64KB is refused while streaming and callbackUrl outside loopback is refused', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+
+  // A plain oversized body is stopped while it is being read, not after it is in memory.
+  const big = JSON.stringify({ msgId: 'big', sender_id: 'creator', text: 'x'.repeat(70_000) })
+  const bigResponse = await fetch(url, { method: 'POST', headers: wechatHeaders({ secret: 'test-secret', body: big }), body: big })
+  assert.equal(bigResponse.status, 413)
+  assert.equal((await bigResponse.json()).code, 'too-large')
+
+  // A chunked body has no Content-Length to trust; the streaming cap still catches it.
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let index = 0; index < 14; index += 1) controller.enqueue(new TextEncoder().encode(big.slice(index * 5_000, (index + 1) * 5_000)))
+      controller.close()
+    },
+  })
+  const chunked = await fetch(url, { method: 'POST', headers: wechatHeaders({ secret: 'test-secret', body: big }), body: stream, duplex: 'half' })
+  assert.equal(chunked.status, 413)
+
+  const outside = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', callbackUrl: 'http://example.com/callback' })
+  assert.equal(outside.status, 400)
+  const loopback = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', callbackUrl: 'http://127.0.0.1:9/callback' })
+  assert.equal(loopback.status, 202)
+  const secure = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', callbackUrl: 'https://example.com/callback' })
+  assert.equal(secure.status, 202)
+})
+
+test('P2-21 HMAC is mandatory and Bearer optional (default off); with Bearer on, a missing one answers 401', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  // Default: HMAC alone is enough.
+  const noToken = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator' })
+  assert.equal(noToken.status, 202)
+
+  const second = setup({ config: { wechat: { listenPort: 0, bearerRequired: true } } })
+  t.after(async () => { await second.ctx.dispose(); rmSync(second.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(second.ctx, receiver)
+  const inbound = await until(async () => (await rowOf(second.ctx))?.inbound, 'the bearer inbound address')
+  assert.equal(typeof inbound.token, 'string')
+  const missing = await postInbound({ url: inbound.url, secret: 'test-secret', msgId: 'm-2', sender: 'creator' })
+  assert.deepEqual([missing.status, missing.json.code], [401, 'bad-token'])
+  const wrong = await postInbound({ url: inbound.url, secret: 'test-secret', token: 'not-it', msgId: 'm-3', sender: 'creator' })
+  assert.deepEqual([wrong.status, wrong.json.code], [401, 'bad-token'])
+  const right = await postInbound({ url: inbound.url, secret: 'test-secret', token: inbound.token, msgId: 'm-4', sender: 'creator' })
+  assert.equal(right.status, 202)
+})
+test.todo('P2-02 a taken port leaves only that channel error with port and fix; the plugin boots and other connectors are ready (waits for the host to surface an async mount error)')
 test.todo('P2-07 a replayed msgId answers 200 duplicate and starts 0 turns; after a plugin restart it is still swallowed')
 test.todo('P2-08 the same text under a new msgId starts a turn (no content-hash swallowing)')
-test.todo('P2-09 over the per-channel rate limit answers 429 with retry_after and starts 0 turns')
-test.todo('P2-10 a sender outside the allowlist answers 403 sender-not-allowed and starts 0 turns')
 test.todo('P2-11 a deleted or failing Bot answers 502 bot-unavailable with the fallback sentence and no retry loop')
 test.todo('P2-12 two inbound messages are serialized: each reply answers its own msgId, correlated to that turn end')
 test.todo('P2-13a a synchronous wait over 20s answers 504 timeout; P2-13b an async turn over 120s sends a failure callback')
@@ -460,9 +624,7 @@ test.todo('P2-15 an inbound turn that needs approval gets the WeChat notice only
 test.todo('P2-16 logs, diagnostics and state.json carry no sender text, no message body and no secret')
 test.todo('P2-17 the read level still answers inbound while wechat_notify stays unregistered')
 test.todo('P2-18 an unsupported connector-command action is refused: per-action allow-list, args checked, login-* only on clawbot')
-test.todo('P2-19 body over 64KB is refused while streaming (chunked included) and callbackUrl outside the loopback literals is refused')
 test.todo('P2-20 visibility: channel sessions never appear in search, read_own_chat, the index, the sidebar or another session')
-test.todo('P2-21 HMAC is mandatory and Bearer optional (default off); with Bearer on, a missing one answers 401')
 test.todo('P2-22a memory: no review enumeration, no memory prompt injection and no MEMORY.md entry for channel sessions')
 test.todo('P2-22b parts: channel sessions are excluded from checkpoints and segments')
 test.todo('P2-23 v1 keeps exactly one conversation session (the creator DM); no group session is pre-created')
