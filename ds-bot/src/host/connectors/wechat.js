@@ -366,14 +366,14 @@ export default {
   normalizeSettings: normalizeWechatSettings,
   readiness: wechatReadiness,
   capabilities: [
-    { key: 'notify', title: 'Send notices through the webhook', risk: 'write' },
+    { key: 'notify', title: 'Send messages through this channel', risk: 'write' },
   ],
   permissions: {
-    summary: 'Sends notices through this channel, and every notice asks for your approval first.',
+    summary: 'Sends a message through this channel when a Bot is asked to. Each channel is limited to 20 messages a minute, and every send is audited.',
   },
   card: {
     glyph: 'wechat',
-    about: 'A WeChat channel bound to one Bot: it can post notices, and incoming messages arrive in a later update. This release supports Webhook; ClawBot comes in the next batch.',
+    about: 'A WeChat channel bound to one Bot: it sends messages to the channel owner, and a Webhook channel also takes incoming messages. Both the Webhook and the ClawBot (beta) transport are supported.',
     docsUrl: 'https://github.com/Tencent/openclaw-weixin',
     levelChoice: false,
   },
@@ -507,7 +507,7 @@ export default {
         ? webhookUrlOf(values, secrets) !== ''
         : loginViewOf(rt, id, secrets).state === 'logged-in' || (typeof secrets?.[ILINK_TOKEN] === 'string' && secrets[ILINK_TOKEN] !== ''),
       levels: [
-        { id: 'write', title: 'Full access', description: 'Send notices for you; every notice asks for your approval first.' },
+        { id: 'write', title: 'Full access', description: 'Send messages for you; a Bot only sends when it is asked to.' },
       ],
       // An outbound-only channel says why it has no address yet: the inbound half needs the
       // HMAC secret, and the card should not look broken while it is missing.
