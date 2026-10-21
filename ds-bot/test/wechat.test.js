@@ -401,7 +401,7 @@ test('P1-15 the F5 card shape: field kinds, level descriptions, canTest and inst
   const byName = Object.fromEntries(row.fields.map(field => [field.name, field]))
   assert.equal(byName.botId.kind, 'bot')
   assert.equal(byName.botId.required, true)
-  assert.deepEqual(byName.transport.options.map(option => option.value), ['webhook', 'clawbot'])
+  assert.deepEqual(byName.transport.options.map(option => option.value), ['webhook']) // P1: ClawBot option comes with P3.
   assert.equal(byName.webhookSecret.kind, 'secret')
   assert.equal(byName.webhookSecret.saved, true)
   assert.equal('value' in byName.webhookSecret, false)
@@ -470,3 +470,4 @@ test.todo('P2-22b parts: channel sessions are excluded from checkpoints and segm
 test.todo('P2-23 v1 keeps exactly one conversation session (the creator DM); no group session is pre-created')
 test.todo('P2-24 the tool denylist holds and untrusted travels in the headerFor message header')
 test.todo('P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504)')
+test.todo('P3: open the ClawBot option and its token field')
