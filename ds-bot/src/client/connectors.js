@@ -215,19 +215,32 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
   const label = settingLabelOf(field)
   if (kind === 'secret') {
     const editing = secret !== null && secret.editing === true
+    const cleared = secret !== null && secret.cleared === true
+    const state = cleared ? t('Will be removed') : field.saved === true ? t('Saved') : t('Not set')
+    let control
+    if (editing) {
+      control = h('div', { className: 'bt-connector-field-control' },
+        h('div', { className: 'bt-q-field bt-secret-field' },
+          h(MaskedInput, { value: secret.value ?? '', onChange: secret.onChange, onEnter, label })),
+        h('button', { type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled, onClick: secret.onCancel }, t('Cancel')))
+    } else if (cleared) {
+      control = h('div', { className: 'bt-connector-field-control' },
+        h('span', { className: 'bt-connector-field-state' }, state),
+        h('button', { type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled, onClick: secret.onUndo }, t('Undo')))
+    } else {
+      control = h('div', { className: 'bt-connector-field-control' },
+        h('span', { className: 'bt-connector-field-state' }, state),
+        h('button', {
+          type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled,
+          onClick: secret === null ? undefined : secret.onReplace,
+        }, field.saved === true ? t('Replace') : t('Set secret')),
+        field.saved === true
+          ? h('button', { type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled, onClick: secret.onClear }, t('Remove'))
+          : null)
+    }
     return h('div', { className: 'bt-connector-field' },
       h('span', { className: 'bt-connector-field-name' }, label),
-      editing
-        ? h('div', { className: 'bt-connector-field-control' },
-          h('div', { className: 'bt-q-field bt-secret-field' },
-            h(MaskedInput, { value: secret.value ?? '', onChange: secret.onChange, onEnter, label })),
-          h('button', { type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled, onClick: secret.onCancel }, t('Cancel')))
-        : h('div', { className: 'bt-connector-field-control' },
-          h('span', { className: 'bt-connector-field-state' }, field.saved === true ? t('Saved') : t('Not set')),
-          h('button', {
-            type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled,
-            onClick: secret === null ? undefined : secret.onReplace,
-          }, field.saved === true ? t('Replace') : t('Set secret'))))
+      control)
   }
   if (kind === 'bot') {
     return h('label', { className: 'bt-connector-field' },
@@ -579,6 +592,8 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
   // A secret is never read back from the view: this map only holds a replacement while the
   // reader is typing one, and the host keeps the stored secret when the request omits it.
   const [secretDraft, setSecretDraft] = useState({})
+  // A saved secret can only be removed through `clearSecrets`; an empty value keeps it.
+  const [secretClears, setSecretClears] = useState([])
   const [removeAsk, setRemoveAsk] = useState(false)
   const [levelDraft, setLevelDraft] = useState(null)
   const [authorizeUrl, setAuthorizeUrl] = useState(null)
@@ -595,7 +610,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
     if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name]
     return typeof field.value === 'string' ? field.value : ''
   }
-  const settingsChanged = fields.some((field) => {
+  const settingsChanged = secretClears.length > 0 || fields.some((field) => {
     if (settingKindOf(field) === 'secret') return Object.hasOwn(secretDraft, field.name) && String(secretDraft[field.name] ?? '').trim() !== ''
     return settingValue(field) !== (typeof field.value === 'string' ? field.value : '')
   })
@@ -615,7 +630,11 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
       }
       values[field.name] = settingValue(field).trim()
     }
-    void run(actions.connectorSetSettings(connector.id, values), () => { setSettingDraft(null); setSecretDraft({}) })
+    void run(actions.connectorSetSettings(connector.id, values, { clearSecrets: secretClears }), () => {
+      setSettingDraft(null)
+      setSecretDraft({})
+      setSecretClears([])
+    })
   }
   const on = connector.state !== 'off'
   const levels = levelsOfConnector(connector)
@@ -682,10 +701,19 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
       secret: kind === 'secret'
         ? {
             editing: Object.hasOwn(secretDraft, field.name),
+            cleared: secretClears.includes(field.name),
             value: secretDraft[field.name] ?? '',
-            onReplace: () => setSecretDraft(previous => ({ ...previous, [field.name]: '' })),
+            onReplace: () => {
+              setSecretClears(previous => previous.filter(name => name !== field.name))
+              setSecretDraft(previous => ({ ...previous, [field.name]: '' }))
+            },
             onCancel: () => setSecretDraft((previous) => { const next = { ...previous }; delete next[field.name]; return next }),
             onChange: (next) => setSecretDraft(previous => ({ ...previous, [field.name]: next })),
+            onClear: () => {
+              setSecretDraft((previous) => { const next = { ...previous }; delete next[field.name]; return next })
+              setSecretClears(previous => (previous.includes(field.name) ? previous : [...previous, field.name]))
+            },
+            onUndo: () => setSecretClears(previous => previous.filter(name => name !== field.name)),
           }
         : null,
     })

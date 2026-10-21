@@ -394,6 +394,8 @@ var ZH = {
   On: "开启",
   "Connector settings": "连接器设置",
   Saved: "已保存",
+  Undo: "撤销",
+  "Will be removed": "保存后删除",
   "Not set": "未设置",
   "Set secret": "设置密钥",
   "Choose a Bot": "选择 Bot",
@@ -2159,7 +2161,13 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     // Settings are plain values (a project id, a role name), saved in one request; the view
     // comes back with what the host normalized. A module that keeps several connections
     // takes the card's own name here too, which is why the input sits beside them.
-    connectorSetSettings: (id, values) => after(call2("connector-set-settings", { id, values })),
+    // An empty secret value means "keep the stored one"; a secret the reader removed travels
+    // in `clearSecrets`, which the host applies to the stored credential.
+    connectorSetSettings: (id, values, options = {}) => after(call2("connector-set-settings", {
+      id,
+      values,
+      ...Array.isArray(options?.clearSecrets) && options.clearSecrets.length > 0 ? { clearSecrets: options.clearSecrets } : {}
+    })),
     // One more card of a multi-instance module, and one fewer; both answer with the new view.
     connectorCreateInstance: (base) => after(call2("connector-create-instance", { base })),
     connectorDeleteInstance: (id) => after(call2("connector-delete-instance", { id })),
@@ -2167,6 +2175,9 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     // level the reader sees.
     connectorOauthStart: (id, level) => after(call2("connector-oauth-start", { id, ...typeof level === "string" && level !== "" ? { level } : {} })),
     connectorOauthApp: (id, clientId, clientSecret) => after(call2("connector-oauth-app", { id, clientId, clientSecret })),
+    // One small module operation the generic endpoints do not cover (WeChat's ClawBot login).
+    // The action name travels as the module declares it; the host refuses unknown ones.
+    connectorCommand: (id, action, args) => after(call2("connector-command", { id, action, ...args === void 0 ? {} : { args } })),
     saveCapability: (capability) => after(call2("capability-save", capability)),
     deleteCapability: (name) => after(call2("capability-delete", { name })),
     approveCapability: (name) => after(call2("capability-approve", { name })),
@@ -14525,11 +14536,11 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
   const label = settingLabelOf(field);
   if (kind === "secret") {
     const editing = secret !== null && secret.editing === true;
-    return (0, import_react36.createElement)(
-      "div",
-      { className: "bt-connector-field" },
-      (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, label),
-      editing ? (0, import_react36.createElement)(
+    const cleared = secret !== null && secret.cleared === true;
+    const state = cleared ? t("Will be removed") : field.saved === true ? t("Saved") : t("Not set");
+    let control;
+    if (editing) {
+      control = (0, import_react36.createElement)(
         "div",
         { className: "bt-connector-field-control" },
         (0, import_react36.createElement)(
@@ -14538,17 +14549,33 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
           (0, import_react36.createElement)(MaskedInput, { value: secret.value ?? "", onChange: secret.onChange, onEnter, label })
         ),
         (0, import_react36.createElement)("button", { type: "button", className: "bt-connector-link bt-connector-link-btn", disabled, onClick: secret.onCancel }, t("Cancel"))
-      ) : (0, import_react36.createElement)(
+      );
+    } else if (cleared) {
+      control = (0, import_react36.createElement)(
         "div",
         { className: "bt-connector-field-control" },
-        (0, import_react36.createElement)("span", { className: "bt-connector-field-state" }, field.saved === true ? t("Saved") : t("Not set")),
+        (0, import_react36.createElement)("span", { className: "bt-connector-field-state" }, state),
+        (0, import_react36.createElement)("button", { type: "button", className: "bt-connector-link bt-connector-link-btn", disabled, onClick: secret.onUndo }, t("Undo"))
+      );
+    } else {
+      control = (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-field-control" },
+        (0, import_react36.createElement)("span", { className: "bt-connector-field-state" }, state),
         (0, import_react36.createElement)("button", {
           type: "button",
           className: "bt-connector-link bt-connector-link-btn",
           disabled,
           onClick: secret === null ? void 0 : secret.onReplace
-        }, field.saved === true ? t("Replace") : t("Set secret"))
-      )
+        }, field.saved === true ? t("Replace") : t("Set secret")),
+        field.saved === true ? (0, import_react36.createElement)("button", { type: "button", className: "bt-connector-link bt-connector-link-btn", disabled, onClick: secret.onClear }, t("Remove")) : null
+      );
+    }
+    return (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-field" },
+      (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, label),
+      control
     );
   }
   if (kind === "bot") {
@@ -15019,6 +15046,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
   const [error, setError] = (0, import_react36.useState)(null);
   const [settingDraft, setSettingDraft] = (0, import_react36.useState)(null);
   const [secretDraft, setSecretDraft] = (0, import_react36.useState)({});
+  const [secretClears, setSecretClears] = (0, import_react36.useState)([]);
   const [removeAsk, setRemoveAsk] = (0, import_react36.useState)(false);
   const [levelDraft, setLevelDraft] = (0, import_react36.useState)(null);
   const [authorizeUrl, setAuthorizeUrl] = (0, import_react36.useState)(null);
@@ -15031,7 +15059,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
     if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name];
     return typeof field.value === "string" ? field.value : "";
   };
-  const settingsChanged = fields.some((field) => {
+  const settingsChanged = secretClears.length > 0 || fields.some((field) => {
     if (settingKindOf(field) === "secret") return Object.hasOwn(secretDraft, field.name) && String(secretDraft[field.name] ?? "").trim() !== "";
     return settingValue(field) !== (typeof field.value === "string" ? field.value : "");
   });
@@ -15053,9 +15081,10 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
       }
       values[field.name] = settingValue(field).trim();
     }
-    void run(actions.connectorSetSettings(connector.id, values), () => {
+    void run(actions.connectorSetSettings(connector.id, values, { clearSecrets: secretClears }), () => {
       setSettingDraft(null);
       setSecretDraft({});
+      setSecretClears([]);
     });
   };
   const on = connector.state !== "off";
@@ -15127,14 +15156,27 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
       onEnter: saveSettings,
       secret: kind === "secret" ? {
         editing: Object.hasOwn(secretDraft, field.name),
+        cleared: secretClears.includes(field.name),
         value: secretDraft[field.name] ?? "",
-        onReplace: () => setSecretDraft((previous) => ({ ...previous, [field.name]: "" })),
+        onReplace: () => {
+          setSecretClears((previous) => previous.filter((name) => name !== field.name));
+          setSecretDraft((previous) => ({ ...previous, [field.name]: "" }));
+        },
         onCancel: () => setSecretDraft((previous) => {
           const next = { ...previous };
           delete next[field.name];
           return next;
         }),
-        onChange: (next) => setSecretDraft((previous) => ({ ...previous, [field.name]: next }))
+        onChange: (next) => setSecretDraft((previous) => ({ ...previous, [field.name]: next })),
+        onClear: () => {
+          setSecretDraft((previous) => {
+            const next = { ...previous };
+            delete next[field.name];
+            return next;
+          });
+          setSecretClears((previous) => previous.includes(field.name) ? previous : [...previous, field.name]);
+        },
+        onUndo: () => setSecretClears((previous) => previous.filter((name) => name !== field.name))
       } : null
     });
   };

@@ -165,6 +165,8 @@ const ZH = {
   On: '开启',
   'Connector settings': '连接器设置',
   Saved: '已保存',
+  Undo: '撤销',
+  'Will be removed': '保存后删除',
   'Not set': '未设置',
   'Set secret': '设置密钥',
   'Choose a Bot': '选择 Bot',
