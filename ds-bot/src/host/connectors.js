@@ -1789,6 +1789,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       const args = commandArgsOf(spec, body.args)
       await rt.loadSecrets()
       await connector.command({ ...hookContextOf(body.id), action, args })
+      // A command may write a credential (a login token). Reconciling now lets the mount see
+      // it; with an unchanged credential key the reconcile returns without remounting.
+      await refresh(body.id)
       return connectorsView()
     },
     // One test run through the module's real path (a notification's send, a channel's test

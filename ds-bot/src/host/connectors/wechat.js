@@ -19,6 +19,24 @@ const TRANSPORTS = ['webhook', 'clawbot']
 const FORMATS = ['generic', 'wecom']
 
 const trim = value => (typeof value === 'string' ? value.trim() : '')
+const SENT_PER_MINUTE = 20
+const sentAt = new WeakMap()
+const takeSend = (rt, channel) => {
+  let byChannel = sentAt.get(rt)
+  if (byChannel === undefined) { byChannel = new Map(); sentAt.set(rt, byChannel) }
+  const now = Date.now()
+  const list = (byChannel.get(channel) ?? []).filter(at => now - at < 60_000)
+  if (list.length >= SENT_PER_MINUTE) {
+    byChannel.set(channel, list)
+    throw new Error(`This WeChat channel has sent ${SENT_PER_MINUTE} messages in the last minute; wait a moment and try again.`)
+  }
+  list.push(now)
+  byChannel.set(channel, list)
+}
+const auditSend = (rt, channel, length, result) => {
+  rt.diagnostics?.record?.({ source: 'wechat-notify', text: `${channel} sent ${length} chars, result ${result}` })
+}
+
 const ILINK_TOKEN = 'WECHAT_ILINK_TOKEN'
 export const CONSENT_VERSION = 1
 // Login state lives in memory only: the QR and its poll belong to the open card, the token
@@ -239,11 +257,44 @@ async function postNotice({ address, format, text, secret, fetch: request = fetc
 }
 
 
-function notifyTool({ channel, settings, secretOf, approve }) {
+function notifyToolClawbot({ channel, token, account, client, rt }) {
   const toolName = channel === 'wechat' ? 'wechat_notify' : `${channel.replaceAll('-', '_')}_notify`
   return {
     name: toolName,
-    description: 'Send a notice to this WeChat channel\'s webhook. Every call asks the user first.',
+    description: 'Send a message the user asked for to this WeChat channel\'s owner. Do not use it to send unprompted chatter.',
+    parameters: {
+      type: 'object',
+      properties: { text: { type: 'string', description: 'The message to send.' } },
+      required: ['text'],
+      additionalProperties: false,
+    },
+    output: textOutput,
+    async execute(args) {
+      const text = trim(args?.text)
+      if (text === '') throw new Error('Write the message to send first.')
+      if (text.length > 4_096) throw new Error('WeChat messages are limited to 4096 characters.')
+      takeSend(rt, channel)
+      try {
+        await client.sendMessage({ token, toUserId: account, contextToken: undefined, text })
+      } catch (error) {
+        auditSend(rt, channel, text.length, error?.message ?? 'error')
+        const status = Number(error?.status)
+        if (status === 401 || status === 403) throw new Error('The WeChat login expired. Webhook channels are not affected; scan the QR code again.')
+        if (Number(error?.body?.errcode) === -14) throw new Error('WeChat paused this login for a while; try again later.')
+        if (status === 429) throw new Error('WeChat is rate-limited; try again in a moment.')
+        throw new Error('Could not reach WeChat.')
+      }
+      auditSend(rt, channel, text.length, 'ok')
+      return 'Sent.'
+    },
+  }
+}
+
+function notifyTool({ channel, settings, secretOf, rt }) {
+  const toolName = channel === 'wechat' ? 'wechat_notify' : `${channel.replaceAll('-', '_')}_notify`
+  return {
+    name: toolName,
+    description: 'Send a notice the user asked for to this WeChat channel. Do not use it to send unprompted chatter or to repeat the same notice.',
     parameters: {
       type: 'object',
       properties: { text: { type: 'string', description: 'The notice to send; keep it short and specific.' } },
@@ -251,23 +302,21 @@ function notifyTool({ channel, settings, secretOf, approve }) {
       additionalProperties: false,
     },
     output: textOutput,
-    async execute(args, exec) {
+    async execute(args) {
       const text = trim(args?.text)
       if (text === '') throw new Error('Write the notice to send first.')
       const limit = textLimit(settings.webhookFormat)
       if (text.length > limit) throw new Error(`WeChat messages are limited to ${limit} characters.`)
       const address = webhookOf(settings)
       if (address === undefined) throw new Error('Add the push webhook URL for this channel.')
-      const host = address.host
-      await approve({
-        tool: toolName,
-        line: `Send a notice through ${channel} (webhook ${host})`,
-        target: host,
-        change: 'posts a notice to the configured webhook',
-        reversible: false,
-        exec,
-      })
-      await postNotice({ address, format: settings.webhookFormat, text, secret: secretOf() })
+      takeSend(rt, channel)
+      try {
+        await postNotice({ address, format: settings.webhookFormat, text, secret: secretOf() })
+      } catch (error) {
+        auditSend(rt, channel, text.length, error?.message ?? 'error')
+        throw error
+      }
+      auditSend(rt, channel, text.length, 'ok')
       return 'Sent.'
     },
   }
@@ -288,6 +337,7 @@ export default {
   credentials: [
     { name: SECRET_NAME, label: 'Webhook secret', required: false },
     { name: URL_SECRET, label: 'Push webhook URL', required: false },
+    { name: ILINK_TOKEN, label: 'ClawBot login', required: false },
   ],
   normalizeSettings: normalizeWechatSettings,
   readiness: wechatReadiness,
@@ -385,6 +435,14 @@ export default {
             await rt.secretEndpoint('secret-set', { name, value: token, purpose: 'WeChat ClawBot login', scope: [] })
           }
           Object.assign(login, { state: 'logged-in', qr: null, scanned: false, account: maskAccount(answer?.ilink_user_id) ?? null, error: null, expiresAt: null, qrcode: null })
+          const channels = rt.state.channels ?? (rt.state.channels = {})
+          const channel = channels[id] ?? (channels[id] = {})
+          channel.ilink = {
+            ...(channel.ilink ?? {}),
+            ...(typeof answer?.ilink_user_id === 'string' ? { ilinkUserId: answer.ilink_user_id } : {}),
+            ...(typeof answer?.ilink_bot_id === 'string' ? { ilinkBotId: answer.ilink_bot_id } : {}),
+          }
+          void rt.save().catch(() => {})
         } else if (mapped === 'scanned') {
           Object.assign(login, { state: 'qr', scanned: true })
         } else if (mapped === 'verified-needed') {
@@ -409,7 +467,9 @@ export default {
     const webhook = trim(values.transport) !== 'clawbot'
     return {
       transport: webhook ? 'webhook' : 'clawbot',
-      canTest: webhook && webhookUrlOf(values, secrets) !== '',
+      canTest: webhook
+        ? webhookUrlOf(values, secrets) !== ''
+        : loginViewOf(rt, id, secrets).state === 'logged-in' || (typeof secrets?.[ILINK_TOKEN] === 'string' && secrets[ILINK_TOKEN] !== ''),
       levels: [
         { id: 'write', title: 'Full access', description: 'Send notices for you; every notice asks for your approval first.' },
       ],
@@ -423,8 +483,20 @@ export default {
   },
   // One test notice through the same path a real notice takes. A failure stays on the card
   // without turning the channel off.
-  async test({ settings, secrets, secretValue }) {
+  async test({ id, rt, settings, secrets, secretValue }) {
     const values = { ...(settings !== null && typeof settings === 'object' ? settings : {}), webhookUrl: webhookUrlOf(settings, secrets) }
+    if (trim(values.transport) === 'clawbot') {
+      const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
+      const ilink = rt.state?.channels?.[id]?.ilink ?? {}
+      if (typeof token !== 'string' || token === '' || typeof ilink.ilinkUserId !== 'string') {
+        throw new Error('Scan the QR code to connect this ClawBot channel first.')
+      }
+      const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
+      const client = createIlinkClient({ base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase) })
+      auditSend(rt, id, TEST_TEXT.length, 'ok')
+      await client.sendMessage({ token, toUserId: ilink.ilinkUserId, text: TEST_TEXT })
+      return
+    }
     const address = webhookOf(values)
     if (address === undefined) throw new Error('Add the push webhook URL for this channel.')
     const secret = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
@@ -432,7 +504,7 @@ export default {
       : (typeof secretValue === 'function' ? secretValue(SECRET_NAME) : undefined)
     await postNotice({ address, format: values.webhookFormat, text: TEST_TEXT, secret })
   },
-  async mount({ rt, settings, instance, level, approve, secrets, token, secretName }) {
+  async mount({ rt, settings, instance, level, secrets, token, secretName }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const id = instance?.id ?? 'wechat'
     const botId = trim(values.botId)
@@ -449,8 +521,23 @@ export default {
       // The inbound half is a 35s long poll; the cursor lives in the channel state so a
       // restart continues where it stopped. There is no webhook URL or HMAC secret here.
       const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
-      const controller = new AbortController()
       const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
+      const ilink = channel.ilink ?? {}
+      const controller = new AbortController()
+      const tools = []
+      if (typeof token === 'string' && token !== '' && level === 'write') {
+        tools.push(notifyToolClawbot({
+          channel: id,
+          token,
+          rt,
+          account: typeof ilink.ilinkUserId === 'string' ? ilink.ilinkUserId : undefined,
+          client: createIlinkClient({
+            base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+            pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
+            backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
+          }),
+        }))
+      }
       if (typeof token === 'string' && token !== '') {
         const client = createIlinkClient({
           base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
@@ -474,7 +561,7 @@ export default {
           }
         })()
       }
-      return { tools: [], close: () => { controller.abort(); ilinkLogins.get(rt)?.delete(id) } }
+      return { tools, close: () => { controller.abort(); ilinkLogins.get(rt)?.delete(id) } }
     }
     // Older state keeps the URL as a plain setting; move it into the credential store before
     // this mount reads anything, keeping the plain value if the write fails.
@@ -509,7 +596,7 @@ export default {
     }
     const tools = []
     if (level === 'write') {
-      tools.push(notifyTool({ channel: id, settings: effective, secretOf, approve }))
+      tools.push(notifyTool({ channel: id, settings: effective, secretOf, rt }))
     }
     return { tools, close: () => { void inboundFor(rt).detach(id) } }
   },

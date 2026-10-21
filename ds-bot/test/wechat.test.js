@@ -127,7 +127,7 @@ const inboundUrl = async (ctx, id = 'wechat') => {
   const inbound = await until(async () => (await rowOf(ctx, id))?.inbound, `the inbound address of ${id}`)
   return inbound.url
 }
-const answerCard = (ctx, questionId, selected) => call(ctx, 'answer-question', { sessionId: 'm1', questionId, answer: { selected } })
+
 
 // Connect a webhook channel bound to b1; the callback receiver is the fake.
 async function connectChannel(ctx, receiver, { id = 'wechat', settings = {} } = {}) {
@@ -239,30 +239,40 @@ test('P1-04 connect turns the channel ready; P2 serves it a loopback inbound add
   assert.equal(row.login, undefined)
 })
 
-test('P1-05 wechat_notify asks first, runs once on allow and never on deny', async (t) => {
+test('P1-05 wechat_notify sends directly, exactly once per call', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
   const { ctx, home, registered } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  // A messaging channel is write-only: its send tool is there as soon as it is ready.
   await connectChannel(ctx, receiver)
   assert.ok(registered.includes('wechat_notify'))
 
-  const approved = notifyToolOf(ctx).execute({ text: 'deploy done' }, { agent: { id: 'm1' } })
-  const shown = await until(() => card(ctx), 'the approval card')
-  assert.match(shown.detail, /webhook/i)
-  assert.ok(!shown.detail.includes('http://') && !shown.detail.includes('/webhook'), 'the card names the host, not the full URL')
-  assert.equal(receiver.requests.length, 0)
-  await answerCard(ctx, shown.id, ['Allow once'])
-  assert.equal(await approved, 'Sent.')
+  // Sending is a direct user-facing action now: no approval card, one request per call.
+  assert.equal(await notifyToolOf(ctx).execute({ text: 'deploy done' }, { agent: { id: 'm1' } }), 'Sent.')
   assert.equal(receiver.requests.length, 1)
   assert.deepEqual(receiver.requests[0].json, { text: 'deploy done' })
+  assert.equal(card(ctx) === undefined || (await card(ctx)) === undefined, true, 'no approval card was drawn')
+  assert.equal(await notifyToolOf(ctx).execute({ text: 'again' }, { agent: { id: 'm1' } }), 'Sent.')
+  assert.equal(receiver.requests.length, 2)
+})
 
-  const denied = notifyToolOf(ctx).execute({ text: 'again' }, { agent: { id: 'm1' } })
-  const second = await until(() => card(ctx), 'the second card')
-  await answerCard(ctx, second.id, ['Deny'])
-  await assert.rejects(denied, /denied/)
-  assert.equal(receiver.requests.length, 1)
+test('P1-05b a channel stops after twenty sends a minute and audits each send without the body', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, rt } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const audited = []
+  rt.diagnostics.record = entry => audited.push(entry)
+  await connectChannel(ctx, receiver)
+  for (let index = 1; index <= 20; index += 1) {
+    assert.equal(await notifyToolOf(ctx).execute({ text: `note ${index}` }, { agent: { id: 'm1' } }), 'Sent.')
+  }
+  await assert.rejects(notifyToolOf(ctx).execute({ text: 'the 21st' }, { agent: { id: 'm1' } }), /sent 20 messages in the last minute/)
+  assert.equal(receiver.requests.length, 20)
+  assert.equal(audited.filter(entry => entry.source === 'wechat-notify').length, 20)
+  const text = JSON.stringify(audited)
+  assert.equal(text.includes('note 1'), false)
+  assert.equal(text.includes('the 21st'), false)
 })
 
 // ---- P1-06: outbound errors and text limits ----
@@ -275,8 +285,6 @@ test('P1-06 outbound errors map to the fixed sentences and over-long text fails 
   await toWrite(ctx)
   const send = async (text) => {
     const pending = notifyToolOf(ctx).execute({ text }, { agent: { id: 'm1' } })
-    const shown = await until(() => card(ctx), 'the card')
-    await answerCard(ctx, shown.id, ['Allow once'])
     return pending
   }
   await assert.rejects(send('hello'), /refused the credential/)
@@ -486,7 +494,7 @@ test('P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting 
   const json = JSON.stringify(await call(ctx, 'state', {}))
   assert.equal(json.includes('second-secret'), false)
   for (const row of await rowsOf(ctx)) {
-    assert.deepEqual(row.inputs.map(field => field.name), ['WECHAT_WEBHOOK_SECRET', 'WECHAT_WEBHOOK_URL'])
+    assert.deepEqual(row.inputs.map(field => field.name), ['WECHAT_WEBHOOK_SECRET', 'WECHAT_WEBHOOK_URL', 'WECHAT_ILINK_TOKEN'])
   }
   await toWrite(ctx, 'wechat')
   await toWrite(ctx, 'wechat-2')
@@ -494,8 +502,6 @@ test('P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting 
   // Each channel signs with its own secret: the framework resolved secrets per instance.
   await toWrite(ctx, 'wechat-2')
   const pending = notifyToolOf(ctx, 'wechat-2').execute({ text: 'from the second channel' }, { agent: { id: 'm1' } })
-  const shown = await until(() => card(ctx), 'the wechat-2 approval card')
-  await answerCard(ctx, shown.id, ['Allow once'])
   assert.equal(await pending, 'Sent.')
   const last = receiver.requests.at(-1)
   assert.equal(last.signatureOk, true, 'wechat-2 signed with its own secret')
@@ -1383,8 +1389,6 @@ test('G-5 a replaced URL in the credential store wins over the old plain value',
   rt.state.connectors.wechat.settings = { ...rt.state.connectors.wechat.settings, webhookUrl: oldReceiver.url }
   await toWrite(ctx, 'wechat')
   const pending = notifyToolOf(ctx).execute({ text: 'to the new one' }, { agent: { id: 'm1' } })
-  const shown = await until(() => card(ctx), 'the notice approval')
-  await answerCard(ctx, shown.id, ['Allow once'])
   assert.equal(await pending, 'Sent.')
   assert.equal(newReceiver.requests.length, 1)
   assert.equal(oldReceiver.requests.length, 0)
@@ -1408,8 +1412,6 @@ test('G-2 a URL that cannot be stored keeps working outbound and is retried late
   assert.equal(rt.state.connectors.wechat.settings.webhookUrl, receiver.url)
   await toWrite(ctx, 'wechat')
   const pending = notifyToolOf(ctx).execute({ text: 'with the old url' }, { agent: { id: 'm1' } })
-  const shown = await until(() => card(ctx), 'the notice approval')
-  await answerCard(ctx, shown.id, ['Allow once'])
   assert.equal(await pending, 'Sent.')
   assert.equal(receiver.requests.at(-1).json.text, 'with the old url')
 })

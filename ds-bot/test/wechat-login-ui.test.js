@@ -123,6 +123,41 @@ test('a scanned code says so, and the login-expired state shows the host words',
   assert.match(texts(expired).join(' | '), /Webhook channels are not affected/)
 })
 
+test('a signed-in ClawBot channel offers one test message, and no earlier', () => {
+  const loggedIn = render({ state: 'logged-in', account: 'ilxk…9f' }, { canTest: true })
+  assert.ok(buttons(loggedIn).includes('Test message'), buttons(loggedIn).join(','))
+  assert.equal(texts(loggedIn).join(' | ').includes('Sign in first'), false)
+
+  const signedOut = render({ state: 'logged-out', consentRequired: false }, { canTest: false })
+  assert.equal(buttons(signedOut).includes('Test message'), false)
+  assert.match(texts(signedOut).join(' | '), /Sign in first to send a test message/)
+
+  const quiet = render({ state: 'logged-in', account: 'ilxk…9f' }, { canTest: false })
+  assert.equal(buttons(quiet).includes('Test message'), false)
+
+  // A stored login outlives the screen: the host says it can send even though this view has
+  // no live sign-in state yet, and the button follows the host.
+  const restored = render({ state: 'logged-out', consentRequired: false }, { canTest: true })
+  assert.ok(buttons(restored).includes('Test message'), buttons(restored).join(','))
+})
+
+test('a failed test shows the host words on the card', () => {
+  const failed = render({ state: 'logged-in', account: 'ilxk…9f' }, { canTest: true, state: 'ready', error: 'Could not reach the WeChat service.' })
+  assert.match(texts(failed).join(' | '), /Could not reach the WeChat service/)
+})
+
+test('a webhook channel keeps its own test rule', () => {
+  const webhook = (extra) => flat(WeChatChannel({
+    row: { ...row(null), transport: 'webhook', fields: fields({ transport: 'webhook' }), card: { glyph: 'wechat', levelChoice: false, about: 'A WeChat channel bound to one Bot.' }, ...extra },
+    actions, bots: [], expanded: true, onToggle: () => {}, lastOne: false,
+  }))
+  const ready = buttons(webhook({ state: 'ready', canTest: true }))
+  assert.ok(ready.includes('Test message'), ready.join(','))
+  const off = buttons(webhook({ state: 'off', canTest: true }))
+  assert.equal(off.includes('Test message'), false)
+  assert.equal(texts(webhook({ state: 'ready', canTest: true })).join(' | ').includes('Sign in first'), false)
+})
+
 test('a webhook channel draws no sign-in block at all', () => {
   const webhook = flat(WeChatChannel({ row: { ...row(null), transport: 'webhook', fields: fields({ transport: 'webhook' }), card: { glyph: 'wechat', levelChoice: false, about: 'A WeChat channel bound to one Bot.' } }, actions, bots: [], expanded: true, onToggle: () => {}, lastOne: false }))
   assert.equal(byState(webhook), undefined)

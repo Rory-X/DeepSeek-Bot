@@ -422,6 +422,7 @@ var ZH = {
   "Not logged in — this channel cannot send or receive yet.": "未登录，该通道暂时无法收发消息",
   "Incoming messages from this channel only answer you.": "该通道只回应你的消息",
   "Log in to link this channel first.": "请先登录再连接此通道",
+  "Sign in first to send a test message.": "请先登录，才能发送测试消息。",
   "Beta": "Beta",
   "Scanning login is beta and has not been tested on a real device. A failure does not affect the Webhook channel.": "扫码登录为 beta，尚未真机验证；失败不影响 Webhook 通道",
   "Sign-in risks": "登录前须知",
@@ -15663,11 +15664,13 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
       loginText(login) !== null ? (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, loginText(login)) : null,
       shownDetail !== null ? (0, import_react38.createElement)("div", { className: "bt-connector-hint bt-wechat-login-detail" }, shownDetail) : null,
       (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, t("Incoming messages from this channel only answer you.")),
+      loginState !== "logged-in" ? (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, t("Sign in first to send a test message.")) : null,
       loginButtons.length > 0 ? (0, import_react38.createElement)("div", { className: "bt-connector-form-row" }, loginButtons) : null
     )
   ) : null;
+  const canTestNow = transportOf(row) === "webhook" ? row.state === "ready" && row.canTest === true : row.canTest === true;
   const headActions = [];
-  if (transportOf(row) === "webhook" && row.canTest === true && row.state === "ready") {
+  if (canTestNow) {
     headActions.push((0, import_react38.createElement)("button", { key: "test", type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
       event.stopPropagation();
       test();
