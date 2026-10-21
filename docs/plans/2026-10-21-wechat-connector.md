@@ -372,6 +372,14 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 | `scaned_but_redirect` | 二维码保留 | 用响应 `redirect_host` 换个 baseurl 继续 |
 | `binded_redirect` | 视为已绑定/已登录或提示 | 停止轮询 |
 
+**宿主/Forge 硬契约（ClawBot 实现必须遵守）**
+
+1. **`view` 同步**：二维码不能在 `view` 里发网络请求；取码只在 async 的 `login-start`/`login-refresh` 命令里做，结果存模块内存，`view` 只读内存；命令返回完整 view 供 UI 刷新。
+2. **QR 不进凭据库**：DSH 单 secret 上限 16384 字符；QR data URL 只留内存/view；`bot_token` 走每实例凭据名（基名 + F2b `_N`）。
+3. **登录态只进 view**：框架不持久化账号名；重启后按「token 是否存在」判 `logged-in`，账号名缺失时显示 `Credentials saved`（客户端已支持）。
+4. **客户端契约**：`d2e53ad` 的 `wechat-card.js` 已支持 `transport==='clawbot'` + `login.qr`（要求 `data:image/png;base64,` 前缀）与三态渲染；按此返回 QR。
+5. **F12（已批，P2 打包后 Forge 落）**：`unmount` 会 `await close()`；模块 `close` 必须**立即 abort**（`AbortController` 取消 fetch + `clearTimeout`），不得在 close 里等 35s 长轮询。
+
 **发布约束（Chief 四条，ClawBot v1 必须满足）**
 
 1. **beta 标注**：`card.about` 与 `releases.md` 都写「扫码登录为 beta、未做真机验证，失败不影响 Webhook 通道」；不得让用户当成稳定功能。
