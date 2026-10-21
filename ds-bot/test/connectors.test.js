@@ -1041,7 +1041,7 @@ const demoGrant = (access, { level = 'read' } = {}) => ({
 
 // A connector host on its own definitions, so an instance case never depends on which
 // modules happen to live under src/host/connectors.
-function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), extraDefinitions = {}, config = {}, grants = {}, secrets = {}, home, credentials } = {}) {
+function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), extraDefinitions = {}, config = {}, grants = {}, secrets = {}, home, credentials, loadSecrets = async () => {} } = {}) {
   const dir = home ?? mkdtempSync(join(tmpdir(), 'dsb-connector-instances-'))
   const statePath = join(dir, 'state.json')
   writeFileSync(statePath, JSON.stringify(state))
@@ -1069,7 +1069,7 @@ function hostSetup({ state = { connectors: {} }, definition = demoDefinition(), 
     redactSecrets: text => String(text),
     readOnly: () => undefined,
     save: async () => { writeFileSync(statePath, JSON.stringify(state)) },
-    loadSecrets: async () => {},
+    loadSecrets,
     secretValue: name => secrets[name],
     secretEndpoint: async () => {},
     diagnostics: { record: entry => audit.push(entry) },
@@ -2079,4 +2079,57 @@ test('a removed instance whose mount was running leaves nothing behind', async (
   assert.equal(rowOf(rt, 'demo-2'), undefined)
   // A tool the queued mount registered is disposed by the removal that follows it.
   assert.ok(disposed.includes('demo_ping'))
+})
+
+// readiness must name per-instance credentials the same way a mount does: a module that
+// checks a stored secret before Connect cannot keep a second naming rule of its own.
+test('readiness gets the same secret naming and values as a mount', async (t) => {
+  const seen = []
+  const definition = {
+    displayName: 'Secret channel',
+    mode: 'custom',
+    levels: ['read'],
+    defaultLevel: 'read',
+    instances: { prefix: 'demo', min: 1, max: 2 },
+    mount: () => ({ tools: [] }),
+    readiness: (context) => { seen.push(context); return undefined },
+  }
+  const state = { connectors: { demo: { level: 'read', settings: {} }, 'demo-2': { level: 'read', settings: {} } } }
+  const { ctx, rt, home } = hostSetup({ state, definition, secrets: { DEMO_SECRET: 'base-value', DEMO_SECRET_2: 'second-value' } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  rt.connectorsView()
+  const base = seen.find(context => context.instance?.id === 'demo' && context.level === 'read')
+  const second = seen.find(context => context.instance?.id === 'demo-2' && context.level === 'read')
+  assert.equal(base.secretName('DEMO_SECRET'), 'DEMO_SECRET')
+  assert.equal(second.secretName('DEMO_SECRET'), 'DEMO_SECRET_2')
+  assert.equal(base.secretValue('DEMO_SECRET'), 'base-value')
+  assert.equal(second.secretValue('DEMO_SECRET'), 'second-value')
+})
+
+// readiness is asked before the first mount, so the credential store must be read first:
+// an unloaded store must never be read as "this credential is missing".
+test('readiness runs only after the credential store is loaded', async (t) => {
+  const order = []
+  const definition = demoDefinition({ readiness: () => { order.push('readiness') } })
+  const { ctx, rt, home } = hostSetup({
+    state: { connectors: { demo: { level: 'read', settings: {} } } },
+    definition,
+    loadSecrets: async () => { order.push('load') },
+  })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await until(() => { rt.connectorsView(); return order.includes('readiness') ? true : undefined }, 'the first readiness')
+  assert.equal(order[0], 'load')
+  assert.equal(order.filter(step => step === 'load').length >= 1, true)
+})
+
+// Adding fields to the readiness context must not change what another connector gets back.
+test('another connector still gets its readiness result unchanged', async (t) => {
+  const definition = demoDefinition({
+    readiness: ({ level }) => (level === 'write' ? 'A project id and a SQL role are required for write access' : undefined),
+  })
+  const { ctx, rt, home } = hostSetup({ state: { connectors: { demo: { level: 'read', settings: {} } } }, definition })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const row = rowOf(rt, 'demo')
+  assert.deepEqual(row.levelNotes, { write: 'A project id and a SQL role are required for write access' })
+  assert.equal(row.levelNote, undefined)
 })
