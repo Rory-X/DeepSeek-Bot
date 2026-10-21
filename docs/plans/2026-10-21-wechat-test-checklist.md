@@ -21,6 +21,8 @@
 | P1-10 | `connector-test` | POST 固定测试通知；成功/失败都返回整个 view；失败 state 仍 ready、error 原文 |
 | P1-11 | 删除实例 | 停监听/清 secret（F2b 命名）；另一个实例仍 ready |
 | P1-12 | profile `wechat:false` | 无行、无端口、无 secret 读写 |
+| P1-13 | `connector-set-settings` 的 `clearSecrets:['webhookSecret']` | secret 被清除，`fields.saved` 转 false；文本空串仍只清文本 |
+| P1-14 | 两个实例的 secret 命名 | 首实例裸名、`wechat-2` 为 `_2`；两实例互不覆盖；删 `wechat-2` 只删自己的 secret |
 
 ## P2 用例（入站监听、绑定、回复）
 
@@ -43,6 +45,12 @@
 | P2-15 | 入站触发审批 | 微信只收到「请回 DS Bot 处理」；审批卡未被回答；工具 0 调用 |
 | P2-16 | 脱敏 | 日志/diagnostics/state.json 无 sender 原文、正文、secret；sender 只有哈希/长度 |
 | P2-17 | read 级入站 | 入站可收发；`wechat_notify` 未注册 |
+| P2-21 | Bearer 开关 | 默认关：不带 Bearer 也通过（只要有 HMAC）；打开后缺/错 Bearer → 401 |
+| P2-22 | 隔离面 | 外部消息不出现在 search / `read_own_chat` / 会话索引 / MEMORY.md / 侧栏 / 工作区列表；其它 session 看不到 |
+| P2-23 | 单 conversation | 每个通道只有创建者 DM 一条 conversation session；不会为 group 预建会话 |
+| P2-24 | 工具与消息头 | channel session 无任何工具（allowReadTools 只放 `web_search`）；denylist 各项不可用；注入正文含 `untrusted` 段 |
+| P2-25 | 异步与 `wait` | 默认 202 + 回调（HMAC/msgId 幂等）；`wait` ≤20s 内 200 且不发回调；超时 504 `code:'timeout'` 且仍发回调 |
+| P3-01 | token 与合规 | token 只在 0600 文件或凭据库，state/日志/设置页无明文；未获用户明确同意时 P3 不启用 |
 
 ## 错误文案矩阵（宿主给用户/调用方的原文）
 

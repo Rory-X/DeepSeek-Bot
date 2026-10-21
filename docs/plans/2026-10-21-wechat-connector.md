@@ -47,8 +47,8 @@
 
 | 凭据名 | 来源 | 用途 |
 |---|---|---|
-| `WECHAT_WEBHOOK_SECRET_<INSTANCE>` | 用户通过安全卡片（`request_secret`）提供 | 出站签名 + 入站 HMAC 校验 |
-| `WECHAT_INBOUND_TOKEN_<INSTANCE>` | 模块生成（32 字节随机），写入 DSH 凭据库 | 入站 Bearer 校验；用户在 Secrets 页读取，配置到网关 |
+| `WECHAT_WEBHOOK_SECRET`（首实例）/ `WECHAT_WEBHOOK_SECRET_2`（`wechat-2`） | 用户通过安全卡片（`request_secret`）提供 | 出站签名 + 入站 HMAC 校验 |
+| `WECHAT_INBOUND_TOKEN`（首实例）/ `WECHAT_INBOUND_TOKEN_2` | 模块生成（32 字节随机），写入 DSH 凭据库 | 入站 Bearer 校验（可选）；用户在 Secrets 页读取，配置到网关 |
 
 clawbot 模式的登录凭据是**本地文件** `<rt.home>/wechat/<instance>.json`（目录 0700、文件 0600），不进 DSH 凭据库、不进 state；结构见 §6。
 
@@ -74,6 +74,8 @@ P1 只有出站：通道可配置、可连接、可发通知、卡片可见，**
 
 ### 3.2 入站（P2）
 
+**这是「通用 HTTP 网关契约」，不是企业微信官方应用回调**：P1/P2 面向同机 sidecar（clawbot-gateway / n8n）；企业微信应用 callback（XML+AES+签名校验）是另一套协议，明确不做（§3.3）。
+
 **监听**：模块自己起一个 loopback HTTP 监听（**只绑 `127.0.0.1`**），端口来自 profile 配置 `wechat.listenPort`（默认 `8799`），所有实例共用一个监听，路径为白名单：
 
 ```
@@ -88,7 +90,15 @@ POST /wechat/<instance>/inbound
 { "msgId": "唯一消息 id", "sender_id": "发送者", "text": "内容", "context_token": "可选" }
 ```
 
-**校验顺序**（任一失败即拒绝，且不触发任何 Bot 轮次）：路径白名单 → Bearer token → HMAC 签名 → 时间戳（±300s）→ nonce 防重放 → 发送者 allowlist（v1 只有创建者本人）→ 速率限制 → `msgId` 幂等。
+**校验顺序**（任一失败即拒绝，且不触发任何 Bot 轮次）：路径白名单 → HMAC 签名（**必选**）→ 时间戳（±300s）→ nonce 防重放 → Bearer token（**可选，默认关**）→ 发送者 allowlist（v1 只有创建者本人）→ 速率限制 → 请求体大小 → `msgId` 幂等。
+
+**鉴权最小配置**：只配 `WECHAT_WEBHOOK_SECRET`（`wechat-2` 为 `WECHAT_WEBHOOK_SECRET_2`）即可（HMAC 必选）；网关能带 Bearer 时再打开 `inbound.bearerRequired`，token 用 `WECHAT_INBOUND_TOKEN` / `..._2`。命名规则见 §12 F2b：**首实例裸名、`-N` 实例加 `_N` 后缀**。
+
+**数值上限**（超限返回码写死）：
+
+- **限速**：每实例 **30 req/min，burst 10**（令牌桶）；超出 → **429** + `retry_after` 秒。
+- **请求体**：≤ **64 KB**；超出 → **413**（在看 body 之前按 Content-Length 拒绝）。
+- **入站文本**：≤ **8 KB**（UTF-8 字节）；超出 → **413**。
 
 **签名头**：
 
@@ -100,12 +110,28 @@ X-WeChat-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + "." + nonce + ".
 
 nonce 用每实例 LRU（1,000 条）挡重放；`msgId` 幂等见 §6。
 
-**响应**（同步等待 Bot 回复）：
+**响应：默认异步（P2 契约写死，不能后移）**
 
-- 200 `{ "ok": true, "msgId": "...", "reply": "Bot 的最终文本", "instance": "wechat" }`
-- 400/401/403/404/429/504 + `{ "ok": false, "code": "...", "message": "..." }`
-- `504` 表示 120s 内没有等到回复；**不重试**，由调用方决定。
-- 可选异步回调（P2 之后）：请求可带 `callbackUrl`，此时先回 `202`，回复完成后再回调；P1/P2 不做。
+网关与常见 HTTP 客户端的超时通常只有 5–30s，Bot 的一轮往往更久，**同步等待会丢回复**。
+
+**默认（异步）**
+
+- 入站**立即**返回 **202** `{ "ok": true, "accepted": true, "msgId": "...", "instance": "wechat" }`。
+- Bot 回复完成后，宿主 POST `callbackUrl`（请求里给，或用通道设置 `callbackUrl`）：
+  `{ "ok": true, "msgId": "...", "instance": "wechat", "reply": "Bot 的最终文本", "completedAt": <ms> }`；
+  失败回调 `{ "ok": false, "msgId": "...", "instance": "wechat", "code": "bot-unavailable"|"timeout"|"channel-rebound", "message": "..." }`。
+- **回调鉴权**：与入站同一套 `X-WeChat-Timestamp` / `X-WeChat-Nonce` / `X-WeChat-Signature`（HMAC 覆盖 `timestamp.nonce.body`），另带 `X-WeChat-Callback: 1`；**幂等键是 `msgId`**（接收端同 msgId 只处理一次）。
+- **回调地址**：只接受 `https://` 或 loopback `http://127.0.0.1`（同机 sidecar）；不跟随重定向；超时 10s。
+- **回调重试**：网络错误/5xx/408/429 退避 3 次（1s/5s/25s）；其它 4xx 视为回调配置错误，不重试、只记状态卡。
+
+**同步模式（可选，`wait` 参数）**
+
+- 请求可带 `"wait": <ms>`，**上限 20,000ms**（超出按 20,000 处理，不报错）；未带或 0 = 纯异步。
+- `wait` 内拿到回复 → **200** `{ "ok": true, "msgId": "...", "reply": "..." }`，且**不再发回调**。
+- `wait` 到上限仍未回复 → **504** `{ "ok": false, "code": "timeout", "message": "The Bot did not answer in time." }`；**消息继续跑完并照常发回调**（不丢结果），调用方以回调为准。
+- `callbackUrl` 与 `wait` 同给：先到者生效（回调送达后同步等待结束）。
+
+`202` 只表示「已接受」，不代表 Bot 已回复。校验失败、限速、超大请求分别回 401/403/429/413。
 
 ### 3.3 企业微信官方回调（不做，后续可选）
 
@@ -117,7 +143,8 @@ nonce 用每实例 LRU（1,000 条）挡重放；`msgId` 幂等见 §6。
 
 - **协议**：`https://ilinkai.weixin.qq.com`，公共头 `iLink-App-Id: bot`、`iLink-App-ClientVersion: <uint32>`；POST 另带 `AuthorizationType: ilink_bot_token`、`Authorization: Bearer <token>`、`X-WECHAT-UIN`（随机 uint32→十进制→base64）。
 - **能力**：`getUpdates` 长轮询（服务端最长挂 35s，`get_updates_buf` 游标必须持久化，否则重收）、`sendMessage`（`context_token` 回传以匹配会话）、`getconfig`/`sendtyping` 可选。
-- **登录（v1）**：先用**官方 CLI 登录拿 `bot_token`，粘贴到卡片**（secret 字段，写 DSH 凭据库），模块把 token 存成 `<rt.home>/wechat/<instance>.json`（0600）或按实例 secret 读取。二维码流程（`GET /ilink/bot/get_bot_qrcode?bot_type=3` → 轮询 `GET /ilink/bot/get_qrcode_status`）**放 P4** 再接；接口返回 data URL，不需要二维码库。
+- **登录（v1，合规约束）**：用**官方 CLI 登录拿 `bot_token`，粘贴到卡片**（secret 字段）。token **只进 DSH 凭据库或 `<rt.home>/wechat/<instance>.json`（0600）**，不得进 state、日志、设置页明文。v1 **不做自动登录/扫码轮询**；二维码（接口返回 data URL，不需要二维码库）放 P4。
+- **合规门槛**：iLink 是逆向/非公开协议，个人微信号有封号风险。**只有用户明确书面同意后才做**（P3 spike 前先拿到两个结论：灰度状态 + 风险接受），风险说明单独成文，不默认开启。
 - **守护**：mount 启动长轮询；断线指数退避（1s→2s→…→60s 封顶，带抖动）；`dispose`/通道关闭时停止；日志只记状态与错误码，不记消息正文与凭据。
 - **可行性验证产出**：协议客户端 spike（mock 服务端单测）、QR CLI 原型、灰度与合规风险清单。**在 §1 的两个结论出来前不排上线开发。**
 
@@ -126,10 +153,11 @@ nonce 用每实例 LRU（1,000 条）挡重放；`msgId` 幂等见 §6。
 - **通道 ↔ Bot 1:1**：一个通道只绑一个 Bot；同一个 Bot 可以被多个通道绑定（多对一允许）。
 - **每个通道按 conversation 一条独立 Session**（否决「注入 Bot 私聊」）：外部消息带 `sender` 元数据、显式标记 `untrusted`；不写入 Bot 的长期记忆，不进用户私聊。
   - **新增 `channelSessionFor`**（不复用 `groupSessionFor`）：Forge 指出复用会把 room log、群提示、群 UI 和记忆 review 一起带进来。落地为 `store.js` 的 `channelOwners` map + 新文件 `src/host/channels.js`，并在 `memory.js` 把 channel session 排除出 memory review/注入。
-  - **粒度**：按 conversation 区分——`dm:<senderHash>`（v1 只做创建者 DM）与 `group:<group_id>`（预留，P4 之后）。每通道最多 **8 个** conversation session，LRU 淘汰并归档；每条 session 的 owner 是当时绑定的 Bot。
+  - **粒度（v1 只做 1 条）**：每通道只有**创建者 DM 一条** conversation session（`dm:<senderHash>`）。「≤8 条 conversation + LRU 归档」与 `group:<group_id>` 都移到 **P4**；P2 的状态与表按单 conversation 设计，不预先建空会话。
   - 选择「专属 channel session」而不是「隐藏 room」：room 有成员/群渲染语义，隐藏 room 会牵动侧栏与会话列表；专属 session 不挂任何列表，影响面最小。
   - 消息注入用 `rt.deliver({ sessionId, toId: botId, text, role: 'request', exchangeId })`（`deliver` 已支持显式 sessionId），不调用 `rt.chatOf(botId)`。
-  - **工具白名单默认空**（纯对话）：channel session 默认拿不到任何工具；预留 `allowReadTools`，v1 只允许 `web_search`。写/文件/bash/连接器写/记忆/`ask_user`/`request_secret`/Bot 管理全部 deny——即使模型想调用也不存在或直接被拒。
+  - **工具白名单**：channel session 默认**无任何工具**（`agent.ctx.tools.restrict({ allow: [] })`）；`settings.allowReadTools === true` 时只允许 `['web_search']`。**denylist 逐项点名**：连接器写、文件、bash、记忆写、`ask_user`、`request_secret`、审批代答、Bot 管理。
+  - **`untrusted` 必须进消息头**：不能只存 `source`；框架的 `headerFor` 要在注入正文里带 `[external channel · untrusted]` 段，模型从正文即可看到；`source` 仍带 `sender`/`untrusted` 供审计。
   - 需要框架补的小改动：`source` 上允许 `untrusted: true` 与 `sender`（现在的 source 字段是白名单的），见 §12。
 - **串行处理**：同一通道内单飞行队列；一条入站处理完（回复或超时）才处理下一条。
 - **回复关联键**：`msgId → exchangeId`。`deliver` 返回的 exchangeId 用于在该 Session 的 `session/event` 里认出对应的 `user/message`，再取紧随的 `turn/start` 的 turn 号，收集该 turn 内的 `assistant/message` 文本，`turn/end` 时用最后一段文本作为回复。超时 120s。
@@ -154,6 +182,7 @@ ready/error ──关闭通道、删除实例、transport 改变──▶ off（
 - `ready`：webhook = 监听已绑 `127.0.0.1:<port>` 且 HMAC/Bearer 凭据齐；clawbot = 长轮询在跑。两种情况都要求绑定的 Bot 存在。
 - `error`：可操作文案（哪个端口被占、缺哪个凭据、Bot 被删）；错误不静默。
 - **端口冲突降级**：监听绑定失败（如 `EADDRINUSE`）时，只有使用 webhook 的实例进入 `error`，文案给端口号与修改方法（`wechat.listenPort`）；**插件启动不受影响**，其他连接器照常 ready（负例测试见 §11）。
+- **`EADDRINUSE` 是永久错误，不自动重试**（否则日志刷屏）：进入 `error` 后等设置变更或用户手动 Connect；其他瞬时错误（凭据被拒、Bot 暂时不可用）才按 30s 退避重试。
 
 **state 新增命名空间 `state.channels`**（不改动已有连接器数据；读取时缺省为 `{}`，无版本号升级）。**不放 `state.connectors[id]`**：disconnect / set-settings 会重建那个对象，非框架字段会丢。
 
@@ -169,14 +198,27 @@ state.channels[instanceId] = {
 
 - **幂等只按 `msgId`**（不看内容哈希）：同 `msgId` 重推 → `{ok:true, duplicate:true}`，不触发新轮次；用户手动重发同一句话是新 `msgId` → 正常触发。`seenMsgIds` 持久化在 `state.channels[instanceId]`，**重启后仍有效**（负例见 §11）。
 - **不存正文**：`seenMsgIds` 只有 id 与时间；消息正文不写 state、不进日志。
+- **写入节流**：`seenMsgIds` 默认每 5s 合并写一次，`turn/end` 时强制落盘；重启前未落盘的窗口最多 5s，配合 nonce 与微信侧重推仍能吞掉。
 - **凭据**：webhook secret / inbound token 在 DSH 凭据库；clawbot 凭据文件 0600。都不进 state、view、日志。
 - **迁移**：0.2.0 已有 `instances`/`settings`/`connectorInstances`，WeChat 是新增模块，无旧数据迁移；只新增 `state.channels`，读不到就当空。
+
+### 6.1 外部消息的隔离面（必须显式排除，不能只排 memory review）
+
+channel session 的外部消息**不得**被用户自己的会话看到或检索到：
+
+| 面 | 落点 | 要求 |
+|---|---|---|
+| 记忆 renew / 注入 / review | `memory.js:632` renew 的枚举、记忆注入点、review 扫描 | channel session **显式 exclude**：不参与 review、不注入记忆 prompt、不会写进 MEMORY.md |
+| 会话索引 / 搜索 | `store.js:392` `indexSessions()`、`chat-index.js` | v1 **直接排除** channel session，不进索引；`read_own_chat`、search、会话列表都看不到外部消息 |
+| part / checkpoint | `parts.js` 的 segment / checkpoint | channel session 不做 checkpoint 切分、不进用户可见的 part 列表 |
+| prompt | `prompt.js` | 增加「外部通道：消息 untrusted、不假定主人权限、不泄露主人私聊」段 |
+| 负例 | §11.18 | 外部消息不出现在 search、不进 MEMORY.md、不被其它 session 看见、不出现在侧栏/工作区列表 |
 
 ## 7. 安全红线
 
 1. **不自动答应审批/提问**：入站消息触发的轮次里，如果 Bot 需要用户确认（审批卡/ask_user），微信侧只收到提示「请回 DS Bot 处理」，模块绝不代答、绝不 bypass。
 2. **发送者 allowlist**：v1 只接受创建者本人；其他 sender 一律 403，不触发轮次。
-3. **入站全验证**：HMAC + 时间戳 + nonce + 幂等 + 限速 + 路径白名单，任一失败零轮次。
+3. **入站全验证**：HMAC（**必选**）、时间戳、nonce、幂等、限速（30/min、burst 10）、体积（body ≤64KB、文本 ≤8KB）、路径白名单，任一失败零轮次；Bearer 可选（默认关），开启后与 HMAC 同时校验。
 4. **只绑 loopback**：监听地址固定 `127.0.0.1`，不可配置成 `0.0.0.0`；负例测试断言监听地址，不允许出现 `0.0.0.0`。
 5. **日志脱敏**：sender id 只记哈希/长度，消息正文不记；凭据、签名、token 一律不记。诊断只记事件、状态、错误码。
 6. **密钥只进凭据库**：webhook secret 只经安全卡片（`request_secret`）注入 DSH 凭据库；state/view/日志/对话都不出现。设计稿不写实际 URL/key。
@@ -239,16 +281,31 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 15. **脱敏**：日志与 diagnostics 不含 sender 原文、正文、secret；state.json 不含正文与 secret。
 16. **级别**：`read` 级无 `wechat_notify`；写等级别下审批卡出现且 allow 只执行一次、deny/超时/取消零请求。
 17. **profile 关闭**：连接器整体 `false` 时无监听、无实例行。
+18. **channel session 不可见**：channel session 不出现在用户会话侧栏、工作区列表或 Bot 私聊的历史里；`createSession` 不带 `dir` 时的落点行为在 P1 确认并加断言（不落到用户可见文件夹）。
+19. **异步回调**：默认 202 + 回调送达；`callbackUrl` 缺失时 `wait` 生效且上限 20s；回调失败退避 3 次后只记状态卡。
+20. **体积与限速**：body >64KB / 文本 >8KB → 413（零轮次）；超过 30/min 或 burst 10 → 429 + `retry_after`。
 
 ## 12. 依赖框架的改动（Forge）
 
-| 编号 | 改动 | 阶段 | 工作量 |
-|---|---|---|---|
-| F1 | `registry.js` 的 `checkInstances` 允许 `mode:'custom'` 使用 `instances`（凭据由模块自己管理，不要求 OAuth grant） | P1 阻塞 | ~0.5d |
-| F2 | Channel session：`store.js` 的 `channelOwners`、新 `src/host/channels.js`（`channelSessionFor` 按 conversation 建/复用/LRU 归档）、`memory.js` 排除 channel session、`source` 允许 `untrusted`/`sender`、默认空工具白名单 + `allowReadTools` | P2 阻塞 | ~1d |
-| F2b | 每实例凭据名：框架当前按全局字段名存 secret，两个实例会互相覆盖；加 `secretNameOf(id, field)`（如 `WECHAT_WEBHOOK_SECRET_WECHAT_2`） | P1 阻塞 | ~0.25d |
-| F3 | 连接器 view 行支持模块 `status` 钩子（每实例状态卡数据） | P1 可选/P2 | ~0.25d |
-| F4 | `readiness({ level, settings })` 增加只读的 `rt`（校验 `botId` 存在）；没有也可在 mount 时报错降级 | 可选 | ~0.25d |
+| 编号 | 改动 | Owner | 阶段 | 工时 |
+|---|---|---|---|---|
+| F1 | `registry.js:105` `checkInstances` 放宽为 `mode` ∈ {`oauth-mcp`, `custom`}；其余校验（prefix、min/max、id 长度、`checkInstanceIds`）不动；custom 模块必须自己声明 `credentials`/`tokenSecret`。测试：custom+instances 通过、rest-tools+instances 仍拒绝、缺凭据声明报错清楚 | Forge | P1 阻塞（**先落 F1 再开 P1 实例**） | 0.5d，今天 |
+| F2b | `secretNameOf(id, field)`：首实例裸名、`-N` 实例 `_N` 后缀（须过 `SECRET_NAME` 校验，两实例不得同名）；`configuredOf`/`credentialKeyOf`/`secretMapOf`/connect 写 secret/disconnect 删 secret/`notifyTokenOf` 全走它；mount 给模块 `secretName(field)`。测试：两实例互不覆盖、删实例只删自己、view/state/logs 不含值 | Forge | P1 阻塞 | 0.25d，今天 |
+| F5 | Host 侧缺口：① `connector-test` 增加模块 `test` 钩子（custom 也能测）；② `connector-set-settings` 支持 secret 字段（缺省/空串=保留、非空=替换写凭据库、`clearSecrets` 显式清除）；③ 通用 `connector-command {id, action, args}` → 模块 `command` 钩子（替代逐个端点，登录等自定义动作都走它）；④ view 由模块 `view`/`status` 钩子合并进 row，`instance.max` 从 `instances.max` 填 | Forge | P1 阻塞（卡片/测试/登录） | 1d |
+| F2a | 会话归属（P2）：`store.js` `channelOwners: Map<sessionId,{botId,instance}>`，`indexSessions()` 从 `state.channels[...].conversations[*].sessionId` 重建；`selfOf`/`isBotSession` 纳入 channel session；新 `src/host/channels.js`：`channelSessionFor`（createSession + 模型/权限/capabilities + 工具白名单）、`rebindChannel`/`closeChannel`（archiveSession + 归档记录，不删不复用）、`assistant/message` 累积 + `turn/end` 收口回调；`agent.ctx.tools.restrict({allow:[...]})`；`memory.js` exclude；`prompt.js` untrusted 段；`delivery.js:57` source 改为可扩展并处理 `headerFor` 与客户端标识 | Forge | P2 阻塞 | 1–1.5d，明天 |
+| F3 | `connectorRow` 增加模块 `status` 钩子（display-only，异常吞掉） | Forge | 可选 | 0.25d |
+| F4 | `readiness({level,settings,instance,rt})` 传只读 `rt`（或更窄 `{botOf}`）；每行每级都会调，要求纯内存、无 IO | Forge | 可选 | 0.25d |
+| F6 | Client 渲染：`fields.kind`（bot/segmented/secret）、`instance.max`、`inbound`、`login`、`canTest`、`connector-command` 动作的卡片/表单实现（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | Prism 实现，Pixel 复核 | P1 | 0.5d |
+
+Forge 已开分支 `feat/wechat-framework-p1`（worktree `dsbot-wechatfwwt`，基线 `6255c87`），F1/F2b 先交；F2a 明天交。没有 F1 之前实例机制用不了，**不做「不合主线」的单实例骨架**。
+
+### 12.1 iLink 客户端附录（P3 可行性）
+
+- **实现规模**：核心客户端约 **600–800 行 + 测试**，**无新 npm 依赖**（`fetch`/`crypto` 足够）。
+- **协议要点**：认证头三件套（`iLink-App-Id: bot`、`iLink-App-ClientVersion`、`AuthorizationType: ilink_bot_token` + Bearer + `X-WECHAT-UIN`）；`getUpdates` 35s 长轮询 + `get_updates_buf` 游标**持久化**（重启恢复，否则重收）；`sendMessage` 回传 `context_token`；`getconfig`/`sendtyping` 可选；指数退避重连；`errcode=-14` 暂停 1h 再试；入站 `msgId` 幂等复用 P2 的 `seenMsgIds`。
+- **二维码**：接口直接返回 data URL，**不需要二维码库**；P3 v1 用「官方 CLI 登录拿 bot_token 粘到卡片」，卡内 QR 留 P4。
+- **测试**：本地 mock iLink（复用 `fakeWebServer` 模式），覆盖游标重启恢复、重复/乱序消息、`context_token` 传递、退避与 `-14`、断线重连。
+- **不进 v1**：媒体 CDN（AES-ECB 上传/下载）、voice SILK 转码。
 
 没有 F1 之前，实例机制用不了，P1 只能先做单实例的骨架与出站实现（可并行，但不合主线）。
 
@@ -257,17 +314,17 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 | 阶段 | 内容 | 工作量（人日） | 产出 |
 |---|---|---|---|
 | P0 | 本设计稿 | 0.5（今天） | 本文档 + 框架依赖清单 |
-| P1 | **纯出站**：custom 实例、settings/凭据、`wechat_notify`（write + 审批）、readiness、状态卡字段、单测 | 1.5 | 可发通知的通道卡；出站单测 |
-| P2 | webhook 入站：loopback 监听、HMAC/时间戳/nonce/幂等/限速/allowlist、绑定与专属 Session、串行队列、回复关联、换绑归档、端口降级、负例测试 | 2.5 | 同步收发的完整 webhook 通道；验收负例全绿 |
+| P1 | **纯出站**：custom 实例、settings/凭据、`wechat_notify`（write + 审批）、readiness、状态卡字段、单测（依赖 F1/F2b/F5） | 2 | 可发通知的通道卡；出站单测 |
+| P2 | webhook 入站：loopback 监听、HMAC/时间戳/nonce/幂等/限速/体积、allowlist、**默认异步 202 + 回调**、绑定与 channel session、串行队列、回复关联、换绑归档、端口降级、负例测试 | 3 | 同步收发的完整 webhook 通道；验收负例全绿 |
 | P3 | clawbot 可行性（**不排开发**）：协议客户端 spike（mock）、QR 登录 CLI 原型、灰度/合规风险清单 | 2（验证） | 可行性报告 + 原型；等结论 |
 | P4 | UI/媒体：卡片内嵌 QR、媒体收发（图片/文件，iLink CDN 加密）、状态卡细化 | 2–3 | 卡片与媒体能力 |
 | P5 | QA/打包：门槛、smoke、证据（390/1280）、Harbor 交付、README/文档 | 1.5 | 可上线包 |
 
-**排期**：核心 P1+P2 约 **4 人日**，按 4–6 天窗口排，**先不对外承诺**。P3 只做验证；P4/P5 在 P2 验收后再排。
+**排期**：**F1 先落（0.5 人日，今天）→ 再开 P1**；核心 P1+P2 约 **5 人日**，按 4–6 天窗口排，**先不对外承诺**。Forge：F1/F2b 今天、F5 1d、F2a 明天 1–1.5d；Prism：F6 0.5d；F5/F6 与 P1 并行。P3 只做验证；P4/P5 在 P2 验收后再排。
 
 **每日能出什么**
 
-- D1：本设计稿 + 框架依赖（F1/F2）确认；P1 模块骨架（实例声明、settings、readiness、凭据注入）与单测骨架。
+- D1：F1 落地（Forge）+ P1 模块骨架（实例声明、settings、readiness、凭据注入）与单测骨架；F5/F6 shape 确认。
 - D2：P1 完成——`wechat_notify` 出站 + 审批 + 错误映射 + 状态字段，P1 门槛全绿，发 Marshal/Forge review。
 - D3：P2 监听与安全层（HMAC/时间戳/nonce/幂等/限速/allowlist）+ 负例 1–9。
 - D4：P2 绑定与专属 Session、串行队列、回复关联、换绑归档、端口降级 + 负例 10–17。
@@ -276,7 +333,7 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 
 **资源与优先级**
 
-- 这条线主要由 Relay 承担；Forge 需投入约 1–1.5 人日做 F1/F2（可与 P1 并行）。
+- 这条线主要由 Relay 承担；Forge 需投入约 **2.5–3 人日**（F1 0.5 + F2b 0.25 + F5 1 + F2a 1–1.5）；Prism 0.5 人日做 F6（Pixel 复核）。
 - 与其他线的关系（按已定优先级）：**微信连接器 > Neon follow-up > ima backlog**；Upstream 同步独立跑，不受影响。
 - 不占用第三方账号资源：P1/P2 只需用户提供 webhook URL 与 secret（安全卡片）；clawbot 验证另需用户的灰度状态。
 
@@ -312,11 +369,13 @@ card: { glyph:'wechat', about, docsUrl }
 - `connector-test { id }`：仅 webhook；向 `webhookUrl` 发一条固定测试通知，成功/失败都返回整个 connectorsView（失败时 state 仍 ready、`error` 放原文）。
 - `connector-set-settings { id, values }`：
   - `values` 里**缺省或空串的 secret 字段 = 保留原值**；非空才替换（写入 DSH 凭据库，不进 state/view）。
+  - **显式清除 secret** 用 `clearSecrets: ['webhookSecret']`（与 `values` 平级），客户端「移除密钥」时带它；不靠空串表达清除。
   - 文本字段空串 = 清空。
   - **已连接（ready/error）时改 `transport` 会被拒绝**，错误文案固定为 “Disconnect this channel before changing the transport.”；客户端先 `connector-disconnect` 再保存（与 Prism 方案一致）。
 - `connector-disconnect { id }`：停监听/轮询，state 转 off；保留 settings 与凭据，供重连。
 - `connector-create-instance { base:'wechat' }` / `connector-delete-instance { id }`：上限 8（min 1），实例 id 为 `wechat`、`wechat-2`…；删除时模块在 `close` 里清理该实例的凭据文件、secret 名与监听路由（best effort，失败只告警）。
-- **新增** `connector-wechat-login { id, action:'start'|'refresh'|'cancel' }`：仅 clawbot；start 生成二维码（结果在 `login` 回，UI 轮询 state），refresh 换新码，cancel 清空；二维码 TTL 到期由宿主把 `login.state` 置为 `expired`，刷新走 refresh（不自动轮换）。
+- **新增通用动作** `connector-command { id, action, args? }`（**F5 host + F6 client**），转发到模块 `command` 钩子。WeChat 的 action：`login-start` / `login-refresh` / `login-cancel`（仅 clawbot；结果在 `login` 回，UI 轮询 state）。TTL 到期宿主把 `login.state` 置 `expired`，刷新走 `login-refresh`（不自动轮换）。**v1 登录是 token 粘贴**，`qr/expired` 随 P4。
+- view 的 `fields`/`inbound`/`login`/`levels` 对象化与 `instance.max` 由 F5 的模块 `view`/`status` 钩子给出，框架合并进 row。
 - `connector-set-level { id, level }` 不变。
 
 **readiness 与级别**
@@ -328,3 +387,25 @@ card: { glyph:'wechat', about, docsUrl }
 
 - `webhookSecret` 与 iLink token 永不下发明文；`inbound.token` 允许显示/复制。
 - 二维码只接受 `data:image/png;base64,…`，客户端不请求外部图片域名。
+
+
+## 15. 评审意见落实表（逐条对）
+
+| 编号 | 意见 | 落在 | Owner | 工时 | 对应负例 |
+|---|---|---|---|---|---|
+| R1 | 入站 HMAC 必选、Bearer 可选（默认关），给最小配置 | §3.2 校验顺序/鉴权最小配置；§7 第 3 条 | Relay（设计） | 0 | P2-04/05/06、新增 P2-21 |
+| R2 | 限速与体积数字：30 req/min、burst 10；body ≤64KB；文本 ≤8KB；429/413 | §3.2 数值上限；§7 第 3 条 | Relay（设计） | 0 | §11.20 |
+| R3 | `EADDRINUSE` 不自动重试（永久错误），等设置变更/手动 connect | §6 端口冲突降级后两条 | Relay（设计） | 0 | §11.2 |
+| R4 | 企业微信口径写死：P1/P2 是通用 HTTP 网关契约，不做官方应用回调（XML+AES） | §1 分批；§3.2 开头；§3.3 | Relay（设计） | 0 | 无（明确不做） |
+| R5 | `seenMsgIds` 写 state 要节流（5s 合并 + turn/end 强制落盘） | §6 写入节流 | Relay（设计） | 0 | §11.7 |
+| R6 | `clearSecrets:['webhookSecret']` 显式清除，不靠空串 | §14 动作 | Relay（设计） | <0.1d | 新增 P1-13 |
+| C1 | 记忆/检索排除面列全：`memory.js:632`、`store.js:392 indexSessions()`、`chat-index.js`、`parts.js` 显式 exclude | §6.1 表（逐文件落点）；§12 F2a | Relay 设计 + Forge 实现 | Forge 1–1.5d（含在 F2a） | §11.18、新增 P2-22 |
+| C2 | v1 只做 1 条 conversation（创建者 DM）；≤8 + LRU 移 P4 | §5 粒度 | Relay（设计） | 0 | 新增 P2-23 |
+| C3 | channel session denylist 逐项点名；`untrusted` 进 `headerFor` 消息头 | §5 工具白名单/`untrusted`；§12 F2a | Relay 设计 + Forge 实现 | 含在 F2a | P2-15、新增 P2-24 |
+| C4 | P3 token 只进 0600/凭据库；逆向+封号风险「用户明确同意才做」；v1 不做自动登录/扫码 | §4 登录/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
+| C5 | `secretNameOf`：删实例只删自己、名字过校验、两实例不同名 | §2 凭据表；§12 F2b | Forge | 0.25d | P1-11、新增 P1-14 |
+| F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14 | Forge | 1d | P1-02/04/09/13 |
+| F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14 | Prism（Pixel 复核） | 0.5d | P1-02 |
+| A1 | P2 异步契约写死：`202 {ok,accepted}` + `callbackUrl`（HMAC、msgId 幂等、重试 3 次）；`wait` ≤20s；同步超时 `504 code:'timeout'` | §3.2 默认异步/同步模式 | Relay（设计）+ P2 实现 | 含在 P2 的 3d | §11.19、新增 P2-25 |
+
+> Chief 原话里的 `connector-wechat-login` 在实现时收敛为通用 `connector-command {id, action, args}`（Forge 建议），功能等价，只是端点名更通用；§14 与 F5 已按通用端点写。
