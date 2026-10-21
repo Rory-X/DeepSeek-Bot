@@ -65,7 +65,11 @@ export function createIlinkClient({
     try { body = await response.json() } catch { body = undefined }
     if (!response.ok) throw Object.assign(new Error(`iLink answered ${response.status}`), { status: response.status, body })
     if (body !== null && typeof body === 'object') {
-      if (Number(body.errcode) === -14) throw Object.assign(new Error('WeChat paused this login for a while; try again later.'), { body })
+      // `-14` is WeChat's "session timeout". What it means depends on the phase (a retryable
+      // pause while signing in, a dead login afterwards), so the error carries a marker and
+      // the caller names it instead of inheriting one phase's wording.
+      const paused = Number(body.errcode) === -14 || Number(body.ret) === -14
+      if (paused) throw Object.assign(new Error('WeChat paused this login for a while; try again later.'), { paused: true, body })
       if (body.ret !== undefined && Number(body.ret) !== 0) throw Object.assign(new Error(`iLink answered ret ${body.ret}`), { body })
       if (body.errcode !== undefined && Number(body.errcode) !== 0) throw Object.assign(new Error(`iLink answered errcode ${body.errcode}`), { body })
     }
@@ -123,14 +127,17 @@ export function createIlinkClient({
       return await answer(response)
     },
 
-    async sendMessage({ token, fromUserId, toUserId, clientId = randomUUID(), contextToken, text, signal }) {
+    // The bot's identity is the bearer token; the scanned account is the target. The official
+    // client sends an empty `from_user_id`, and it is not a parameter here so no caller can
+    // put an id there.
+    async sendMessage({ token, toUserId, clientId = randomUUID(), contextToken, text, signal }) {
       const response = await request(`${baseUrl}/ilink/bot/sendmessage`, {
         method: 'POST',
         headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
         body: JSON.stringify({
           base_info: { channel_version: '1', bot_agent: 'ds-bot' },
           msg: {
-            from_user_id: String(fromUserId ?? ''),
+            from_user_id: '',
             to_user_id: String(toUserId ?? ''),
             client_id: String(clientId ?? ''),
             message_type: 2,
