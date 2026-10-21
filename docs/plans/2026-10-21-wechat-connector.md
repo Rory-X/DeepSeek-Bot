@@ -39,7 +39,7 @@
 | `label` | 卡片名，可空 |
 | `transport` | `webhook` 或 `clawbot`。**P1 只暴露 webhook 选项，ClawBot 选项随 P3 开放**；内部校验与 API 写入仍接受 `clawbot` |
 | `botId` | **必填**，绑定一个 Bot；不存在则不 ready |
-| `webhookUrl` | webhook 模式的出站地址（企业微信群机器人 URL 或任意 HTTP 接收端） |
+| `webhookUrl` | webhook 模式的出站地址（企业微信群机器人 URL 或任意 HTTP 接收端）。**本质是凭据**（企业微信机器人 URL 里带 key）：P1 先按普通设置明文常驻卡片并提醒用户截图打码，**P2-26 必须收口**——按 secret 存储（卡片只显 Saved/Replace/Remove）或客户端掩码（只显 host+尾部，可复制/编辑时展开） |
 | `webhookFormat` | `generic`（发送 `{text}`）或 `wecom`（发送企业微信 `{msgtype:'text',text:{content}}`） |
 | `notifyPrefix` | 可选，出站消息前缀 |
 
@@ -320,7 +320,10 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 
 Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbot-wechatfwwt`，基线 `6255c87`），F1/F2b 先交；F2a 明天交。没有 F1 之前实例机制用不了，**不做「不合主线」的单实例骨架**。
 
-**后续（非本批，统一处理）**：通用连接器卡的 `levelNote`（当前级别的单条原因）与 `levelNotes[级别]`（每级原因）会渲染同一句——`src/client/connectors.js` 两个字段都画，Neon 等缺 projectId 时同样如此，属既有行为，不是微信卡独有；微信卡已在 `a8a6541` 按 Pixel 建议在客户端把自己那边去重。通用修复留后续统一处理，本批不改。
+**后续（非本批，统一处理）**
+
+- 通用连接器卡的 `levelNote`（当前级别的单条原因）与 `levelNotes[级别]`（每级原因）会渲染同一句——`src/client/connectors.js` 两个字段都画，Neon 等缺 projectId 时同样如此，属既有行为，不是微信卡独有；微信卡已在 `a8a6541` 按 Pixel 建议在客户端把自己那边去重。通用修复留后续统一处理，本批不改。
+- **P2-26（P2 必做）**：`webhookUrl` 是企业微信群机器人 URL，里面带 key，不能长期明文常驻卡片。P1 已接受该风险并在验收步骤里提醒「截图打码」；P2 必须收口，二选一：①按 secret 存储（卡片只显 `Saved`/`Replace`/`Remove`，值只进 DSH 凭据库）；②客户端对 URL 掩码显示（只显 host + 尾部几位，完整值可复制/编辑时再展开）。两种都要覆盖「截图外发不泄露 key」的验收。
 
 ### 12.1 iLink 客户端附录（P3 可行性）
 

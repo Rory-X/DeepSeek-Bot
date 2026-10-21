@@ -54,6 +54,7 @@
 | P2-23 | 单 conversation | 每个通道只有创建者 DM 一条 conversation session；不会为 group 预建会话 |
 | P2-24 | 工具与消息头 | channel session 无任何工具（allowReadTools 只放 `web_search`）；denylist 各项不可用；注入正文含 `untrusted` 段 |
 | P2-25 | 异步与 `wait` | **= P2-13a + P2-13b**：默认 202 + 回调（HMAC/msgId 幂等）；`wait` ≤20s 内 200 且不发回调；同步超时 504 `code:'timeout'`，异步 120s 未完成发 failure callback |
+| P2-26 | `webhookUrl` 凭据收口 | 企业微信机器人 URL 带 key，不能明文常驻卡片：按 secret 存储（卡片只显 Saved/Replace/Remove）或客户端掩码（只显 host + 尾部几位，可复制/展开）；截图外发不得泄露 key。**P1 已接受风险并提醒打码，P2 必须收口** |
 | P3-01 | token 与合规 | token 只在 0600 文件或凭据库，state/日志/设置页无明文；未获用户明确同意时 P3 不启用 |
 
 ## 错误文案矩阵（宿主给用户/调用方的原文）
@@ -153,5 +154,6 @@
 | P2-23 | P2-23 v1 keeps exactly one conversation session (the creator DM); no group session is pre-created | 470 | todo | 单 conversation |
 | P2-24 | P2-24 the tool denylist holds and untrusted travels in the headerFor message header | 471 | todo | denylist + headerFor untrusted |
 | P2-25 | P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504) | 472 | todo | = P2-13a/13b |
+| P2-26 | P2-26 the webhook URL is stored as a credential or masked on the card | — | todo | webhookUrl 凭据化/掩码；P2 开工补 `test.todo` 与行号 |
 
-**偏差与别名**：P2-25 由 P2-13a + P2-13b 覆盖，不单列；P2-20 管「可见性」，P2-22a 管「记忆 review/注入/MEMORY.md」，P2-22b 管「parts/checkpoint」；P1-11 的「无 listener」半边挂到 P2-02/P2-03；P1-07 覆盖 ready/error/off/真实 disconnect/重连五种情况（含 F8 的 off 标记语义）。F8 的框架级用例（断开后重启仍 off、旧 team file 无标记行为不变、断开后行仍在且可改 transport/重连）在 `test/connectors.test.js`，不属于本清单的 P1/P2 编号。
+**偏差与别名**：P2-26 待 P2 开工补测试名与行号（设计 §12「后续」与 §3.1 `webhookUrl` 行）；P2-25 由 P2-13a + P2-13b 覆盖，不单列；P2-20 管「可见性」，P2-22a 管「记忆 review/注入/MEMORY.md」，P2-22b 管「parts/checkpoint」；P1-11 的「无 listener」半边挂到 P2-02/P2-03；P1-07 覆盖 ready/error/off/真实 disconnect/重连五种情况（含 F8 的 off 标记语义）。F8 的框架级用例（断开后重启仍 off、旧 team file 无标记行为不变、断开后行仍在且可改 transport/重连）在 `test/connectors.test.js`，不属于本清单的 P1/P2 编号。
