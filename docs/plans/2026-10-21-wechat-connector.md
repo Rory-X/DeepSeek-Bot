@@ -380,29 +380,24 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 4. **客户端契约**：`d2e53ad` 的 `wechat-card.js` 已支持 `transport==='clawbot'` + `login.qr`（要求 `data:image/png;base64,` 前缀）与三态渲染；按此返回 QR。
 5. **F12（已批，P2 打包后 Forge 落）**：`unmount` 会 `await close()`；模块 `close` 必须**立即 abort**（`AbortController` 取消 fetch + `clearTimeout`），不得在 close 里等 35s 长轮询。
 
-**UI 登录态（`view.login.state`，10 种，失败态必须分开）**
+**UI 登录态（`view.login.state`，宿主 8 态；cancelled 纯客户端）**
 
-| state | 触发（协议态） | 卡片文案（宿主英文原文） | 可重试动作 |
+| state | 触发（协议态 / 宿主判定） | 卡片文案（宿主英文原文） | 可重试动作 |
 |---|---|---|---|
 | `logged-out` | 无 token / 用户登出 | `Scan a QR code with WeChat to connect this channel.`（未 consent 时加风险说明） | Start |
-| `qr` | `wait` / `scaned` / `scaned_but_redirect`（后两者 `scanned:true`，附「已扫码，请在手机上确认」） | `Scan this QR code with WeChat.` | Refresh / Cancel |
-| `verified-needed` | `need_verifycode` | `Enter the verification code shown on your phone.` | Refresh / Cancel |
+| `qr` | `wait`；`scaned`/`scaned_but_redirect` 时附加 `scanned:true` | `Scan this QR code with WeChat.` | Refresh / Cancel |
+| `verified-needed` | `need_verifycode`（验证码在手机输入，无卡片输入框） | `Enter the verification code shown on your phone.` | Refresh / Cancel |
 | `blocked` | `verify_code_blocked` | `WeChat blocked this verification. Try again later.` | Refresh / Cancel |
 | `expired` | `expired` | `The QR code expired. Refresh to try again.` | Refresh / Cancel |
-| `cancelled` | 用户 Cancel | `Login cancelled.` | Start |
-| `confirm-failed` | 已扫码但手机端确认失败（协议错误/拒绝） | `The phone did not confirm the login. Scan again.` | Start / Retry |
-| `unavailable` | 登录服务不可用 / 网络失败（宿主原文进 `login.error`） | `The WeChat login service is not available right now.` | Retry |
-| `logged-in` | `confirmed` / `binded_redirect` | `Connected${account ? ` as ${account}` : ''}.` | — |
-| `session-expired` | 已登录后 token 失效/鉴权失败 | `The WeChat login expired. Webhook channels are not affected; scan the QR code again.`（不自动重登） | Start |
+| `invalid` | 鉴权失败 / 协议变更 / token 失效 | `The WeChat login expired. Webhook channels are not affected; scan the QR code again.` | Start |
+| `protocol-error` | 命令/网络失败（**不设 row error**，返回 `login.error` 原文） | `The WeChat login service is not available right now.` | Retry / Refresh |
+| `logged-in` | `confirmed` / `binded_redirect`（`account` 可 null） | `Connected${account ? ` as ${account}` : ''}.` | — |
 
-**失败态来源（与 Prism 对齐）**
-
-- `cancelled`：用户点 Cancel 时宿主**写一次** `cancelled`（不静默回 logged-out），UI 显示「已取消 + Start login」；Start/refresh 后清除；重启后无残留即回 `logged-out`。
-- `confirm-failed`：只有「`confirmed` 但缺 `bot_token`/凭据解析失败」才记该态；纯超时按 `expired`，其它错误按 `unavailable`（协议没有「手机明确拒绝」状态，宿主不臆造）。
-- `unavailable`：`login-start`/`login-poll` 的网络/协议错误**写进 view**（`state:'unavailable'` + `login.error` 宿主原文）并正常返回 view，不用 HTTP 错误；该通道 row 不因登录瞬时失败转 error。
-- `session-expired`：已登录后 iLink 鉴权失败统一此态 + 该通道 `row.state:'error'`，Webhook 不受影响，不自动重登。
-
-登录失效口径：仅该通道 `row.state:'error'`，**Webhook 通道完全不受影响**，不自动重登；用户点 Start 重新扫码。
+- **`cancelled` 不落 view**：用户点 Cancel 后宿主回 `logged-out`，客户端本地显示「已取消 + Start login」即可。
+- **`invalid`** 才把该通道 `row.state:'error'`（Webhook 不受影响、不自动重登）；`protocol-error` 仅 view + error，通道不转 error。
+- `login-poll`：无参、仅 clawbot、返回完整 view；客户端 `qr`/`verified-needed` 时 2s 轮询、上限 5 分钟，到 `logged-in`/`expired`/`blocked`/`invalid` 或 Cancel 即停，卡片卸载/切 transport 立即停（客户端 effect cleanup）。`login-poll` 自身出错回 view + `login.error`，不打 row error。
+- QR 只返回 `https://` 图片 URL 或 `data:` URL；内容串 → `qr:null` + `error:'The QR code was returned in an unsupported form; update DS Bot.'`，客户端绝不渲染原始串。
+- Disconnect：清登录态 + `WECHAT_ILINK_TOKEN`，回 `logged-out`；Webhook 不受影响。`account` 脱敏（前 4 后 2）；consent 持久化 `state.channels[instance].ilink.consent`（`rt.save`）；`expiresAt` ISO 或 null。
 
 **发布约束（Chief 四条，ClawBot v1 必须满足）**
 
