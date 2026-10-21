@@ -3,7 +3,9 @@
 // any HTTP receiver). The inbound listener, channel Sessions and ClawBot login land in P2/P3.
 import { createHmac, randomBytes } from 'node:crypto'
 import { inboundFor } from '../wechat-inbound.js'
-import { createIlinkClient, maskAccount, qrImageOf, qrStateOf } from '../wechat-ilink.js'
+import { createRequire } from 'node:module'
+import { qrPngDataUrl } from '../qr-image.js'
+import { createIlinkClient, maskAccount, qrStateOf } from '../wechat-ilink.js'
 
 const TIMEOUT_MS = 10_000
 // v0.2.0 refuses a tool without an output contract; a notice renders as its text.
@@ -41,6 +43,18 @@ const rememberConsent = (rt, id) => {
   channel.ilink = { ...(channel.ilink ?? {}), consent: { at: Date.now(), version: CONSENT_VERSION } }
   void rt.save().catch(() => {})
 }
+// The live iLink answer is a page URL, not an image: encode that URL into a QR ourselves
+// with the vendored MIT encoder and a tiny zlib PNG writer (no runtime dependency). A PNG
+// data URL is passed through; anything else is not renderable on the card.
+const require = createRequire(import.meta.url)
+const qrcode = require('../vendor/qrcode.js')
+const qrForCard = (value) => {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (/^data:image\/png;base64,[A-Za-z0-9+/=]+$/i.test(text)) return text
+  if (/^https:\/\//i.test(text)) return qrPngDataUrl(text, qrcode)
+  return undefined
+}
+
 const loginViewOf = (rt, id, secrets) => {
   const login = loginOf(rt, id)
   const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
@@ -338,7 +352,7 @@ export default {
       }
       try {
         const answer = await client.getQrCode()
-        const image = qrImageOf(answer?.qrcode_img_content)
+        const image = qrForCard(answer?.qrcode_img_content)
         Object.assign(login, {
           state: 'qr',
           qrcode: typeof answer?.qrcode === 'string' ? answer.qrcode : null,

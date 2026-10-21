@@ -30,6 +30,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "NOTICE",
     "index.js",
     "src/host/",
     "src/shared/",

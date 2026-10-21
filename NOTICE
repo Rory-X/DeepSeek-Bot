@@ -91,3 +91,14 @@ their ideas; it does not contain their code.
     (packages/experimental/client-ui-voice-input), MIT: the voice chat
     records with the same steps (record, resample to 16 kHz mono, PCM16 WAV)
     before it calls the plugin's speech service.
+
+==============================================================================
+qrcode-generator 1.4.4
+==============================================================================
+
+ds-bot/src/host/vendor/qrcode.js
+
+qrcode-generator 1.4.4, MIT License, Copyright (c) 2009 Kazuhiko Arase
+http://www.d-project.com/
+
+The MIT license text is kept in the file header of ds-bot/src/host/vendor/qrcode.js.
