@@ -11,11 +11,15 @@ export default {
   tokenSecret: 'TELEGRAM_BOT_TOKEN',
   // The chat is not known until the bot has heard from it, or the user types its id.
   needsChatId: true,
+  // A messaging connector only sends: the level choice is hidden and write is the only level.
+  levels: ['write'],
+  defaultLevel: 'write',
   card: {
     glyph: 'telegram',
     about: 'Send notifications through a Telegram bot of your own.',
     docsUrl: 'https://t.me/BotFather',
     readOnlyNote: 'The connector only sends the messages a Bot was asked to send.',
+    levelChoice: false,
   },
   // The framework shows what this returns as the card's account; for Telegram that is the
   // bot's own username, the name the user knows it by in @BotFather.

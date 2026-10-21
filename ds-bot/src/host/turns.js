@@ -230,6 +230,10 @@ export function install(rt) {
   // Bot's own chat is hidden only when it has nothing of its own to show: the
   // acknowledgement of being stopped, and the fixed line that opens a part. A turn that
   // answers another Bot is the Bot's work, and the user reads it in the Bot's chat.
+  // Fork delta: upstream marks a turn that answers another Bot as an exchange turn, with
+  // `(expectsReply(info) && !answersUser(info)) || info.role === 'room'`. This fork keeps
+  // that turn visible in the Bot's chat instead (commit 5e59f07 "Show the work a Bot does
+  // for another Bot"), so the rule below stays narrower than upstream on purpose.
   const claimTrigger = (sessionId, entry, info) => {
     entry.info = info
     // A turn that was stopped for a part switch brings its joined requests along.

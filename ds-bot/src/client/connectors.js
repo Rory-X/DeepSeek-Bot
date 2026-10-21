@@ -3,7 +3,7 @@ import { useMorph } from './motion.js'
 import { MaskedInput } from './secret-card.js'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
-import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf } from './connector-shared.js'
+import { SettingField, declaredSettingsOf, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf } from './connector-shared.js'
 import { WeChatCard, WeChatMark } from './wechat-card.js'
 
 export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true },
@@ -319,7 +319,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   }
   // A connector with a level or capabilities opens its panel; settings and instances live on
   // the module's grouped card instead.
-  const hasOptions = levels.length > 0 || (on && (capabilities.length > 0 || permissions !== null))
+  const hasOptions = levelChoiceVisible(connector) || (on && (capabilities.length > 0 || permissions !== null))
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   // The card names its own glyph; a host that declares none keeps the mark its id had.
@@ -344,7 +344,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
           locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
       })))
     : null
-  const levelBlock = levels.length > 0
+  const levelBlock = levelChoiceVisible(connector)
     ? h('div', { className: 'bt-connector-setting' },
       h('div', { className: 'bt-connector-action-title' }, t('Access level')),
       h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
@@ -624,7 +624,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
         : null,
     })
   }
-  const levelBlock = levels.length > 0
+  const levelBlock = levelChoiceVisible(connector)
     ? h('div', { className: 'bt-connector-setting' },
       h('div', { className: 'bt-connector-action-title' }, t('Access level')),
       h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
@@ -756,7 +756,7 @@ function AddProjectForm({ base, baseId, existingIds, actions, onCreated, onCance
   return h('div', { className: 'bt-connector-add-form' },
     fieldInput('label', t('Name (optional)'), t('The project name, if you want a different card name')),
     valueFields.map(field => fieldInput(field.name, typeof field.label === 'string' && field.label !== '' ? field.label : field.name, field.label ?? field.name)),
-    levels.length > 0
+    levelChoiceVisible(base)
       ? h('div', { className: 'bt-connector-setting' },
         h('div', { className: 'bt-connector-action-title' }, t('Access level')),
         h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },

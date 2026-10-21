@@ -15076,6 +15076,7 @@ var declaredSettingsOf = (connector) => {
   return Array.isArray(list) ? list.filter((field) => field !== null && typeof field?.name === "string" && field.name !== "") : [];
 };
 var levelsOfConnector = (connector) => Array.isArray(connector.levels) ? connector.levels.filter((entry) => entry !== null) : [];
+var levelChoiceVisible = (connector) => levelsOfConnector(connector).length > 0 && connector?.card?.levelChoice !== false;
 var settingKindOf = (field) => field?.kind === "secret" || field?.kind === "bot" || field?.kind === "segmented" ? field.kind : "text";
 var settingOptionsOf = (field) => Array.isArray(field?.options) ? field.options.filter((option) => option !== null && typeof option === "object" && typeof option.value === "string" && option.value !== "") : [];
 var settingLabelOf = (field) => typeof field.label === "string" && field.label !== "" ? field.label : field.name;
@@ -15408,7 +15409,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
       secret: secretOf(field)
     });
   };
-  const levelBlock = levels.length > 0 ? (0, import_react38.createElement)(
+  const levelBlock = levelChoiceVisible(row) ? (0, import_react38.createElement)(
     "div",
     { className: "bt-connector-setting" },
     (0, import_react38.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
@@ -15994,7 +15995,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       setBusy(false);
     }
   };
-  const hasOptions = levels.length > 0 || on && (capabilities.length > 0 || permissions !== null);
+  const hasOptions = levelChoiceVisible(connector) || on && (capabilities.length > 0 || permissions !== null);
   const [details, setDetails] = (0, import_react39.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark;
@@ -16019,7 +16020,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       );
     }))
   ) : null;
-  const levelBlock = levels.length > 0 ? (0, import_react39.createElement)(
+  const levelBlock = levelChoiceVisible(connector) ? (0, import_react39.createElement)(
     "div",
     { className: "bt-connector-setting" },
     (0, import_react39.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
@@ -16408,7 +16409,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
       } : null
     });
   };
-  const levelBlock = levels.length > 0 ? (0, import_react39.createElement)(
+  const levelBlock = levelChoiceVisible(connector) ? (0, import_react39.createElement)(
     "div",
     { className: "bt-connector-setting" },
     (0, import_react39.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
@@ -16594,7 +16595,7 @@ function AddProjectForm({ base, baseId, existingIds, actions, onCreated, onCance
     { className: "bt-connector-add-form" },
     fieldInput("label", t("Name (optional)"), t("The project name, if you want a different card name")),
     valueFields.map((field) => fieldInput(field.name, typeof field.label === "string" && field.label !== "" ? field.label : field.name, field.label ?? field.name)),
-    levels.length > 0 ? (0, import_react39.createElement)(
+    levelChoiceVisible(base) ? (0, import_react39.createElement)(
       "div",
       { className: "bt-connector-setting" },
       (0, import_react39.createElement)("div", { className: "bt-connector-action-title" }, t("Access level")),
