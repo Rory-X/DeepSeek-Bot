@@ -14,7 +14,8 @@ import { createServer as createHttpServer } from 'node:http'
 import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
-import { normalizeWechatSettings, wechatReadiness } from '../src/host/connectors/wechat.js'
+import wechatConnector, { normalizeWechatSettings, wechatReadiness } from '../src/host/connectors/wechat.js'
+import { inboundFor } from '../src/host/wechat-inbound.js'
 import { postInbound, startWebhookReceiver, wechatHeaders } from './wechat-fakes.js'
 
 const TEAM = {
@@ -519,13 +520,19 @@ const startIlinkMock = async ({
   token = 'ilink-token',
   userId = 'ilink_user_123456',
   qrFailures = 0,
+  qrcodes = null,
   send = () => ({ ret: 0 }),
   updates = () => ({ ret: 0, get_updates_buf: 'cursor-1' }),
   updatesDelayMs = 40,
+  qrDelayMs = 0,
+  statusDelayMs = 0,
+  statusHang = false,
+  sendHang = false,
 } = {}) => {
   const calls = []
   let index = 0
   let qrCalls = 0
+  let qrIndex = 0
   const server = createHttpServer((request, response) => {
     const chunks = []
     request.on('data', chunk => chunks.push(chunk))
@@ -540,19 +547,29 @@ const startIlinkMock = async ({
         response.writeHead(status, { 'content-type': 'application/json' })
         response.end(JSON.stringify(value))
       }
+      // The service answers the QR status call slowly (a 30s long poll); tests shorten that.
+      const later = (value, status = 200, delay = 0) => {
+        if (delay <= 0) return json(value, status)
+        setTimeout(() => json(value, status), delay)
+        return undefined
+      }
       if (request.url.startsWith('/ilink/bot/get_bot_qrcode')) {
         qrCalls += 1
         // The QR request itself can answer `-14` too: the retry must ask again instead of
         // polling a code it never received.
-        if (qrCalls <= qrFailures) return json({ ret: 0, errcode: -14, errmsg: 'session timeout' })
-        return json({ qrcode, qrcode_img_content: image })
+        if (qrCalls <= qrFailures) return later({ ret: 0, errcode: -14, errmsg: 'session timeout' }, 200, qrDelayMs)
+        const value = qrcodes === null ? qrcode : qrcodes[Math.min(qrIndex, qrcodes.length - 1)]
+        qrIndex += 1
+        return later({ qrcode: value, qrcode_img_content: image }, 200, qrDelayMs)
       }
       if (request.url.startsWith('/ilink/bot/get_qrcode_status')) {
         const status = statuses[Math.min(index, statuses.length - 1)]
         index += 1
-        if (status === 'auth-fail') return json({ error: 'unauthorized' }, 401)
-        if (status === 'paused') return json({ ret: 0, errcode: -14, errmsg: 'session timeout' })
-        return json({ status, ...(status === 'confirmed' || status === 'binded_redirect' ? { bot_token: token, ilink_bot_id: 'bot-1', baseurl: 'https://base.test', ...(userId === undefined ? {} : { ilink_user_id: userId }) } : {}) })
+        // A stuck answer never ends: the host's deadline has to end it.
+        if (statusHang) return undefined
+        if (status === 'auth-fail') return later({ error: 'unauthorized' }, 401, statusDelayMs)
+        if (status === 'paused') return later({ ret: 0, errcode: -14, errmsg: 'session timeout' }, 200, statusDelayMs)
+        return later({ status, ...(status === 'confirmed' || status === 'binded_redirect' ? { bot_token: token, ilink_bot_id: 'bot-1', baseurl: 'https://base.test', ...(userId === undefined ? {} : { ilink_user_id: userId }) } : {}) }, 200, statusDelayMs)
       }
       if (request.url.startsWith('/ilink/bot/getupdates')) {
         const answer = updates(call) ?? {}
@@ -560,7 +577,10 @@ const startIlinkMock = async ({
         setTimeout(() => json(answer), updatesDelayMs)
         return undefined
       }
-      if (request.url.startsWith('/ilink/bot/sendmessage')) return json(send(call))
+      if (request.url.startsWith('/ilink/bot/sendmessage')) {
+        if (sendHang) return undefined
+        return json(send(call))
+      }
       return json({ ret: 0 })
     })
   })
@@ -780,8 +800,10 @@ test('CB-08 a logged-in channel keeps its inbound long poll and its cursor, and 
   // The first poll has no cursor; a restart continues from the saved one.
   assert.equal(polls()[0].json.get_updates_buf === undefined || polls()[0].json.get_updates_buf === '', true)
   await until(async () => (polls().some(entry => entry.json?.get_updates_buf === 'cursor-1') ? true : undefined), 'a poll carrying the saved cursor')
-  const state = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8'))
-  assert.equal(state.channels?.wechat?.ilink?.cursor, 'cursor-1')
+  await until(async () => {
+    const state = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8'))
+    return state.channels?.wechat?.ilink?.cursor === 'cursor-1' ? true : undefined
+  }, 'the cursor to reach the state file')
   // A settings save remounts the channel: keepalive must start again, not stop.
   const before = polls().length
   const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'clawbot', botId: 'b1', label: 'Live' } })
@@ -831,6 +853,252 @@ test('CB-09b a Webhook Test audits its send like a notice does', async (t) => {
   assert.match(failed.value.find(item => item.id === 'wechat').error, /refused the credential/)
   assert.match(audited.filter(entry => entry.source === 'wechat-notify').at(-1).text, /result 401$/)
   assert.equal(JSON.stringify(audited).includes('DS Bot: the WeChat channel works.'), false)
+})
+
+// ---- The QR poll flood: one 30s call at a time, and no stale answer ----
+// A minimal run of the module's own commands, without the host's endpoint queue: single flight
+// and stale-answer handling are rules of the module, so they are checked here directly.
+const commandHost = (base, wechat = {}) => {
+  const host = {
+    state: { channels: {} },
+    savedSecrets: [],
+    config: { wechat: { ilinkBase: base, ...wechat } },
+    save: async () => {},
+    secretEndpoint: async (endpoint, payload) => { host.savedSecrets.push({ endpoint, payload }) },
+  }
+  return host
+}
+const runWechat = (host, action, args) => wechatConnector.command({ id: 'wechat', rt: host, action, args, secretName: name => name })
+const loginViewOfHost = (host, secrets = {}) => wechatConnector.view({ id: 'wechat', settings: { transport: 'clawbot' }, rt: host, secrets }).login
+const closeCommandHost = (host) => { void inboundFor(host).dispose() }
+
+test('CB-10 one QR poll per channel: ten concurrent asks make one upstream call', async (t) => {
+  // The real status call takes 30s and the card asks every 2s; a shortened delay keeps the
+  // shape while the ten asks still overlap.
+  const mock = await startIlinkMock({ statuses: ['wait'], statusDelayMs: 80 })
+  t.after(() => mock.close())
+  const host = commandHost(mock.base)
+  t.after(() => closeCommandHost(host))
+  await runWechat(host, 'login-start', { consent: true })
+  assert.equal(loginViewOfHost(host).state, 'qr')
+  const statusCalls = () => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/get_qrcode_status')).length
+  const startedAt = Date.now()
+  await Promise.all(Array.from({ length: 10 }, () => runWechat(host, 'login-poll')))
+  assert.equal(statusCalls(), 1, 'the other nine asks must not reach WeChat')
+  assert.ok(Date.now() - startedAt < 1_000, `ten asks must not take ten polls (${Date.now() - startedAt}ms)`)
+  assert.equal(loginViewOfHost(host).state, 'qr')
+  // The single flight is released once the real answer lands: the next ask goes out again.
+  await runWechat(host, 'login-poll')
+  assert.equal(statusCalls(), 2)
+  // The declaration is what lets the framework keep a poll out of the connector queue.
+  assert.equal(wechatConnector.commands['login-poll'].concurrent, true)
+})
+
+test('CB-11 a late poll cannot revive a cancelled or refreshed login', async (t) => {
+  // Cancel while the confirming answer is still on its way.
+  const cancelledMock = await startIlinkMock({ statuses: ['confirmed'], statusDelayMs: 80 })
+  t.after(() => cancelledMock.close())
+  const cancelled = commandHost(cancelledMock.base)
+  t.after(() => closeCommandHost(cancelled))
+  await runWechat(cancelled, 'login-start', { consent: true })
+  const lateAfterCancel = runWechat(cancelled, 'login-poll')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  await runWechat(cancelled, 'login-cancel')
+  await lateAfterCancel
+  assert.deepEqual(cancelled.savedSecrets, [], 'a cancelled login must not store a token')
+  assert.equal(loginViewOfHost(cancelled).state, 'logged-out')
+
+  // Refresh replaces the code while the answer is in flight: that answer belongs to the old code.
+  const refreshedMock = await startIlinkMock({ statuses: ['confirmed'], statusDelayMs: 80, qrcodes: ['qr-1', 'qr-2'] })
+  t.after(() => refreshedMock.close())
+  const refreshed = commandHost(refreshedMock.base)
+  t.after(() => closeCommandHost(refreshed))
+  await runWechat(refreshed, 'login-start', { consent: true })
+  const lateAfterRefresh = runWechat(refreshed, 'login-poll')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  await runWechat(refreshed, 'login-refresh')
+  await lateAfterRefresh
+  assert.deepEqual(refreshed.savedSecrets, [], 'the old code\'s answer must not log in')
+  const view = loginViewOfHost(refreshed)
+  assert.equal(view.state, 'qr')
+  assert.match(view.qr, /^data:image\/png;base64,/)
+})
+
+test('CB-12 a stuck iLink call ends on its deadline and maps like any other failure', async (t) => {
+  // A status call that never answers stands in for a stuck socket; the deadline must end it.
+  const hung = await startIlinkMock({ statuses: ['wait'], statusHang: true })
+  t.after(() => hung.close())
+  const { ctx, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: hung.base, ilinkTimeouts: { qr: 120, poll: 120, send: 120 } } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(ctx)
+  await call(ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
+  assert.equal((await rowOf(ctx)).login.state, 'qr')
+  const startedAt = Date.now()
+  await call(ctx, 'connector-command', { id: 'wechat', action: 'login-poll' })
+  const row = await rowOf(ctx)
+  // The login phase maps a failed poll to a retryable protocol error, not a dead row.
+  assert.equal(row.login.state, 'protocol-error')
+  assert.match(row.login.error, /timeout/i)
+  assert.deepEqual([row.state, row.error], ['ready', undefined])
+  assert.ok(Date.now() - startedAt < 5_000, `the command must not hang (${Date.now() - startedAt}ms)`)
+})
+
+test('CB-12b a stuck send is reported as unreachable and audits the failure', async (t) => {
+  const hung = await startIlinkMock({ statuses: ['confirmed'], sendHang: true })
+  t.after(() => hung.close())
+  const { ctx, home, rt } = setup({ config: { wechat: { listenPort: 0, ilinkBase: hung.base, ilinkTimeouts: { qr: 400, send: 80 } } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const audited = []
+  rt.diagnostics.record = entry => audited.push(entry)
+  await connectClawbot(ctx)
+  await loginClawbot(ctx)
+  await assert.rejects(notifyToolOf(ctx).execute({ text: 'hello' }, { agent: { id: 'm1' } }), /Could not reach WeChat/)
+  assert.match(audited.filter(entry => entry.source === 'wechat-notify').at(-1).text, /result error$/)
+})
+
+// ---- ClawBot inbound: a WeChat message becomes a Bot turn and the answer goes back ----
+const ilinkTurn = (emitSession, agent, turn, text) => {
+  const message = agent.calls[turn - 1]
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+  emitSession(agent.session.id, 'turn/start', { turn })
+  emitSession(agent.session.id, 'assistant/message', { message: { content: [{ type: 'text', text }] } })
+  emitSession(agent.session.id, 'turn/end', { turn, reason: { kind: 'completed' } })
+}
+
+test('CB-13 a WeChat message reaches the Bot and its answer goes back with the context token', async (t) => {
+  const mock = await startIlinkMock({
+    statuses: ['confirmed'],
+    updates: (() => {
+      let served = false
+      return () => {
+        if (served) return { ret: 0, get_updates_buf: 'cursor-2' }
+        served = true
+        return {
+          ret: 0,
+          get_updates_buf: 'cursor-1',
+          msgs: [{
+            message_id: 41,
+            message_type: 1,
+            message_state: 0,
+            from_user_id: 'ilink_user_123456',
+            context_token: 'ctx-1',
+            item_list: [{ type: 1, text_item: { text: 'hello bot' } }],
+          }],
+        }
+      }
+    })(),
+  })
+  t.after(() => mock.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true, config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(ctx)
+  await loginClawbot(ctx)
+  // The bot told WeChat it is online when the token mounted.
+  await until(() => (mock.calls.some(entry => entry.url.startsWith('/ilink/bot/msg/notifystart')) ? true : undefined), 'the online ping')
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the inbound delivery')
+  const delivered = agent.calls[0]
+  assert.equal(delivered.source.sender.id, 'ilink_user_123456')
+  assert.match(delivered.content[0].text, /hello bot$/)
+  // The long poll keeps running while the turn is still open: a stopped poll would drop the
+  // session, so the message queue must never be awaited by the loop itself.
+  const polls = () => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/getupdates')).length
+  await until(() => (polls() >= 2 ? true : undefined), 'the long poll to keep running during the turn')
+  ilinkTurn(emitSession, agent, 1, 'answer from the Bot')
+  const sent = await until(() => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/sendmessage')).at(-1), 'the answer in WeChat')
+  assert.equal(sent.json.msg.from_user_id, '')
+  assert.equal(sent.json.msg.to_user_id, 'ilink_user_123456')
+  assert.equal(sent.json.msg.context_token, 'ctx-1')
+  assert.deepEqual([sent.json.msg.message_type, sent.json.msg.message_state], [2, 2])
+  assert.deepEqual(sent.json.msg.item_list, [{ type: 1, text_item: { text: 'answer from the Bot' } }])
+  // Going away tells WeChat the bot is offline.
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  await until(() => (mock.calls.some(entry => entry.url.startsWith('/ilink/bot/msg/notifystop')) ? true : undefined), 'the offline ping')
+})
+
+test('CB-14 only a new text message from the scanned account is delivered, and a replayed id is not', async (t) => {
+  const messages = [
+    { message_id: 1, message_type: 1, message_state: 0, from_user_id: 'someone-else', context_token: 'ctx-x', item_list: [{ type: 1, text_item: { text: 'not the owner' } }] },
+    { message_id: 2, message_type: 2, message_state: 0, from_user_id: 'ilink_user_123456', context_token: 'ctx-y', item_list: [{ type: 1, text_item: { text: 'a bot echo' } }] },
+    { message_id: 3, message_type: 1, message_state: 2, from_user_id: 'ilink_user_123456', context_token: 'ctx-z', item_list: [{ type: 1, text_item: { text: 'an older message' } }] },
+    { message_id: 4, message_type: 1, message_state: 0, from_user_id: 'ilink_user_123456', context_token: 'ctx-1', item_list: [{ type: 1, text_item: { text: 'first real message' } }] },
+    { message_id: 4, message_type: 1, message_state: 0, from_user_id: 'ilink_user_123456', context_token: 'ctx-1', item_list: [{ type: 1, text_item: { text: 'first real message' } }] },
+    { message_id: 5, message_type: 1, message_state: 0, from_user_id: 'ilink_user_123456', context_token: 'ctx-2', item_list: [{ type: 2, image_item: { media: { full_url: 'https://cdn.test/x.png' } } }] },
+  ]
+  const mock = await startIlinkMock({
+    statuses: ['confirmed'],
+    updates: (() => {
+      let served = false
+      return () => {
+        if (served) return { ret: 0, get_updates_buf: 'cursor-2' }
+        served = true
+        return { ret: 0, get_updates_buf: 'cursor-1', msgs: messages }
+      }
+    })(),
+  })
+  t.after(() => mock.close())
+  const { ctx, rt, home, sessionAgents, emitSession } = setup({ session: true, config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const audited = []
+  rt.diagnostics.record = entry => audited.push(entry)
+  await connectClawbot(ctx)
+  await loginClawbot(ctx)
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the one delivered message')
+  assert.match(agent.calls[0].content[0].text, /first real message$/)
+  // Nothing else may start a turn: wrong sender, a bot echo, an older message, a replay and a
+  // non-text message are all ignored.
+  await new Promise(resolve => setTimeout(resolve, 150))
+  const total = () => [...sessionAgents.values()].reduce((count, entry) => count + entry.calls.length, 0)
+  assert.equal(total(), 1)
+  assert.ok(audited.some(entry => entry.source === 'wechat-inbound' && /without text/.test(entry.text)))
+  ilinkTurn(emitSession, agent, 1, 'one answer')
+  await until(() => (mock.calls.some(entry => entry.url.startsWith('/ilink/bot/sendmessage')) ? true : undefined), 'the one answer')
+  assert.equal(mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/sendmessage')).length, 1)
+})
+
+test('CB-15 a restart keeps the login and resumes the long poll without clearing the account', async (t) => {
+  const mock = await startIlinkMock({ statuses: ['confirmed'] })
+  t.after(() => mock.close())
+  const first = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  await connectClawbot(first.ctx)
+  const signedIn = await loginClawbot(first.ctx)
+  assert.equal(signedIn.login.state, 'logged-in')
+  assert.equal(first.rt.state.channels?.wechat?.ilink?.ilinkUserId, 'ilink_user_123456')
+  await first.ctx.dispose()
+  const polls = () => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/getupdates')).length
+  const before = polls()
+  const second = setup({ home: first.home, config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await second.ctx.dispose(); rmSync(second.home, { recursive: true, force: true, maxRetries: 5 }) })
+  // The token lives in the credential store, so the card comes back signed in on its own.
+  const restored = await until(async () => {
+    const row = await rowOf(second.ctx)
+    return row?.state === 'ready' ? row : undefined
+  }, 'the restored channel')
+  assert.equal(restored.login.state, 'logged-in')
+  // The scanned account survived too, and the long poll resumes on mount.
+  assert.equal(second.rt.state.channels?.wechat?.ilink?.ilinkUserId, 'ilink_user_123456')
+  await until(() => (polls() > before ? true : undefined), 'the restored long poll')
+})
+
+test('CB-17 a remount during the token write still persists the account and finishes logged-in', async (t) => {
+  const mock = await startIlinkMock({ statuses: ['confirmed'] })
+  t.after(() => mock.close())
+  const host = commandHost(mock.base)
+  t.after(() => closeCommandHost(host))
+  // Writing the token makes the framework reconcile and mount again; emulate that remount by
+  // bumping the login epoch inside the credential write, before the poll resumes.
+  host.secretEndpoint = async (endpoint, payload) => {
+    host.savedSecrets.push({ endpoint, payload, accountAtWrite: host.state.channels.wechat?.ilink?.ilinkUserId })
+    const channel = host.state.channels.wechat ?? (host.state.channels.wechat = {})
+    channel.ilink = { ...(channel.ilink ?? {}), epoch: (channel.ilink?.epoch ?? 0) + 1 }
+  }
+  await runWechat(host, 'login-start', { consent: true })
+  await runWechat(host, 'login-poll')
+  // The identity is on disk before the credential, so the remount already knows its account.
+  assert.equal(host.savedSecrets[0].accountAtWrite, 'ilink_user_123456')
+  assert.equal(host.state.channels.wechat.ilink.ilinkUserId, 'ilink_user_123456')
+  assert.equal(host.state.channels.wechat.ilink.ilinkBotId, 'bot-1')
+  // The remount owns a new login object; the stored token is what reads as logged-in.
+  assert.equal(loginViewOfHost(host, { WECHAT_ILINK_TOKEN: 'ilink-token' }).state, 'logged-in')
 })
 
 // ---- P2: inbound listener and its gate ----

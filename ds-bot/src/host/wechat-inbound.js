@@ -72,6 +72,9 @@ class InboundHub {
     this.rt = rt
     // instance id -> the channel's route: its secret, its budget and its seen messages.
     this.routes = new Map()
+    // A ClawBot channel has no listener and no signature: its route exists only to hand the
+    // long poll's messages to the same Session queue.
+    this.localRoutes = new Map()
     this.server = undefined
     this.port = undefined
     this.starting = undefined
@@ -215,6 +218,50 @@ class InboundHub {
     // The last channel leaves: close soon, not instantly, so a new channel mounted in the
     // same moment can reuse the open listener instead of racing a half-closed port.
     this.scheduleIdleStop()
+  }
+
+  // A ClawBot message arrives on the long poll, not through the listener. It enters the same
+  // Session queue as a webhook message, with the binding the mount already holds: no port, no
+  // token and no signature are involved.
+  localRoute({ instance, botId, settings, title }) {
+    const id = trim(instance)
+    if (id === '') throw new Error('An inbound channel needs an instance id')
+    let route = this.localRoutes.get(id)
+    if (route === undefined) {
+      route = {
+        id,
+        botId: trim(botId),
+        title: trim(title) === '' ? undefined : trim(title),
+        settings: settings !== null && typeof settings === 'object' ? settings : {},
+        running: false,
+        pending: new Set(),
+        rebound: false,
+        secret: '',
+        token: undefined,
+        nonces: new Map(),
+        bucket: { tokens: BURST, at: Date.now() },
+        queue: [],
+        error: undefined,
+      }
+      this.localRoutes.set(id, route)
+    } else {
+      if (trim(botId) !== '') route.botId = trim(botId)
+      if (settings !== null && typeof settings === 'object') route.settings = settings
+      const name = trim(title)
+      route.title = name === '' ? route.title : name
+    }
+    return route
+  }
+
+  // The message itself: same one-at-a-time Session logic the webhook path uses, without HTTP.
+  async deliverLocal({ instance, botId, settings, title, sender, text }) {
+    const route = this.localRoute({ instance, botId, settings, title })
+    return await this.runOne(route, { sender: String(sender ?? ''), text: String(text ?? '') })
+  }
+
+  // The mount that owns the route went away: the next mount starts from a fresh binding.
+  forgetLocal(instance) {
+    this.localRoutes.delete(trim(instance))
   }
 
   scheduleIdleStop() {

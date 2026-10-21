@@ -10,14 +10,16 @@ const serve = async (handler) => {
     request.on('data', chunk => chunks.push(chunk))
     request.on('end', () => {
       const body = Buffer.concat(chunks).toString('utf8')
-      const { status = 200, json = {} } = handler({ method: request.method, url: request.url, headers: request.headers, body })
+      const { status = 200, json = {}, hang = false } = handler({ method: request.method, url: request.url, headers: request.headers, body })
+      // A hung request is how a stuck service looks: the client must end it on its own.
+      if (hang) return
       response.writeHead(status, { 'content-type': 'application/json' })
       response.end(JSON.stringify(json))
     })
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const { port } = server.address()
-  return { base: `http://127.0.0.1:${port}`, close: () => new Promise(resolve => server.close(resolve)) }
+  return { base: `http://127.0.0.1:${port}`, close: () => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve) }) }
 }
 
 test('iLink constants: version packing, QR states, images and masked accounts', () => {
@@ -104,4 +106,27 @@ test('a -14 answer pauses the client for the configured time', async (t) => {
   const result = client.noteError(-14)
   assert.equal(result.paused, true)
   assert.equal(result.pauseMs, 50)
+})
+
+test('every call has a deadline: a stuck answer ends with a timeout', async (t) => {
+  const mock = await serve(() => ({ hang: true }))
+  t.after(() => mock.close())
+  const client = createIlinkClient({ base: mock.base, timeouts: { qr: 40, poll: 40, send: 40, updates: 40 } })
+  const calls = [
+    () => client.getQrCode(),
+    () => client.pollQrStatus('qr-1'),
+    () => client.sendMessage({ token: 'tok', toUserId: 'user-1', text: 'hello' }),
+    () => client.getUpdates({ token: 'tok' }),
+  ]
+  for (const call of calls) await assert.rejects(call(), error => error.name === 'TimeoutError')
+})
+
+test('the long poll also ends when the mount cancels it, not only on its deadline', async (t) => {
+  const mock = await serve(() => ({ hang: true }))
+  t.after(() => mock.close())
+  const client = createIlinkClient({ base: mock.base })
+  const controller = new AbortController()
+  const pending = client.getUpdates({ token: 'tok', signal: controller.signal })
+  controller.abort()
+  await assert.rejects(pending, error => error.name === 'AbortError')
 })
