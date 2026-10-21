@@ -15235,8 +15235,29 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
 // src/client/wechat-login.js
 var LOGIN_STATES = ["logged-out", "qr", "verified-needed", "blocked", "expired", "cancelled", "confirm-failed", "protocol-error", "logged-in", "login-expired"];
 var KNOWN = new Set(LOGIN_STATES);
-var POLL_INTERVAL_MS = 2e3;
+var POLL_GAP_MS = 500;
 var POLL_LIMIT_MS = 5 * 60 * 1e3;
+var pollLoginSerially = async ({
+  poll,
+  cancelled = () => false,
+  now = () => Date.now(),
+  sleep: sleep2 = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  startedAt = now(),
+  gapMs = POLL_GAP_MS,
+  limitMs = POLL_LIMIT_MS
+} = {}) => {
+  let calls = 0;
+  while (!cancelled() && now() - startedAt < limitMs) {
+    calls += 1;
+    try {
+      await poll();
+    } catch {
+    }
+    if (cancelled()) break;
+    await sleep2(gapMs);
+  }
+  return calls;
+};
 var loginOf = (row) => row?.login !== null && typeof row?.login === "object" && typeof row.login.state === "string" ? row.login : null;
 var loginStateOf = (login) => {
   if (login === null) return null;
@@ -15589,16 +15610,15 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
   pollingRef.current = polling;
   (0, import_react38.useEffect)(() => {
     if (!polling) return void 0;
-    const startedAt = Date.now();
-    const timer = setInterval(() => {
-      if (Date.now() - startedAt >= POLL_LIMIT_MS) {
-        clearInterval(timer);
-        return;
-      }
-      actions.connectorCommand(row.id, "login-poll").catch(() => {
-      });
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    void pollLoginSerially({
+      poll: () => actions.connectorCommand(row.id, "login-poll"),
+      cancelled: () => cancelled,
+      limitMs: POLL_LIMIT_MS
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [polling, row.id]);
   (0, import_react38.useEffect)(() => () => {
     if (pollingRef.current) actions.connectorCommand(row.id, "login-cancel").catch(() => {
