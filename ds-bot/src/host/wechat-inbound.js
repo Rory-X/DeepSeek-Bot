@@ -25,6 +25,9 @@ const DEFAULT_PORT = 8_799
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 
 const trim = value => (typeof value === 'string' ? value.trim() : '')
+const textOfContent = content => (Array.isArray(content)
+  ? content.filter(block => block !== null && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string').map(block => block.text).join('')
+  : '')
 const senderHashOf = (sender) => createHash('sha256').update(String(sender)).digest('hex').slice(0, 16)
 const safeEqual = (left, right) => {
   const a = Buffer.from(String(left))
@@ -46,6 +49,11 @@ const errorText = {
   'too-large': 'The request body is too large.',
   'not-found': 'Not found.',
 }
+
+const botUnavailableText = 'The Bot is not available right now; try again later.'
+const errorTextTimeout = 'The Bot did not answer in time.'
+const errorTextRebound = 'This channel was rebound to another Bot; send the message again.'
+const needsUserText = 'Open DS Bot to handle this request.'
 
 const hubs = new WeakMap()
 
@@ -70,7 +78,23 @@ class InboundHub {
     this.error = undefined
     this.sockets = new Set()
     this.saveTimers = new Map()
+    this.waits = new Map()
+    this.idleTimer = undefined
     this.stopped = false
+    const ctx = rt.ctx
+    // While the channels are mounted a listener may idle for a moment between a remove and
+    // an add; when the plugin itself goes away the port must close with it.
+    if (typeof ctx?.effect === 'function') {
+      ctx.effect(() => () => { void this.dispose() }, 'ds-bot: WeChat inbound listener')
+    }
+    if (typeof ctx?.on === 'function') {
+      ctx.on('approval/request', (request, next) => {
+        const sessionId = request?.agent?.session?.id ?? request?.agent?.id
+        const waiting = sessionId === undefined ? undefined : this.waits.get(sessionId)
+        if (waiting !== undefined) waiting.finish({ code: 'needs-user', message: needsUserText })
+        return typeof next === 'function' ? next() : undefined
+      })
+    }
   }
 
   // The profile may carry one set of listener numbers for the whole module:
@@ -101,14 +125,24 @@ class InboundHub {
     }
   }
 
-  attach({ instance, botId, settings, secret, secretName }) {
+  async attach({ instance, botId, settings, secret, secretName, title }) {
     const id = trim(instance)
     if (id === '') throw new Error('An inbound channel needs an instance id')
     this.stopped = false
+    // A channel that arrives while the listener is about to close keeps it open: a remove
+    // followed at once by an add must not hit a closing port.
+    if (this.idleTimer !== undefined) {
+      clearTimeout(this.idleTimer)
+      this.idleTimer = undefined
+    }
     const route = {
       id,
       botId: trim(botId),
+      title: trim(title) === '' ? undefined : trim(title),
       settings: settings !== null && typeof settings === 'object' ? settings : {},
+      running: false,
+      pending: new Set(),
+      rebound: false,
       secret: String(secret),
       token: undefined,
       nonces: new Map(),
@@ -117,11 +151,14 @@ class InboundHub {
       error: undefined,
     }
     this.routes.set(id, route)
-    void this.ensureToken(route, secretName)
-    this.ensureStarted().catch((error) => {
-      route.error = error
-      this.error = error
-    })
+    await this.ensureToken(route, secretName)
+    try {
+      await this.ensureStarted()
+    } catch (error) {
+      // The mount contract lets a module fail here: the host puts the message on the row.
+      this.routes.delete(id)
+      throw error
+    }
     return route
   }
 
@@ -132,7 +169,19 @@ class InboundHub {
     this.routes.delete(id)
     this.flush(id)
     if (this.routes.size > 0) return
-    await this.stop()
+    // The last channel leaves: close soon, not instantly, so a new channel mounted in the
+    // same moment can reuse the open listener instead of racing a half-closed port.
+    this.scheduleIdleStop()
+  }
+
+  scheduleIdleStop() {
+    if (this.idleTimer !== undefined) return
+    const timer = setTimeout(() => {
+      this.idleTimer = undefined
+      if (this.routes.size === 0) void this.stop()
+    }, 3_000)
+    timer.unref?.()
+    this.idleTimer = timer
   }
 
   // One token per instance, stored under the same per-instance credential name the framework
@@ -211,6 +260,10 @@ class InboundHub {
   }
 
   async stop() {
+    if (this.idleTimer !== undefined) {
+      clearTimeout(this.idleTimer)
+      this.idleTimer = undefined
+    }
     const server = this.server
     this.server = undefined
     this.port = undefined
@@ -225,6 +278,12 @@ class InboundHub {
   ready(instance) {
     const route = this.routes.get(trim(instance))
     return route !== undefined && route.error === undefined && this.server?.listening === true
+  }
+
+  // A channel that has everything but its HMAC secret is still an outbound channel; the
+  // card says the inbound half waits for the secret instead of drawing a dead address.
+  needsSecret() {
+    return { status: { inbound: 'needs-secret' } }
   }
 
   viewOf(instance) {
@@ -248,6 +307,205 @@ class InboundHub {
     if (this.error !== undefined) return { status: { inbound: 'error', inboundError: this.error.message } }
     if (!this.ready(id)) return { status: { inbound: this.starting === undefined ? 'off' : 'starting' } }
     return { status: { inbound: 'listening' } }
+  }
+
+  waitOf(value) {
+    const ms = Number(value)
+    if (!Number.isFinite(ms) || ms <= 0) return 0
+    return Math.min(20_000, Math.floor(ms))
+  }
+
+  turnTimeoutMs() {
+    const value = this.config().turnTimeoutMs
+    return Number.isInteger(value) && value >= 0 ? value : 120_000
+  }
+
+  callbackDelays() {
+    const value = this.config().callbackRetryDelays
+    return Array.isArray(value) && value.every(item => Number.isInteger(item) && item >= 0) ? value : [1_000, 5_000, 25_000]
+  }
+
+  // One message at a time per channel: the next one waits for this turn to end, its reply to
+  // arrive, its approval to show, or the turn timeout to pass.
+  enqueue(route, message) {
+    route.queue.push(message)
+    if (route.running) return
+    route.running = true
+    void this.drain(route).finally(() => { route.running = false })
+  }
+
+  async drain(route) {
+    while (route.queue.length > 0) {
+      const message = route.queue.shift()
+      if (route.rebound) {
+        this.settle(message, { code: 'channel-rebound', message: errorTextRebound })
+        continue
+      }
+      let result
+      try {
+        result = await this.runOne(route, message)
+      } catch (error) {
+        result = { code: 'bot-unavailable', message: botUnavailableText, error: error?.message ?? String(error) }
+      }
+      this.settle(message, result)
+    }
+  }
+
+  async runOne(route, message) {
+    if (typeof this.rt.channelSessionFor !== 'function' || typeof this.rt.deliver !== 'function') {
+      return { code: 'bot-unavailable', message: botUnavailableText }
+    }
+    let sessionId
+    try {
+      sessionId = await this.rt.channelSessionFor({
+        instance: route.id,
+        botId: route.botId,
+        conversationId: `dm:${message.sender}`,
+        ...(route.title === undefined ? {} : { title: route.title }),
+        settings: route.settings,
+      })
+    } catch {
+      return { code: 'bot-unavailable', message: botUnavailableText }
+    }
+    let exchangeId
+    try {
+      exchangeId = await this.rt.deliver({ toId: route.botId, sessionId, text: message.text, role: 'request', untrusted: true, sender: { name: 'WeChat', id: message.sender } })
+    } catch {
+      return { code: 'bot-unavailable', message: botUnavailableText }
+    }
+    return await this.awaitTurn(route, sessionId, exchangeId)
+  }
+
+  // The reply is the text of the turn that answers this exchange: `deliver` returns the
+  // exchange id, the user message carries it, and the turn id that follows is the one whose
+  // end closes this message. A later turn in the same Session is never mistaken for it.
+  awaitTurn(route, sessionId, exchangeId) {
+    const timeout = this.turnTimeoutMs()
+    return new Promise((resolve) => {
+      let awaiting = false
+      let turnId
+      let settled = false
+      const texts = []
+      let entry
+      const finish = (value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (entry !== undefined) route.pending.delete(entry)
+        this.waits.delete(sessionId)
+        unsubscribe?.()
+        resolve(value)
+      }
+      const timer = setTimeout(() => finish({ code: 'timeout', message: errorTextTimeout }), timeout)
+      timer.unref?.()
+      const listener = (session, event) => {
+        if (session?.id !== sessionId) return
+        if (event.type === 'user/message') {
+          if (event.data?.source?.exchangeId === exchangeId) awaiting = true
+          return
+        }
+        if (!awaiting) return
+        if (event.type === 'turn/start') { turnId = event.data?.turn; return }
+        if (event.type === 'assistant/message' && turnId !== undefined) {
+          const text = textOfContent(event.data?.message?.content)
+          if (text !== '') texts.push(text)
+          return
+        }
+        if (event.type !== 'turn/end') return
+        if (turnId !== undefined && event.data?.turn !== turnId) return
+        const reason = event.data?.reason
+        if (reason?.kind === 'error') return finish({ code: 'bot-unavailable', message: botUnavailableText, error: reason.error?.message })
+        if (reason?.kind === 'aborted') return finish({ code: 'timeout', message: errorTextTimeout })
+        if (reason?.kind === 'blocked') return finish({ code: 'needs-user', message: needsUserText })
+        finish({ text: texts.join('\n\n').trim() })
+      }
+      const unsubscribe = this.rt.ctx.on('session/event', listener)
+      entry = { fail: finish }
+      route.pending.add(entry)
+      this.waits.set(sessionId, { route, finish })
+    })
+  }
+
+  settle(message, result) {
+    if (message.timer !== undefined) {
+      clearTimeout(message.timer)
+      message.timer = undefined
+    }
+    if (message.response !== undefined) {
+      // A synchronous caller hears the turn's own answer, a fixed failure, or a 504 when its
+      // wait runs out; an approval never becomes its own code here.
+      if (result.code === 'needs-user') return
+      this.answerSync(message, result)
+      return
+    }
+    if (message.callbackUrl === undefined) return
+    const payload = result.text === undefined
+      ? { ok: false, msgId: message.msgId, instance: message.instance ?? '', code: result.code ?? 'bot-unavailable', message: result.message ?? botUnavailableText }
+      : { ok: true, msgId: message.msgId, reply: result.text, completedAt: Date.now() }
+    void this.sendCallback(message.callbackUrl, payload)
+  }
+
+  answerTimeout(message) {
+    if (message.response === undefined) return
+    const response = message.response
+    message.response = undefined
+    this.reply(response, 504, { ok: false, code: 'timeout', message: errorTextTimeout })
+  }
+
+  answerSync(message, result) {
+    const response = message.response
+    if (response === undefined) return
+    message.response = undefined
+    if (result.text !== undefined) return this.reply(response, 200, { ok: true, msgId: message.msgId, reply: result.text })
+    if (result.code === 'channel-rebound') return this.reply(response, 503, { ok: false, code: 'channel-rebound', message: errorTextRebound })
+    if (result.code === 'timeout') return this.reply(response, 504, { ok: false, code: 'timeout', message: errorTextTimeout })
+    this.reply(response, 502, { ok: false, code: 'bot-unavailable', message: botUnavailableText })
+  }
+
+  // The gateway gets the same signed contract back, on the address it named. Only a network
+  // error, a 5xx, a 408 or a 429 is retried; another 4xx is a configuration error.
+  async sendCallback(url, payload) {
+    const body = JSON.stringify(payload)
+    const timestamp = String(Math.floor(Date.now() / 1000))
+    const nonce = randomBytes(8).toString('hex')
+    const headers = {
+      'content-type': 'application/json',
+      'x-wechat-timestamp': timestamp,
+      'x-wechat-nonce': nonce,
+      'x-wechat-signature': signatureOf(this.callbackSecret(url), timestamp, nonce, body),
+      'x-wechat-callback': '1',
+    }
+    for (let attempt = 0; ; attempt += 1) {
+      let status
+      try {
+        const response = await fetch(url, { method: 'POST', headers, body, redirect: 'manual', signal: AbortSignal.timeout(10_000) })
+        status = response.status
+      } catch {
+        status = undefined
+      }
+      const retry = status === undefined || status >= 500 || status === 408 || status === 429
+      const delays = this.callbackDelays()
+      if (!retry || attempt >= delays.length) return
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+    }
+  }
+
+  callbackSecret() {
+    // The callback is signed with the channel's own secret; the caller's URL never carries
+    // it, and the module only ever uses the value the framework resolved for this instance.
+    const route = this.callbackRoute
+    return route?.secret ?? ''
+  }
+
+  // Rebind or close: every waiting message is answered at once with the rebound code, and
+  // the queue is emptied so the new Bot's binding starts clean.
+  rebound(instance, reason = 'rebind') {
+    const route = this.routes.get(trim(instance))
+    if (route === undefined) return
+    route.rebound = true
+    for (const entry of route.pending) entry.fail({ code: 'channel-rebound', message: errorTextRebound })
+    for (const message of route.queue.splice(0)) this.settle(message, { code: 'channel-rebound', message: errorTextRebound })
+    if (typeof this.rt.rebindChannel === 'function') void this.rt.rebindChannel(route.id, { reason }).catch(() => {})
   }
 
   reply(response, status, payload) {
@@ -333,9 +591,19 @@ class InboundHub {
       return this.reply(response, 200, { ok: true, duplicate: true, msgId })
     }
 
+    const wait = this.waitOf(payload.wait)
     this.remember(route, hash, msgId)
-    route.queue.push({ msgId, sender: hash, text, callbackUrl, wait: payload.wait, at: Date.now() })
+    const message = { msgId, sender: hash, text, callbackUrl, wait, at: Date.now() }
+    if (wait > 0) {
+      // A synchronous caller keeps the response open; the queue still owns the message.
+      message.response = response
+      message.timer = setTimeout(() => this.answerTimeout(message), wait)
+      message.timer.unref?.()
+      this.enqueue(route, message)
+      return
+    }
     this.reply(response, 202, { ok: true, accepted: true, msgId, instance: route.id })
+    this.enqueue(route, message)
   }
 
   // The body is read with a hard cap, including a chunked request: past the limit the

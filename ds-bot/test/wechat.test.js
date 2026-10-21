@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:net'
 import { test } from 'node:test'
 import { apply } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
@@ -72,6 +73,15 @@ const rowsOf = async (ctx) => (await call(ctx, 'state', {})).value.connectors.fi
 const rowOf = async (ctx, id = 'wechat') => (await rowsOf(ctx)).find(row => row.id === id)
 const card = async (ctx) => (await call(ctx, 'state', {})).value.questions.m1
 // The inbound address the card draws once the shared listener serves this channel.
+// A port the test may expect to be reused, taken and released before the host starts.
+const freePort = () => new Promise((resolve, reject) => {
+  const server = createServer()
+  server.once('error', reject)
+  server.listen(0, '127.0.0.1', () => {
+    const { port } = server.address()
+    server.close(() => resolve(port))
+  })
+})
 const inboundUrl = async (ctx, id = 'wechat') => {
   const inbound = await until(async () => (await rowOf(ctx, id))?.inbound, `the inbound address of ${id}`)
   return inbound.url
@@ -460,6 +470,75 @@ test('P2-01 the inbound listener binds 127.0.0.1 only', async (t) => {
   assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/wechat\/wechat\/inbound$/)
   const accepted = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hello' })
   assert.deepEqual([accepted.status, accepted.json.accepted], [202, true])
+})
+
+test('P2-02 a taken port leaves only that channel error with the port and the fix', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  // The port is busy before the channel asks for it.
+  const blocker = createServer()
+  await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen(0, '127.0.0.1', resolve) })
+  const port = blocker.address().port
+  t.after(() => new Promise(resolve => blocker.close(resolve)))
+  const { ctx, home } = setup({ config: { wechat: { listenPort: port } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const full = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: full })).ok, true)
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the outbound channel')
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, webhookSecret: 'test-secret' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const row = await until(async () => ((await rowOf(ctx))?.state === 'error' ? await rowOf(ctx) : undefined), 'the port error row')
+  assert.match(row.error, new RegExp(`port ${port}`))
+  assert.match(row.error, /wechat\.listenPort/)
+  // The plugin itself is healthy: the other connectors keep their own state.
+  const state = (await call(ctx, 'state', {})).value
+  assert.equal(state.connectors.find(item => item.id === 'wechat').state, 'error')
+  assert.equal(state.connectors.find(item => item.id === 'vercel').state, 'off')
+})
+
+test('P2-02a inbound waits for the webhook secret: a URL alone opens no port', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const port = await freePort()
+  const { ctx, home } = setup({ config: { wechat: { listenPort: port } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const full = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: full })).ok, true)
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'ready without a secret')
+  // The outbound half works, the inbound half waits and the card says so.
+  assert.equal((await rowOf(ctx)).inbound, undefined)
+  assert.equal((await rowOf(ctx)).status?.inbound, 'needs-secret')
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/wechat/wechat/inbound`, { method: 'POST' }))
+  // Saving the secret attaches the same channel on the configured port.
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, webhookSecret: 'test-secret' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const inbound = await until(async () => (await rowOf(ctx))?.inbound, 'the inbound address')
+  assert.match(inbound.url, new RegExp(`:${port}/wechat/wechat/inbound$`))
+  const accepted = await postInbound({ url: inbound.url, secret: 'test-secret', msgId: 'm-1', sender: 'creator' })
+  assert.equal(accepted.status, 202)
+})
+
+test('P2-02b removing the last channel and adding one at once keeps the port', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const port = await freePort()
+  const { ctx, home } = setup({ config: { wechat: { listenPort: port } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  assert.match(await inboundUrl(ctx), new RegExp(`:${port}/wechat/wechat/inbound$`))
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  // No waiting: the next channel must reuse the listener, not race a closing port.
+  assert.equal((await call(ctx, 'connector-create-instance', { base: 'wechat' })).ok, true)
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat-2', values: { transport: 'webhook', botId: 'b2', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const connected = await call(ctx, 'connector-connect', { id: 'wechat-2', values: { WECHAT_WEBHOOK_SECRET: 'second-secret' } })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  const second = await inboundUrl(ctx, 'wechat-2')
+  assert.match(second, new RegExp(`:${port}/wechat/wechat-2/inbound$`))
+  const row = (await rowsOf(ctx)).find(item => item.id === 'wechat-2')
+  assert.deepEqual([row.state, row.error], ['ready', undefined])
+  const accepted = await postInbound({ url: second, secret: 'second-secret', msgId: 'm-2', sender: 'creator' })
+  assert.equal(accepted.status, 202)
 })
 
 test('P2-03 dispose closes the inbound listener', async (t) => {
