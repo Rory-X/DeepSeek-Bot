@@ -393,6 +393,10 @@ var ZH = {
   Off: "关闭",
   On: "开启",
   "Connector settings": "连接器设置",
+  Saved: "已保存",
+  "Not set": "未设置",
+  "Set secret": "设置密钥",
+  "Choose a Bot": "选择 Bot",
   "Base connection": "基础连接",
   "Read-only access covers all projects. Writing needs a project authorization.": "只读授权覆盖所有项目；需要写入时请添加项目授权。",
   "Project authorizations": "项目授权",
@@ -3446,6 +3450,11 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* A form with several credentials names each field above its masked box. */
 .bt-connector-field{display:flex;flex-direction:column;gap:4px}
 .bt-connector-field-name{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+/* A setting can also be a picker, a two-way switch or a secret the host only says it has. */
+.bt-connector-field-control{display:flex;align-items:center;gap:8px;min-width:0}
+.bt-connector-field-control .bt-q-field{flex:1 1 auto;min-width:0}
+.bt-connector-field-state{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+.bt-connector-field .bt-select{min-width:0}
 /* Several instances of one module: each is a card of its own, the panel names the fields the
    instance keeps, and one more instance is added from the bottom of the group. */
 .bt-connector-panel-inner{display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -14503,8 +14512,106 @@ function groupStatusText(base, count) {
   if (count === 0) return t("Connected · Read-only (all projects)");
   return count === 1 ? t("Connected · 1 project authorization") : t("Connected · {count} project authorizations", { count });
 }
-var declaredSettingsOf = (connector) => Array.isArray(connector.settings) ? connector.settings.filter((field) => field !== null && typeof field?.name === "string" && field.name !== "") : [];
+var declaredSettingsOf = (connector) => {
+  const list = Array.isArray(connector.fields) ? connector.fields : connector.settings;
+  return Array.isArray(list) ? list.filter((field) => field !== null && typeof field?.name === "string" && field.name !== "") : [];
+};
 var levelsOfConnector = (connector) => Array.isArray(connector.levels) ? connector.levels.filter((entry) => entry !== null) : [];
+var settingKindOf = (field) => field?.kind === "secret" || field?.kind === "bot" || field?.kind === "segmented" ? field.kind : "text";
+var settingOptionsOf = (field) => Array.isArray(field?.options) ? field.options.filter((option) => option !== null && typeof option === "object" && typeof option.value === "string" && option.value !== "") : [];
+var settingLabelOf = (field) => typeof field.label === "string" && field.label !== "" ? field.label : field.name;
+function SettingField({ field, value, bots = [], disabled = false, onChange, onEnter, secret = null }) {
+  const kind = settingKindOf(field);
+  const label = settingLabelOf(field);
+  if (kind === "secret") {
+    const editing = secret !== null && secret.editing === true;
+    return (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-field" },
+      (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, label),
+      editing ? (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-field-control" },
+        (0, import_react36.createElement)(
+          "div",
+          { className: "bt-q-field bt-secret-field" },
+          (0, import_react36.createElement)(MaskedInput, { value: secret.value ?? "", onChange: secret.onChange, onEnter, label })
+        ),
+        (0, import_react36.createElement)("button", { type: "button", className: "bt-connector-link bt-connector-link-btn", disabled, onClick: secret.onCancel }, t("Cancel"))
+      ) : (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-field-control" },
+        (0, import_react36.createElement)("span", { className: "bt-connector-field-state" }, field.saved === true ? t("Saved") : t("Not set")),
+        (0, import_react36.createElement)("button", {
+          type: "button",
+          className: "bt-connector-link bt-connector-link-btn",
+          disabled,
+          onClick: secret === null ? void 0 : secret.onReplace
+        }, field.saved === true ? t("Replace") : t("Set secret"))
+      )
+    );
+  }
+  if (kind === "bot") {
+    return (0, import_react36.createElement)(
+      "label",
+      { className: "bt-connector-field" },
+      (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, label),
+      (0, import_react36.createElement)(
+        "select",
+        {
+          className: "bt-select",
+          value: typeof value === "string" ? value : "",
+          disabled,
+          "aria-label": label,
+          onChange: (event) => onChange(event.target.value)
+        },
+        (0, import_react36.createElement)("option", { value: "" }, t("Choose a Bot")),
+        bots.map((bot) => (0, import_react36.createElement)("option", { key: bot.id, value: bot.id }, bot.name))
+      )
+    );
+  }
+  if (kind === "segmented") {
+    return (0, import_react36.createElement)(
+      "div",
+      { className: "bt-connector-field" },
+      (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, label),
+      (0, import_react36.createElement)(
+        "div",
+        { className: "bt-connector-levels", role: "radiogroup", "aria-label": label },
+        settingOptionsOf(field).map((option) => (0, import_react36.createElement)("button", {
+          key: option.value,
+          type: "button",
+          role: "radio",
+          "aria-checked": value === option.value,
+          className: "bt-connector-level",
+          "data-current": value === option.value || void 0,
+          disabled,
+          onClick: () => {
+            if (!disabled && value !== option.value) onChange(option.value);
+          }
+        }, (0, import_react36.createElement)("span", { className: "bt-connector-level-title" }, typeof option.label === "string" && option.label !== "" ? option.label : option.value)))
+      )
+    );
+  }
+  return (0, import_react36.createElement)(
+    "label",
+    { className: "bt-connector-field" },
+    (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, label),
+    (0, import_react36.createElement)("div", { className: "bt-q-field" }, (0, import_react36.createElement)("input", {
+      className: "bt-connector-input",
+      value: typeof value === "string" ? value : "",
+      placeholder: field.placeholder ?? label,
+      "aria-label": label,
+      autoComplete: "off",
+      spellCheck: false,
+      disabled,
+      onChange: (event) => onChange(event.target.value),
+      onKeyDown: (event) => {
+        if (event.key === "Enter") onEnter?.();
+      }
+    }))
+  );
+}
 function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = (0, import_react36.useState)(false);
   const [values, setValues] = (0, import_react36.useState)({});
@@ -14907,10 +15014,11 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     error ? (0, import_react36.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
   );
 }
-function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded = false, onToggle }) {
+function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded = false, onToggle, bots = [] }) {
   const [busy, setBusy] = (0, import_react36.useState)(false);
   const [error, setError] = (0, import_react36.useState)(null);
   const [settingDraft, setSettingDraft] = (0, import_react36.useState)(null);
+  const [secretDraft, setSecretDraft] = (0, import_react36.useState)({});
   const [removeAsk, setRemoveAsk] = (0, import_react36.useState)(false);
   const [levelDraft, setLevelDraft] = (0, import_react36.useState)(null);
   const [authorizeUrl, setAuthorizeUrl] = (0, import_react36.useState)(null);
@@ -14923,7 +15031,10 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
     if (settingDraft !== null && Object.hasOwn(settingDraft, field.name)) return settingDraft[field.name];
     return typeof field.value === "string" ? field.value : "";
   };
-  const settingsChanged = fields.some((field) => settingValue(field) !== (typeof field.value === "string" ? field.value : ""));
+  const settingsChanged = fields.some((field) => {
+    if (settingKindOf(field) === "secret") return Object.hasOwn(secretDraft, field.name) && String(secretDraft[field.name] ?? "").trim() !== "";
+    return settingValue(field) !== (typeof field.value === "string" ? field.value : "");
+  });
   const run = (task, after) => {
     setBusy(true);
     setError(null);
@@ -14933,8 +15044,19 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
   };
   const saveSettings = () => {
     if (busy || !settingsChanged) return;
-    const values = Object.fromEntries(fields.map((field) => [field.name, settingValue(field).trim()]));
-    void run(actions.connectorSetSettings(connector.id, values), () => setSettingDraft(null));
+    const values = {};
+    for (const field of fields) {
+      if (settingKindOf(field) === "secret") {
+        const replacement = String(secretDraft[field.name] ?? "").trim();
+        if (Object.hasOwn(secretDraft, field.name) && replacement !== "") values[field.name] = replacement;
+        continue;
+      }
+      values[field.name] = settingValue(field).trim();
+    }
+    void run(actions.connectorSetSettings(connector.id, values), () => {
+      setSettingDraft(null);
+      setSecretDraft({});
+    });
   };
   const on = connector.state !== "off";
   const levels = levelsOfConnector(connector);
@@ -14942,7 +15064,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
   const writesLocked = typeof readOnly === "string" && readOnly !== "";
   const levelNotes = connector.levelNotes !== null && typeof connector.levelNotes === "object" ? connector.levelNotes : {};
   const storedSetting = (field) => (typeof field.value === "string" ? field.value : "").trim();
-  const settingsEmpty = declared.some((field) => field.name !== "label" && storedSetting(field) === "");
+  const settingsEmpty = declared.some((field) => field.name !== "label" && settingKindOf(field) !== "secret" && storedSetting(field) === "");
   const levelBlocked = (id) => {
     const note = typeof levelNotes[id] === "string" && levelNotes[id] !== "" ? levelNotes[id] : null;
     if (note !== null) return note;
@@ -14990,24 +15112,32 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
     if (busy) return;
     void run(actions.connectorDeleteInstance(connector.id), () => setRemoveAsk(false));
   };
-  const fieldNode = (field) => (0, import_react36.createElement)(
-    "label",
-    { key: field.name, className: "bt-connector-field" },
-    (0, import_react36.createElement)("span", { className: "bt-connector-field-name" }, typeof field.label === "string" && field.label !== "" ? field.label : field.name),
-    (0, import_react36.createElement)("div", { className: "bt-q-field" }, (0, import_react36.createElement)("input", {
-      className: "bt-connector-input",
-      value: settingValue(field),
-      placeholder: field.placeholder ?? (typeof field.label === "string" && field.label !== "" ? field.label : field.name),
-      "aria-label": field.label ?? field.name,
-      autoComplete: "off",
-      spellCheck: false,
+  const fieldNode = (field) => {
+    const kind = settingKindOf(field);
+    return (0, import_react36.createElement)(SettingField, {
+      key: field.name,
+      field,
+      value: kind === "secret" ? "" : settingValue(field),
+      bots,
       disabled: busy,
-      onChange: (event) => setSettingDraft((previous) => ({ ...previous, [field.name]: event.target.value })),
-      onKeyDown: (event) => {
-        if (event.key === "Enter") saveSettings();
-      }
-    }))
-  );
+      onChange: (next) => {
+        if (kind === "secret") setSecretDraft((previous) => ({ ...previous, [field.name]: next }));
+        else setSettingDraft((previous) => ({ ...previous, [field.name]: next }));
+      },
+      onEnter: saveSettings,
+      secret: kind === "secret" ? {
+        editing: Object.hasOwn(secretDraft, field.name),
+        value: secretDraft[field.name] ?? "",
+        onReplace: () => setSecretDraft((previous) => ({ ...previous, [field.name]: "" })),
+        onCancel: () => setSecretDraft((previous) => {
+          const next = { ...previous };
+          delete next[field.name];
+          return next;
+        }),
+        onChange: (next) => setSecretDraft((previous) => ({ ...previous, [field.name]: next }))
+      } : null
+    });
+  };
   const levelBlock = levels.length > 0 ? (0, import_react36.createElement)(
     "div",
     { className: "bt-connector-setting" },
@@ -15238,7 +15368,7 @@ function AddProjectForm({ base, baseId, existingIds, actions, onCreated, onCance
     error !== null ? (0, import_react36.createElement)("div", { className: "bt-connector-error", role: "alert" }, error) : null
   );
 }
-function GroupCard({ rows, actions, readOnly = null }) {
+function GroupCard({ rows, actions, readOnly = null, bots = [] }) {
   const base = rows.find((row) => row.id === instanceOf(row)?.base) ?? rows[0];
   const projects = rows.filter((row) => row !== base);
   const instance = instanceOf(base);
@@ -15373,7 +15503,8 @@ function GroupCard({ rows, actions, readOnly = null }) {
             actions,
             readOnly,
             expanded: openProject === row.id,
-            onToggle: () => setOpenProject((current) => current === row.id ? null : row.id)
+            onToggle: () => setOpenProject((current) => current === row.id ? null : row.id),
+            bots
           }))),
           adding ? (0, import_react36.createElement)(AddProjectForm, {
             key: "add-project",
@@ -15421,6 +15552,7 @@ function connectorGroups(list) {
 function ConnectorsPage({ roster, actions }) {
   const list = roster?.connectors ?? [];
   const readOnly = typeof roster?.readOnly === "string" && roster.readOnly !== "" ? roster.readOnly : null;
+  const bots = Array.isArray(roster?.bots) ? roster.bots : [];
   const rows = [];
   for (const group of connectorGroups(list)) {
     if (group.base === null) {
@@ -15428,7 +15560,7 @@ function ConnectorsPage({ roster, actions }) {
       rows.push((0, import_react36.createElement)(ConnectorRow, { key: connector.id, connector, actions, readOnly }));
       continue;
     }
-    rows.push((0, import_react36.createElement)(GroupCard, { key: `${group.base}-group`, rows: group.rows, actions, readOnly }));
+    rows.push((0, import_react36.createElement)(GroupCard, { key: `${group.base}-group`, rows: group.rows, actions, readOnly, bots }));
   }
   return (0, import_react36.createElement)(
     "section",

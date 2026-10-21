@@ -643,6 +643,11 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* A form with several credentials names each field above its masked box. */
 .bt-connector-field{display:flex;flex-direction:column;gap:4px}
 .bt-connector-field-name{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+/* A setting can also be a picker, a two-way switch or a secret the host only says it has. */
+.bt-connector-field-control{display:flex;align-items:center;gap:8px;min-width:0}
+.bt-connector-field-control .bt-q-field{flex:1 1 auto;min-width:0}
+.bt-connector-field-state{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+.bt-connector-field .bt-select{min-width:0}
 /* Several instances of one module: each is a card of its own, the panel names the fields the
    instance keeps, and one more instance is added from the bottom of the group. */
 .bt-connector-panel-inner{display:flex;flex-direction:column;gap:12px;min-width:0}
