@@ -28,6 +28,7 @@ test('iLink constants: version packing, QR states, images and masked accounts', 
   )
   assert.equal(qrImageOf('https://example.com/qr.png'), 'https://example.com/qr.png')
   assert.equal(qrImageOf('data:image/png;base64,iVBORw0KGgo='), 'data:image/png;base64,iVBORw0KGgo=')
+  assert.equal(qrImageOf('data:image/svg+xml;base64,PHN2Zz4='), undefined)
   assert.equal(qrImageOf('plain-login-token'), undefined)
   assert.equal(maskAccount('ilink_user_123456'), 'ilin…56')
   assert.equal(maskAccount('abc'), 'a…')
@@ -54,6 +55,27 @@ test('the QR request carries the documented headers and the poll only the app he
   assert.equal(pollRequest.method, 'GET')
   assert.equal('authorizationtype' in pollRequest.headers, false)
   assert.equal('x-wechat-uin' in pollRequest.headers, false)
+})
+
+test('the bot API carries the cursor in the body and sends the documented message shape', async (t) => {
+  const seen = []
+  const mock = await serve((request) => {
+    seen.push(request)
+    return { json: { ret: 0 } }
+  })
+  t.after(() => mock.close())
+  const client = createIlinkClient({ base: mock.base })
+  await client.getUpdates({ token: 'tok', cursor: 'cursor-1' })
+  await client.sendMessage({ token: 'tok', fromUserId: 'bot-1', toUserId: 'user-1', clientId: 'c-1', contextToken: 'ctx-1', text: 'hello' })
+  const updateBody = JSON.parse(seen[0].body)
+  assert.equal(updateBody.get_updates_buf, 'cursor-1')
+  assert.equal(seen[0].url.includes('get_updates_buf'), false)
+  const message = JSON.parse(seen[1].body).msg
+  assert.deepEqual(
+    [message.from_user_id, message.to_user_id, message.client_id, message.message_type, message.message_state, message.context_token],
+    ['bot-1', 'user-1', 'c-1', 2, 2, 'ctx-1'],
+  )
+  assert.deepEqual(message.item_list, [{ type: 1, text_item: { text: 'hello' } }])
 })
 
 test('a -14 answer pauses the client for the configured time', async (t) => {

@@ -29,7 +29,7 @@ export const qrStateOf = (status) => {
 export const qrImageOf = (value) => {
   const text = typeof value === 'string' ? value.trim() : ''
   if (/^https:\/\/\S+$/i.test(text)) return text
-  if (/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i.test(text)) return text
+  if (/^data:image\/png;base64,[A-Za-z0-9+/=]+$/i.test(text)) return text
   return undefined
 }
 
@@ -103,26 +103,34 @@ export function createIlinkClient({
     },
 
     // Bot API: Bearer plus base_info, and the documented long-poll timeout is 35s.
-    async getUpdates({ cursor, signal, channelVersion = 1 } = {}) {
-      const query = new URLSearchParams()
-      if (cursor !== undefined) query.set('get_updates_buf', String(cursor))
-      const response = await request(`${baseUrl}/ilink/bot/getupdates?${query}`, {
+    async getUpdates({ token, cursor, signal, channelVersion = 1 } = {}) {
+      const response = await request(`${baseUrl}/ilink/bot/getupdates`, {
         method: 'POST',
-        headers: jsonHeaders({ ...common, Authorization: `Bearer ${this.__token ?? ''}` }),
-        body: JSON.stringify({ base_info: { channel_version: String(channelVersion), bot_agent: 'ds-bot' } }),
+        headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
+        body: JSON.stringify({
+          base_info: { channel_version: String(channelVersion), bot_agent: 'ds-bot' },
+          ...(cursor === undefined ? {} : { get_updates_buf: String(cursor) }),
+        }),
         signal,
       })
       return await answer(response)
     },
 
-    async sendMessage({ token, contextToken, text, signal }) {
+    async sendMessage({ token, fromUserId, toUserId, clientId, contextToken, text, signal }) {
       const response = await request(`${baseUrl}/ilink/bot/sendmessage`, {
         method: 'POST',
         headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
         body: JSON.stringify({
           base_info: { channel_version: '1', bot_agent: 'ds-bot' },
-          ...(contextToken === undefined ? {} : { context_token: String(contextToken) }),
-          msg: { msgtype: 1, text: { content: String(text) } },
+          msg: {
+            from_user_id: String(fromUserId ?? ''),
+            to_user_id: String(toUserId ?? ''),
+            client_id: String(clientId ?? ''),
+            message_type: 2,
+            message_state: 2,
+            ...(contextToken === undefined ? {} : { context_token: String(contextToken) }),
+            item_list: [{ type: 1, text_item: { text: String(text ?? '') } }],
+          },
         }),
         signal,
       })
