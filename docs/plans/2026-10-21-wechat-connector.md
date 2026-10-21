@@ -150,7 +150,7 @@ nonce 用每实例 LRU（1,000 条）挡重放；`msgId` 幂等见 §6。
 
 - **协议**：`https://ilinkai.weixin.qq.com`，公共头 `iLink-App-Id: bot`、`iLink-App-ClientVersion: <uint32>`；POST 另带 `AuthorizationType: ilink_bot_token`、`Authorization: Bearer <token>`、`X-WECHAT-UIN`（随机 uint32→十进制→base64）。
 - **能力**：`getUpdates` 长轮询（服务端最长挂 35s，`get_updates_buf` 游标必须持久化，否则重收）、`sendMessage`（`context_token` 回传以匹配会话）、`getconfig`/`sendtyping` 可选。
-- **登录（v1，合规约束）**：用**官方 CLI 登录拿 `bot_token`，粘贴到卡片**（secret 字段）。token **只进 DSH 凭据库或 `<rt.home>/wechat/<instance>.json`（0600）**，不得进 state、日志、设置页明文。v1 **不做自动登录/扫码轮询**；二维码（接口返回 data URL，不需要二维码库）放 P4。
+- **登录（v1，插件内扫码；2026-10-21 用户定版）**：卡片内二维码登录——`connector-command {action:'login-start'|'login-refresh'|'login-cancel'}` 由模块异步取码/换码/取消（二维码接口直接返回 data URL，不需要二维码库），`view.login = { state:'qr'|'logged-in'|'expired', qr?, account? }` 下发，客户端已能渲染 `data:image/png;base64,…`。**仅 owner（创建者）扫码**，v1 只支持一个 owner 账号；QR 只在模块内存与 view 里，**不进日志/diagnostics/state**；`bot_token` 只进 DSH 凭据库（每实例独立名）或 `<rt.home>/wechat/<instance>.json`（0600），不进 state/日志/设置页明文。**mock 验证先行**；真机测试仍须用户书面同意并按其 §4.1 执行。
 - **协议来源（官方公开文档）**：以腾讯官方仓库公开的协议文档为规范——[`Tencent/openclaw-weixin`](https://github.com/Tencent/openclaw-weixin) 的 [`docs/protocol_zh_CN.md`](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)「微信后端 API 协议」，文档自述「面向实现或对接兼容微信后端的开发者」。P3 spike 以这份文档为准，不依赖第三方移植的二手说明。
 - **依据版本（固定记录）**：npm [`@tencent-weixin/openclaw-weixin@2.4.10`](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin)（2026-10-11 发布，author `Tencent`，license `MIT`）；仓库 commit `874637a0`（2026-10-13）；`docs/protocol_zh_CN.md` sha256 `774ecb258ec9147d833335711cbb0d51fb40de3cb26113394b2427c191a735a0`。接口变更时按这个基线判断是哪个版本带来的。
 - **合规门槛（风险口径）**：MIT 只覆盖代码复用；协议文档面向兼容后端的实现者，但**官方支持范围仍是 OpenClaw 插件**，后端接口对第三方没有 SLA；文档本身也说明客户端类型/行为不能代表完整服务端契约。真实风险：①接口可能随版本变更，需要持续跟版本；②个人号的风控/频控照旧存在。因此**真机测试必须用户明确书面同意**（P3 spike 前先拿灰度状态 + 风险接受两个结论），风险说明单独成文、默认不开启。
@@ -350,7 +350,7 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 - **规范与基线**：以 §4 的官方协议文档为准——[`docs/protocol_zh_CN.md`](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)，基线 npm `@tencent-weixin/openclaw-weixin@2.4.10`、仓库 commit `874637a0`、文档 sha256 `774ecb258ec9147d833335711cbb0d51fb40de3cb26113394b2427c191a735a0`；风险按 §4 合规门槛执行（MIT 只覆盖代码复用，官方支持范围是 OpenClaw 插件，后端接口对第三方无 SLA）。
 - **实现规模**：核心客户端约 **600–800 行 + 测试**，**无新 npm 依赖**（`fetch`/`crypto` 足够）。
 - **协议要点**：认证头三件套（`iLink-App-Id: bot`、`iLink-App-ClientVersion`、`AuthorizationType: ilink_bot_token` + Bearer + `X-WECHAT-UIN`）；`getUpdates` 35s 长轮询 + `get_updates_buf` 游标**持久化**（重启恢复，否则重收）；`sendMessage` 回传 `context_token`；`getconfig`/`sendtyping` 可选；指数退避重连；`errcode=-14` 暂停 1h 再试；入站 `msgId` 幂等复用 P2 的 `seenMsgIds`。
-- **二维码**：接口直接返回 data URL，**不需要二维码库**；P3 v1 用「官方 CLI 登录拿 bot_token 粘到卡片」，卡内 QR 留 P4。
+- **二维码**：接口直接返回 data URL，**不需要二维码库**；v1 由模块在 `login-start` 命令里取码、`view.login` 下发（客户端渲染 `data:image/png;base64,…`），`login-refresh` 换码、`login-cancel` 清空；**仅 owner 扫码、v1 单账号**；QR 只进内存/view，不进凭据、state、日志；**mock 验证先行**，真机按 §4.1。
 - **测试**：本地 mock iLink（复用 `fakeWebServer` 模式），覆盖游标重启恢复、重复/乱序消息、`context_token` 传递、退避与 `-14`、断线重连。
 - **不进 v1**：媒体 CDN（AES-ECB 上传/下载）、voice SILK 转码。
 - **门槛与风险**：灰度门槛①已满足、②合规/封号风险未解决；P3 只做 mock/CLI 原型，不碰真实账号。真实账号测试仅在书面同意后按 **§4.1** 执行（小号、≤24h、token 用后即删、失败即停、不自动重登）。
