@@ -680,12 +680,11 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       return undefined
     }
   }
-  const viewExtrasOf = (id) => {
+  const viewExtrasOf = (id, moduleStatus) => {
     const extra = hookValueOf(id, 'view', 'view') ?? {}
     const out = {}
     for (const key of VIEW_KEYS) if (extra[key] !== undefined) out[key] = extra[key]
-    const status = hookValueOf(id, 'status', 'status')
-    if (status !== undefined) out.status = status
+    if (moduleStatus !== undefined) out.status = moduleStatus
     return out
   }
   // What one command may receive: only the arguments the module declared for that action,
@@ -1327,6 +1326,12 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   const connectorRow = (id) => {
     const connector = options[id]
     const status = statuses.get(id) ?? { state: 'off' }
+    // A module's `status` hook may report its own card state (a ClawBot login expiry turns
+    // the row red). It is a display override only: mounting, grants and tool registration
+    // keep the host's state, and a hook that says nothing else leaves the row as it was.
+    const moduleStatus = hookValueOf(id, 'status', 'status')
+    const rowState = typeof moduleStatus?.state === 'string' && moduleStatus.state !== '' ? moduleStatus.state : status.state
+    const rowError = typeof moduleStatus?.error === 'string' && moduleStatus.error !== '' ? moduleStatus.error : status.error
     const oauthConnector = connector.mode === 'oauth-mcp'
     // One row per instance: the client groups rows by `instance.base`, keys them by
     // `instance.id` and shows `instance.label` as the card name; `max` is the module's own
@@ -1343,8 +1348,8 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       id,
       name: instance === undefined ? connector.displayName : instance.label,
       ...(instance === undefined ? {} : { instance }),
-      state: status.state,
-      ...(status.error !== undefined ? { error: status.error } : {}),
+      state: rowState,
+      ...(rowError !== undefined ? { error: rowError } : {}),
       // An OAuth connector has no account before it is connected; the client draws
       // Connect from `oauth` and shows `account` once the server named it.
       account: accountOf(id),
@@ -1395,7 +1400,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
           }
         : {}),
     }
-    return { ...row, ...viewExtrasOf(id) }
+    return { ...row, ...viewExtrasOf(id, moduleStatus) }
   }
 
   const connectorsView = () => {
