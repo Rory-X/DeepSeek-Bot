@@ -760,7 +760,7 @@ export function install(rt) {
   const frozen = new Map()
   const snapshotPath = sessionId => join(root, 'snapshots', `${safeId(sessionId)}.md`)
   function sectionFor(sessionId) {
-    if (sessionId === undefined) return ''
+    if (sessionId === undefined || rt.isChannelSession?.(sessionId) === true) return ''
     const bot = rt.botOf(rt.selfOf(sessionId))
     if (bot === undefined) return ''
     // A section frozen under another role (made a Main Bot or a group admin since, or no
@@ -790,7 +790,7 @@ export function install(rt) {
   }
   // The Session's next render freezes the memory as it is then.
   function renewMemory(sessionId) {
-    if (sessionId === undefined) return
+    if (sessionId === undefined || rt.isChannelSession?.(sessionId) === true) return
     frozen.delete(sessionId)
     try { unlinkSync(snapshotPath(sessionId)) } catch { /* none saved */ }
   }
@@ -807,6 +807,7 @@ export function install(rt) {
 
   const callerOf = (exec) => {
     const sessionId = exec.agent?.id
+    if (rt.isChannelSession?.(sessionId) === true) return undefined
     const bot = rt.botOf(rt.selfOf(sessionId))
     return bot === undefined ? undefined : { bot, sessionId, roomId: roomIdOf(sessionId) }
   }
@@ -1317,7 +1318,9 @@ export function install(rt) {
 
   // What a Session's turn gives the review: its Bot's own chat, or its group with a
   // copy of the group's log as of now. `key` is where the review keeps its place.
+  // A channel Session is outside the review: it is not the Bot's own chat.
   const reviewOf = (sessionId) => {
+    if (rt.isChannelSession?.(sessionId) === true) return undefined
     const chat = rt.chatOwners.get(sessionId)
     if (chat !== undefined) return { key: `chat:${sessionId}`, sessionId, botId: chat }
     const owner = rt.groupOwners.get(sessionId) ?? rt.pastOwners.get(sessionId)
@@ -1469,7 +1472,7 @@ export function install(rt) {
     // A turn that starts again before the delay is over is reviewed when it ends.
     ctx.on('agent/status', ({ agent, status }) => {
       const id = agent?.id
-      if (id === undefined || (!rt.isBotSession(id) && !turnOwners.has(id))) return
+      if (id === undefined || rt.isChannelSession?.(id) === true || (!rt.isBotSession(id) && !turnOwners.has(id))) return
       clearTimeout(reviewTimers.get(id))
       reviewTimers.delete(id)
       if (status !== 'idle') {

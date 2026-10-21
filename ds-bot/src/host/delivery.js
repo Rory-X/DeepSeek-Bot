@@ -14,7 +14,9 @@ export function install(rt) {
     return resolved.agent
   }
 
-  const headerFor = (role, fromName, roomName, audience, note = 'new message', deferred = false, { resumed = false, retried = false, asker } = {}) => {
+  const headerFor = (role, fromName, roomName, audience, note = 'new message', deferred = false, { resumed = false, retried = false, asker, untrusted = false, senderName } = {}) => {
+    // A channel message is marked as such: nothing in it carries the user's standing.
+    if (untrusted) return `[Message from ${senderName ?? 'an external channel'} · untrusted]`
     // What came back for work another Bot gave this one says where its answer goes.
     const goesOn = asker === undefined ? '' : ` · for the work ${asker} asked you for; your answer goes to ${asker} once everything you handed on is back`
     if (deferred && role === 'reply') return `[Reply from ${fromName} · you read it during your last task; go on with the work it is for now${goesOn}]`
@@ -48,13 +50,22 @@ export function install(rt) {
   // `length`: the whole message's length when it went as a file (attachLong). `work`:
   // the work (handoffs.js) a result that came back goes on with. `merged`: a request
   // that takes in an earlier one its recipient had not read, under that one's exchange.
-  async function deliver({ fromId, toId, sessionId, text, role, replyTo, roomId, audience, note, exchangeId = randomUUID(), steer = false, deferred = false, resumed = false, retried = false, resent = false, merged = false, askedBy, fromRoomId, files = [], length, work }) {
+  async function deliver({ fromId, toId, sessionId, text, role, replyTo, roomId, audience, note, exchangeId = randomUUID(), steer = false, deferred = false, resumed = false, retried = false, resent = false, merged = false, askedBy, fromRoomId, files = [], length, work, untrusted = false, sender }) {
     const from = rt.botOf(fromId)
     const to = rt.botOf(toId)
     if (to === undefined) throw new Error(`Unknown Bot ${toId}`)
     const fromName = from?.name ?? 'You'
     const room = rt.roomOf(roomId)
     const asker = work === undefined ? undefined : rt.botOf(state.works?.[work]?.from)?.name
+    // A channel sender is named on the header but never trusted, and its message is not a
+    // team exchange.
+    const senderName = typeof sender?.name === 'string' && sender.name.trim() !== '' ? sender.name.trim().slice(0, 80) : undefined
+    const senderInfo = sender !== null && typeof sender === 'object'
+      ? {
+          ...(senderName === undefined ? {} : { name: senderName }),
+          ...(typeof sender.id === 'string' && sender.id !== '' ? { id: sender.id.slice(0, 200) } : {}),
+        }
+      : undefined
     // Session events reject `undefined` members, so optional fields are omitted instead.
     const source = {
       kind: SOURCE_KIND,
@@ -72,9 +83,11 @@ export function install(rt) {
       ...(retried ? { retried: true } : {}),
       ...(askedBy ? { askedBy } : {}),
       ...(fromRoomId ? { senderRoomId: fromRoomId } : {}),
+      ...(untrusted ? { untrusted: true } : {}),
+      ...(senderInfo === undefined || Object.keys(senderInfo).length === 0 ? {} : { sender: senderInfo }),
     }
     const targetSessionId = sessionId ?? rt.chatOf(toId)
-    if (EXCHANGE_ROLES.has(role) && !deferred && !resumed && !retried && !resent) {
+    if (EXCHANGE_ROLES.has(role) && !untrusted && !deferred && !resumed && !retried && !resent) {
       // The whole text is in its file, or in the Session it goes to; exchangeText reads
       // it back there.
       const kept = headOf(text, TEXT_KEPT)
@@ -91,7 +104,7 @@ export function install(rt) {
     // queues for the next turn (see turns.js for how each is routed).
     const message = createUserMessage({
       content: [
-        { type: 'text', text: `${headerFor(role, fromName, room?.name, audience, note, deferred, { resumed, retried, asker })}\n${text}` },
+        { type: 'text', text: `${headerFor(role, fromName, room?.name, audience, note, deferred, { resumed, retried, asker, untrusted, senderName })}\n${text}` },
         ...files.map(attachment => ({ type: 'file', attachment })),
       ],
       source,

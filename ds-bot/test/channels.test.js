@@ -1,0 +1,264 @@
+// Channel Sessions: one Session per channel conversation, owned by the Bot the channel was
+// bound to. They are not a Bot's own chat, not a group, and not in any workspace.
+import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { test } from 'node:test'
+import { createRuntime } from '../index.js'
+import { fakeContext } from './fake-ctx.js'
+
+const seed = () => ({
+  version: 1,
+  mainBotIds: ['a'],
+  bots: {
+    a: { id: 'a', name: 'Chief', role: 'Boss', sessionId: 'a', createdAt: 1 },
+    b: { id: 'b', name: 'Writer', role: 'Writer', sessionId: 'b', createdAt: 2 },
+  },
+  rooms: {},
+  agents: {},
+  exchanges: [],
+  exchangeTurns: {},
+  questions: {},
+  prefs: {},
+  revision: 0,
+})
+
+async function start({ state = seed(), schemas = [], home: reuse, config = {} } = {}) {
+  const home = reuse ?? mkdtempSync(join(tmpdir(), 'dsb-channels-'))
+  if (reuse === undefined) writeFileSync(join(home, 'state.json'), JSON.stringify(state))
+  const ctx = fakeContext()
+  const created = []
+  const archived = []
+  const workspaces = []
+  const agents = new Map()
+  ctx.tools.schemas = () => schemas
+  const agentOf = (sessionId) => {
+    if (!agents.has(sessionId)) {
+      const restricted = []
+      agents.set(sessionId, {
+        session: { id: sessionId },
+        restricted,
+        calls: [],
+        followup(message) { this.calls.push(message) },
+        ctx: { tools: { restrict(filter) { restricted.push(filter) } } },
+      })
+    }
+    return agents.get(sessionId)
+  }
+  Object.assign(ctx, {
+    llm: { listProviders: () => [], listModels: async () => [], resolveModelInfo: async () => ({}) },
+    workspaceRegistry: {
+      get: () => undefined,
+      resolveByPath: async () => undefined,
+      create: async (path, name) => { workspaces.push([path, name]); return { id: `w${workspaces.length}`, path } },
+      archiveSession: async (sessionId, options) => { archived.push([sessionId, options]) },
+    },
+    sessionController: {
+      create: async (options) => { created.push(options); return { sessionId: `s${created.length}` } },
+      resolveAgent: async sessionId => ({ agent: agentOf(sessionId) }),
+      selectModel: async () => {},
+    },
+    sessionTitle: { rename: async () => {} },
+    sessions: { flush: async () => {} },
+  })
+  const rt = createRuntime(ctx, { home, ...config })
+  await rt.load()
+  const listeners = name => ctx.listeners.get(name) ?? []
+  const emitSession = (sessionId, type, data) => {
+    for (const listener of listeners('session/event')) listener({ id: sessionId }, { type, data })
+  }
+  const stop = async () => {
+    await ctx.dispose()
+    rmSync(home, { recursive: true, force: true, maxRetries: 5 })
+  }
+  const dispose = async () => { await ctx.dispose() }
+  return { rt, ctx, home, created, archived, workspaces, agents, emitSession, stop, dispose }
+}
+
+const bind = (rt, overrides = {}) => rt.channelSessionFor({ instance: 'wechat', botId: 'a', conversationId: 'dm:u1', title: 'Chief · WeChat', settings: {}, ...overrides })
+
+test('a channel conversation gets its own Session outside every workspace', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  assert.equal(sessionId, 's1')
+  // The Session is made by cwd alone, under the plugin's own folder, so it joins no DSH
+  // workspace and never shows up in a project or session list.
+  assert.deepEqual(host.workspaces, [])
+  assert.equal(host.created[0].workspaceId, undefined)
+  assert.equal(host.created[0].cwd, join(host.home, 'wechat', 'sessions', 'wechat'))
+  assert.equal(statSync(join(host.home, 'wechat', 'sessions', 'wechat')).isDirectory(), true)
+  assert.equal(host.rt.selfOf('s1'), 'a')
+  assert.equal(host.rt.isChannelSession('s1'), true)
+  assert.equal(host.rt.isBotSession('s1'), false)
+
+  // The same conversation finds its Session again; the state file records it.
+  assert.equal(await bind(host.rt), 's1')
+  assert.equal(host.created.length, 1)
+  const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
+  assert.equal(saved.channels.wechat.conversations['dm:u1'].sessionId, 's1')
+  assert.equal(saved.channels.wechat.conversations['dm:u1'].botId, 'a')
+})
+
+test('a channel Session has no tools, or only the read tools it asked for', async (t) => {
+  const host = await start({ schemas: [{ name: 'web_search' }, { name: 'bash' }] })
+  t.after(host.stop)
+  await bind(host.rt)
+  assert.deepEqual(host.agents.get('s1').restricted, [{ allow: [] }])
+
+  const second = await bind(host.rt, { conversationId: 'dm:u2', settings: { allowReadTools: true } })
+  assert.equal(second, 's2')
+  // Only the tool this Harness serves is named; everything else stays out.
+  assert.deepEqual(host.agents.get('s2').restricted, [{ allow: ['web_search'] }])
+})
+
+test('channel Sessions are outside memory and carry the channel rules', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  await bind(host.rt)
+  const section = name => host.ctx.sections.get(name)
+  assert.match(section('channel-rules').text({ agent: { id: 's1' } }), /External channel conversation/)
+  assert.equal(section('channel-rules').text({ agent: { id: 'a' } }), '')
+  // The Bot keeps its identity here, but its memory is neither shown nor reviewed.
+  assert.match(section('bot-identity').text({ agent: { id: 's1' } }), /You are Chief/)
+  assert.equal(section('bot-memory').text({ agent: { id: 's1' } }), '')
+  assert.equal(host.rt.isChannelSession('a'), false)
+})
+
+test('a channel message is marked untrusted and is not a team exchange', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  await host.rt.deliver({
+    toId: 'a',
+    sessionId,
+    text: 'hello from outside',
+    role: 'request',
+    untrusted: true,
+    sender: { name: 'Alice', id: 'u1' },
+  })
+  const message = host.agents.get(sessionId).calls[0]
+  assert.equal(message.content[0].text, '[Message from Alice · untrusted]\nhello from outside')
+  assert.equal(message.source.untrusted, true)
+  assert.deepEqual(message.source.sender, { name: 'Alice', id: 'u1' })
+  assert.deepEqual(host.rt.state.exchanges, [])
+})
+
+test('rebinding archives every conversation and the next Bot starts fresh', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const first = await bind(host.rt)
+  const archived = await host.rt.rebindChannel('wechat', { reason: 'rebind' })
+  assert.deepEqual(archived.map(entry => entry.sessionId), [first])
+  assert.deepEqual(host.archived, [[first, { stopActivity: true }]])
+  assert.equal(host.rt.isChannelSession(first), false)
+  const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
+  assert.deepEqual(saved.channels.wechat.history.map(entry => [entry.sessionId, entry.botId, entry.reason]), [[first, 'a', 'rebind']])
+  assert.deepEqual(saved.channels.wechat.conversations, {})
+
+  // The new Bot gets a new Session; the archived one is never handed out again.
+  const second = await bind(host.rt, { botId: 'b' })
+  assert.notEqual(second, first)
+  assert.equal(host.rt.selfOf(second), 'b')
+})
+
+test('a channel turn ends with its text, or with the error that ended it', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  const replies = []
+  const off = host.rt.onChannelReply(sessionId, reply => replies.push(reply))
+  t.after(off)
+  host.emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text: 'first' }] } })
+  host.emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text: 'second' }] } })
+  host.emitSession(sessionId, 'turn/end', { reason: { kind: 'completed' } })
+  assert.deepEqual(replies, [{ text: 'first\n\nsecond', reason: { kind: 'completed' } }])
+
+  const error = { message: 'model failed', code: 'UNKNOWN' }
+  host.emitSession(sessionId, 'turn/end', { reason: { kind: 'error', error } })
+  assert.deepEqual(replies.at(-1), { text: '', reason: { kind: 'error', error }, error })
+})
+
+test('a channel conversation is found again after a restart', async (t) => {
+  const first = await start()
+  t.after(async () => { rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }) })
+  const sessionId = await bind(first.rt)
+  await first.dispose()
+
+  // A restart rebuilds the ownership from the state file, without the module or a mount.
+  const second = await start({ home: first.home })
+  t.after(second.stop)
+  assert.equal(second.rt.isChannelSession(sessionId), true)
+  assert.equal(second.rt.selfOf(sessionId), 'a')
+  assert.equal(second.rt.channelOwners.get(sessionId).instance, 'wechat')
+  assert.equal(second.rt.channelOwners.get(sessionId).conversationId, 'dm:u1')
+})
+
+test('a channel keeps at most eight conversations and archives the oldest', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const ids = []
+  for (let index = 1; index <= 9; index += 1) ids.push(await bind(host.rt, { conversationId: `dm:u${index}` }))
+  const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
+  assert.equal(Object.keys(saved.channels.wechat.conversations).length, 8)
+  assert.equal(saved.channels.wechat.history.some(entry => entry.sessionId === ids[0] && entry.reason === 'lru'), true)
+  assert.equal(host.rt.isChannelSession(ids[0]), false)
+  assert.equal(host.rt.isChannelSession(ids.at(-1)), true)
+})
+
+test('closing a channel archives its conversations and keeps the record', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  await host.rt.closeChannel('wechat', 'instance-deleted')
+  assert.deepEqual(host.archived, [[sessionId, { stopActivity: true }]])
+  assert.equal(host.rt.isChannelSession(sessionId), false)
+  const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
+  assert.deepEqual(saved.channels.wechat.history.map(entry => [entry.sessionId, entry.reason]), [[sessionId, 'instance-deleted']])
+})
+
+test('a channel Session is not one of the Bot\'s own chat parts', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  assert.deepEqual(host.rt.partsOf('a').map(part => part.sessionId), ['a'])
+  assert.equal(host.rt.partsOf('a').some(part => part.sessionId === sessionId), false)
+  assert.equal(host.rt.chatOf('a'), 'a')
+  // Nothing about the channel becomes a part of the Bot's chat or a group segment, so the
+  // checkpoint/segment machinery never sees it.
+  assert.equal(host.rt.state.bots.a.segments, undefined)
+  assert.deepEqual(Object.keys(host.rt.state.rooms), [])
+})
+
+test('unsubscribing a reply handler stops the replies', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  const replies = []
+  const off = host.rt.onChannelReply(sessionId, reply => replies.push(reply))
+  off()
+  host.emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text: 'ignored' }] } })
+  host.emitSession(sessionId, 'turn/end', { reason: { kind: 'completed' } })
+  assert.deepEqual(replies, [])
+})
+
+test('a channel turn reaches no memory review and no roster map', async (t) => {
+  const host = await start({ config: { memoryReviewDelayMs: 5 } })
+  t.after(host.stop)
+  // The review trigger itself works: a Bot chat Session ending schedules one.
+  host.ctx.emit('agent/status', { agent: { id: 'a' }, status: 'idle' })
+  assert.equal(host.rt.memoryReviews(), 1)
+  await new Promise(resolve => setTimeout(resolve, 30))
+
+  const sessionId = await bind(host.rt)
+  host.ctx.emit('agent/status', { agent: { id: sessionId }, status: 'idle' })
+  await new Promise(resolve => setTimeout(resolve, 30))
+  assert.equal(host.rt.memoryReviews(), 0)
+  // No roster map knows the channel Session, and the team roster is untouched.
+  assert.equal(host.rt.chatOwners.has(sessionId), false)
+  assert.equal(host.rt.groupOwners.has(sessionId), false)
+  assert.equal(host.rt.pastOwners.has(sessionId), false)
+  assert.deepEqual(Object.keys(host.rt.state.bots).sort(), ['a', 'b'])
+  assert.deepEqual(host.rt.state.rooms, {})
+})

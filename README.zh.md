@@ -101,7 +101,7 @@ ds bot 拥有群聊功能。群聊是非常好的多 bot 协作方式，但它�
 
 ### 连接器
 
-设置 → **连接器** 可以连接外部服务，连接后每个 bot 都能使用该服务的工具。GitHub（`GITHUB_TOKEN`）或 Vercel（`VERCEL_TOKEN`）只需连接一次：token 保存在密钥里，只在 MCP 连接中使用。GitHub 的工具名是 `mcp__github__…`；Vercel 只读连接，工具如 `vercel_list_projects`、`vercel_get_runtime_logs`。Vercel 的四个部署动作默认关闭：在连接器里打开后，每次调用前会在聊天里显示一张审批卡（允许一次 / 拒绝），不批准就什么都不会发出。另有一个工具箱开关，打开后会加上 `vercel_search_tools` 和 `vercel_call`，用搜索触达 Vercel 的全部能力；写操作仍需在这张卡上批准，会返回凭据或环境变量值的工具一律不提供。**Cloudflare** 用 OAuth 连接：点 Connect，在 Cloudflare 页面上同意只读权限即可，授权保存在 DSH 的凭据存储里而不是密钥里。它挂载 14 个具名只读工具（`cloudflare_get_zones`、`cloudflare_get_zones_dns_records`、分析类与 Workers 读取等）。可选的 **Full capabilities** 开关会加上 `cloudflare_search_tools` / `cloudflare_call`，覆盖服务器全部端点：GET/HEAD 直接读，任何写操作都先在审批卡上批准，会铸造或读取凭据的端点一律不提供；不走 Cloudflare 的代码执行工具。
+设置 → **连接器** 可以连接外部服务，连接后每个 bot 都能使用该服务的工具。GitHub（`GITHUB_TOKEN`）或 Vercel（`VERCEL_TOKEN`）只需连接一次：token 保存在密钥里，只在 MCP 连接中使用。GitHub 的工具名是 `mcp__github__…`；Vercel 只读连接，工具如 `vercel_list_projects`、`vercel_get_runtime_logs`。Vercel 的四个部署动作默认关闭：在连接器里打开后，每次调用前会在聊天里显示一张审批卡（允许一次 / 拒绝），不批准就什么都不会发出。另有一个工具箱开关，打开后会加上 `vercel_search_tools` 和 `vercel_call`，用搜索触达 Vercel 的全部能力；写操作仍需在这张卡上批准，会返回凭据或环境变量值的工具一律不提供。**Cloudflare** 用 OAuth 连接：点 Connect，在 Cloudflare 页面上同意只读权限即可，授权保存在 DSH 的凭据存储里而不是密钥里。它挂载 14 个具名只读工具（`cloudflare_get_zones`、`cloudflare_get_zones_dns_records`、分析类与 Workers 读取等）。可选的 **Full capabilities** 开关会加上 `cloudflare_search_tools` / `cloudflare_call`，覆盖服务器全部端点：GET/HEAD 直接读，任何写操作都先在审批卡上批准，会铸造或读取凭据的端点一律不提供；不走 Cloudflare 的代码执行工具。 **微信**是通道类连接器：每个通道绑定一个 Bot，通过 webhook 发通知（每次发送前都会在审批卡上确认）；在卡片上保存 **Webhook secret** 后，它还会在 `127.0.0.1:8799` 上监听入站消息（`POST /wechat/<实例>/inbound`，用同一个 secret 签名）。推送 webhook URL 按凭据保存，卡片只显示是否已保存；不配 secret 时通道仍可发通知但不开端口，移除或禁用通道会关闭端口。
 
 
 #### Telegram 通知

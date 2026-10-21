@@ -71,12 +71,13 @@ export async function startWebhookReceiver({ secret, reply = () => ({ status: 20
 }
 
 // One inbound request as the gateway would send it: signed when a secret is given.
-export async function postInbound({ url, token, secret, msgId, sender = 'creator', text = 'hello', timestamp, nonce, headers = {} }) {
-  const body = JSON.stringify({ msgId, sender_id: sender, text })
+export async function postInbound({ url, token, secret, msgId, sender = 'creator', text = 'hello', callbackUrl, wait, timestamp, nonce, headers = {} }) {
+  const body = JSON.stringify({ msgId, sender_id: sender, text, ...(callbackUrl === undefined ? {} : { callbackUrl }), ...(wait === undefined ? {} : { wait }) })
   const signed = secret === undefined ? {} : wechatHeaders({ secret, body, ...(timestamp === undefined ? {} : { timestamp }), ...(nonce === undefined ? {} : { nonce }) })
   const response = await fetch(url, {
     method: 'POST',
     headers: {
+      'content-type': 'application/json',
       ...signed,
       ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
       ...headers,

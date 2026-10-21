@@ -2,16 +2,54 @@
 // outbound half — a channel posts a notice to a webhook (an enterprise WeChat group bot or
 // any HTTP receiver). The inbound listener, channel Sessions and ClawBot login land in P2/P3.
 import { createHmac, randomBytes } from 'node:crypto'
+import { inboundFor } from '../wechat-inbound.js'
+import { createIlinkClient, maskAccount, qrImageOf, qrStateOf } from '../wechat-ilink.js'
 
 const TIMEOUT_MS = 10_000
+// v0.2.0 refuses a tool without an output contract; a notice renders as its text.
+const textOutput = { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: String(value) }] }
 const GENERIC_TEXT_MAX = 4_000
 const WECOM_TEXT_MAX = 2_048
 const SECRET_NAME = 'WECHAT_WEBHOOK_SECRET'
+const URL_SECRET = 'WECHAT_WEBHOOK_URL'
 const TEST_TEXT = 'DS Bot: the WeChat channel works.'
 const TRANSPORTS = ['webhook', 'clawbot']
 const FORMATS = ['generic', 'wecom']
 
 const trim = value => (typeof value === 'string' ? value.trim() : '')
+const ILINK_TOKEN = 'WECHAT_ILINK_TOKEN'
+export const CONSENT_VERSION = 1
+// Login state lives in memory only: the QR and its poll belong to the open card, the token
+// (once confirmed) lives in the credential store.
+const ilinkLogins = new WeakMap()
+const loginOf = (rt, id) => {
+  let byId = ilinkLogins.get(rt)
+  if (byId === undefined) { byId = new Map(); ilinkLogins.set(rt, byId) }
+  let login = byId.get(id)
+  if (login === undefined) { login = { state: 'logged-out', qr: null, scanned: false, account: null, error: null, expiresAt: null, qrcode: null }; byId.set(id, login) }
+  return login
+}
+const consentOf = (rt, id) => rt.state?.channels?.[id]?.ilink?.consent
+const consentCurrent = (rt, id) => consentOf(rt, id)?.version === CONSENT_VERSION
+const rememberConsent = (rt, id) => {
+  const channels = rt.state.channels ?? (rt.state.channels = {})
+  const channel = channels[id] ?? (channels[id] = {})
+  channel.ilink = { ...(channel.ilink ?? {}), consent: { at: Date.now(), version: CONSENT_VERSION } }
+  void rt.save().catch(() => {})
+}
+const loginViewOf = (rt, id) => {
+  const login = loginOf(rt, id)
+  return {
+    state: login.state,
+    qr: login.qr,
+    scanned: login.scanned === true,
+    account: login.account,
+    error: login.error,
+    expiresAt: login.expiresAt,
+    consentRequired: login.state === 'logged-out' && !consentCurrent(rt, id),
+  }
+}
+
 const textLimit = format => (format === 'wecom' ? WECOM_TEXT_MAX : GENERIC_TEXT_MAX)
 
 // The card's settings. A secret is a credential, not a setting: the framework stores it in
@@ -19,10 +57,14 @@ const textLimit = format => (format === 'wecom' ? WECOM_TEXT_MAX : GENERIC_TEXT_
 // transport only; the ClawBot option opens with P3, and the validation still accepts it.
 export const WECHAT_SETTINGS = [
   { name: 'label', label: 'Name' },
-  { name: 'transport', label: 'Transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }] },
+  { name: 'transport', label: 'Transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }, { value: 'clawbot', label: 'ClawBot (beta)' }] },
   { name: 'botId', label: 'Bot', kind: 'bot', required: true },
-  { name: 'webhookUrl', label: 'Push webhook URL' },
+  // The push webhook URL carries its own key (a WeCom group bot URL), so it is stored as a
+  // credential: the card only ever sees saved/replace/remove, never the value.
+  { name: 'webhookUrl', label: 'Push webhook URL', kind: 'secret', secret: URL_SECRET },
   { name: 'webhookFormat', label: 'Format', kind: 'segmented', options: [{ value: 'generic', label: 'Generic JSON' }, { value: 'wecom', label: 'WeCom group bot' }] },
+  // A channel Session carries no tools by default; turning this on allows only web_search.
+  { name: 'allowReadTools', label: 'Read tools', kind: 'segmented', options: [{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }] },
   { name: 'webhookSecret', label: 'Webhook secret', kind: 'secret', secret: SECRET_NAME },
 ]
 
@@ -41,12 +83,67 @@ const webhookOf = (settings) => {
 
 // A channel is ready once it knows which Bot it speaks for and where to post. P1 keeps the
 // secret optional: a receiver that cannot verify a signature still gets its notice.
-export function wechatReadiness({ settings } = {}) {
+export function wechatReadiness({ settings, rt, secretName, secretValue } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
-  if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release. Use the Webhook transport.'
-  if (trim(values.botId) === '') return 'Choose a Bot for this channel.'
-  if (trim(values.webhookUrl) === '') return 'Add the push webhook URL for this channel.'
+  if (trim(values.transport) === 'clawbot') {
+    const token = typeof secretName === 'function' && typeof secretValue === 'function'
+      ? secretValue(secretName(ILINK_TOKEN))
+      : undefined
+    return typeof token === 'string' && token !== '' ? undefined : 'Scan the QR code to connect this ClawBot channel. (beta; Webhook channels are not affected)'
+  }
+  const botId = trim(values.botId)
+  if (botId === '') return 'Choose a Bot for this channel.'
+  if (typeof rt?.botOf === 'function' && rt.botOf(botId) === undefined) return 'The Bot this channel is bound to no longer exists. Choose another Bot.'
+  // The framework's own per-instance helper names the credential (F11); a value that is
+  // merely unknown (undefined) is not an answer, so readiness stays lenient and only an
+  // explicitly empty store counts as missing. The mount, which runs after the store loaded,
+  // refuses a real "no URL" with the same sentence.
+  const name = typeof secretName === 'function' ? secretName(URL_SECRET) : undefined
+  const stored = name !== undefined && typeof secretValue === 'function' ? secretValue(name) : undefined
+  if (trim(values.webhookUrl) === '' && stored === '') return 'Add the push webhook URL for this channel.'
   return undefined
+}
+
+// The URL a read or send path should use: the legacy plain setting (before migration, or
+// after a failed migration) first, then the credential the framework resolved per instance.
+const secretValueOfField = (rt, secrets, secretName, name) => {
+  const fromMount = secrets !== null && typeof secrets === 'object' ? secrets[name] : undefined
+  if (typeof fromMount === 'string') return fromMount
+  if (typeof secretName !== 'function' || typeof rt?.secretValue !== 'function') return undefined
+  try {
+    const value = rt.secretValue(secretName(name))
+    return typeof value === 'string' ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// The credential comes first: a Replace on the card must win even while the old plain value
+// is still around (migration pending, failed, or restored from an older state); legacy is
+// only the fallback.
+const webhookUrlOf = (settings, secrets) => {
+  const stored = secrets !== null && typeof secrets === 'object' ? secrets[URL_SECRET] : undefined
+  if (typeof stored === 'string' && stored !== '') return stored
+  return trim(settings?.webhookUrl)
+}
+
+// A URL saved by an older release lives in the settings as plain text. Move it into the
+// credential store once, and only clear the plain value after the write succeeded: a failed
+// write keeps the URL usable for outbound posts and is retried by the next mount.
+async function migrateWebhookUrl({ rt, id, settings, secretName }) {
+  const legacy = trim(settings?.webhookUrl)
+  if (legacy === '') return
+  await rt.loadSecrets?.()
+  const name = secretName(URL_SECRET)
+  if (rt.secretValue?.(name) === undefined) {
+    await rt.secretEndpoint('secret-set', { name, value: legacy, purpose: 'WeChat push webhook URL', scope: [] })
+  }
+  const prior = rt.state.connectors?.[id]?.settings
+  if (prior === null || typeof prior !== 'object' || typeof prior.webhookUrl !== 'string') return
+  const next = { ...prior }
+  delete next.webhookUrl
+  rt.state.connectors = { ...rt.state.connectors, [id]: { ...rt.state.connectors[id], settings: next } }
+  await rt.save()
 }
 
 export function normalizeWechatSettings(values = {}, context = {}) {
@@ -74,6 +171,8 @@ export function normalizeWechatSettings(values = {}, context = {}) {
     webhookOf({ webhookUrl })
     normalized.webhookUrl = webhookUrl
   }
+  const allowReadTools = trim(given.allowReadTools)
+  if (allowReadTools === 'on' || allowReadTools === 'off') normalized.allowReadTools = allowReadTools
   const webhookFormat = trim(given.webhookFormat)
   if (webhookFormat !== '') {
     if (!FORMATS.includes(webhookFormat)) throw new Error('The webhook format is generic or wecom.')
@@ -133,6 +232,7 @@ function notifyTool({ channel, settings, secretOf, approve }) {
       required: ['text'],
       additionalProperties: false,
     },
+    output: textOutput,
     async execute(args, exec) {
       const text = trim(args?.text)
       if (text === '') throw new Error('Write the notice to send first.')
@@ -167,7 +267,10 @@ export default {
   // A base name only: the framework's per-instance naming (F2b) adds the `_2` suffix, so
   // two channels never share one secret. Until F5 adds optional secret fields to the
   // settings form, Connect must carry one value; readiness still treats signing as optional.
-  credentials: [{ name: SECRET_NAME, label: 'Webhook secret', required: false }],
+  credentials: [
+    { name: SECRET_NAME, label: 'Webhook secret', required: false },
+    { name: URL_SECRET, label: 'Push webhook URL', required: false },
+  ],
   normalizeSettings: normalizeWechatSettings,
   readiness: wechatReadiness,
   capabilities: [
@@ -184,20 +287,99 @@ export default {
   },
   // What the card draws besides the settings: the level descriptions, whether Test can run,
   // and (P2) the inbound address. Display only, so a failing hook never breaks the card.
-  view({ settings }) {
+  // The ClawBot login steps: the QR is fetched only by these commands, never by the view,
+  // and consent is required once per risk-text version before any code is requested.
+  commands: {
+    'login-start': { transport: 'clawbot', args: ['consent'] },
+    'login-refresh': { transport: 'clawbot', args: [] },
+    'login-cancel': { transport: 'clawbot', args: [] },
+    'login-poll': { transport: 'clawbot', args: [] },
+  },
+  async command({ id, rt, action, args, secretName }) {
+    const login = loginOf(rt, id)
+    const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
+    const client = createIlinkClient({
+      base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+      pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
+      backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
+    })
+    if (action === 'login-cancel') {
+      loginOf(rt, id).state = 'logged-out'
+      Object.assign(login, { state: 'logged-out', qr: null, scanned: false, account: null, error: null, expiresAt: null, qrcode: null })
+      return
+    }
+    if (action === 'login-start' || action === 'login-refresh') {
+      if (!consentCurrent(rt, id) && args?.consent !== true) {
+        throw Object.assign(new Error('Confirm the ClawBot login risks first'), { code: 'bot/invalid' })
+      }
+      if (args?.consent === true) rememberConsent(rt, id)
+      if (action === 'login-poll') {
+        // handled below
+      }
+      try {
+        const answer = await client.getQrCode()
+        const image = qrImageOf(answer?.qrcode_img_content)
+        Object.assign(login, {
+          state: 'qr',
+          qrcode: typeof answer?.qrcode === 'string' ? answer.qrcode : null,
+          qr: image ?? null,
+          scanned: false,
+          account: null,
+          error: image === undefined ? 'The QR code was returned in an unsupported form; update DS Bot.' : null,
+          expiresAt: typeof answer?.expires_at === 'string' ? answer.expires_at : null,
+        })
+      } catch (error) {
+        Object.assign(login, { state: 'protocol-error', qr: null, scanned: false, error: String(error?.message ?? error) })
+      }
+      return
+    }
+    if (action === 'login-poll') {
+      if (login.qrcode === null) return
+      try {
+        const answer = await client.pollQrStatus(login.qrcode)
+        const mapped = qrStateOf(answer?.status)
+        if (mapped === 'confirmed') {
+          const token = typeof answer?.bot_token === 'string' ? answer.bot_token : ''
+          const name = secretName(ILINK_TOKEN)
+          if (token !== '') await rt.secretEndpoint('secret-set', { name, value: token, purpose: 'WeChat ClawBot login', scope: [] })
+          Object.assign(login, { state: 'logged-in', qr: null, scanned: false, account: maskAccount(answer?.ilink_user_id) ?? null, error: null, expiresAt: null, qrcode: null })
+        } else if (mapped === 'scanned') {
+          Object.assign(login, { state: 'qr', scanned: true })
+        } else if (mapped === 'verified-needed') {
+          Object.assign(login, { state: 'verified-needed' })
+        } else if (mapped === 'blocked') {
+          Object.assign(login, { state: 'blocked' })
+        } else if (mapped === 'expired') {
+          Object.assign(login, { state: 'expired', qr: null, scanned: false, qrcode: null })
+        }
+      } catch (error) {
+        Object.assign(login, { state: 'protocol-error', error: String(error?.message ?? error) })
+      }
+    }
+  },
+  view({ id, settings, rt, secrets }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
+    const hub = inboundFor(rt)
+    const inbound = hub.viewOf(id)
+    const webhook = trim(values.transport) !== 'clawbot'
     return {
-      transport: trim(values.transport) === 'clawbot' ? 'clawbot' : 'webhook',
-      canTest: trim(values.transport) !== 'clawbot' && trim(values.webhookUrl) !== '',
+      transport: webhook ? 'webhook' : 'clawbot',
+      canTest: webhook && webhookUrlOf(values, secrets) !== '',
       levels: [
         { id: 'write', title: 'Full access', description: 'Send notices for you; every notice asks for your approval first.' },
       ],
+      // An outbound-only channel says why it has no address yet: the inbound half needs the
+      // HMAC secret, and the card should not look broken while it is missing.
+      ...(Object.keys(inbound).length === 0 && webhook ? hub.needsSecret() : {}),
+      ...inbound,
+      ...hub.statusOf(id),
+      ...(webhook ? {} : { login: loginViewOf(rt, id) }),
     }
   },
   // One test notice through the same path a real notice takes. A failure stays on the card
   // without turning the channel off.
   async test({ settings, secrets, secretValue }) {
-    const values = settings !== null && typeof settings === 'object' ? settings : {}
+    const values = { ...(settings !== null && typeof settings === 'object' ? settings : {}), webhookUrl: webhookUrlOf(settings, secrets) }
     const address = webhookOf(values)
     if (address === undefined) throw new Error('Add the push webhook URL for this channel.')
     const secret = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
@@ -205,24 +387,49 @@ export default {
       : (typeof secretValue === 'function' ? secretValue(SECRET_NAME) : undefined)
     await postNotice({ address, format: values.webhookFormat, text: TEST_TEXT, secret })
   },
-  mount({ rt, settings, instance, level, approve, secrets, token }) {
+  async mount({ rt, settings, instance, level, approve, secrets, token, secretName }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const id = instance?.id ?? 'wechat'
     if (trim(values.transport) === 'clawbot') throw new Error('ClawBot is not available in this release. Use the Webhook transport.')
     const botId = trim(values.botId)
     if (botId === '') throw new Error('Choose a Bot for this channel.')
     if (rt.botOf(botId) === undefined) throw new Error('The Bot this channel is bound to no longer exists. Choose another Bot.')
-    if (webhookOf(values) === undefined) throw new Error('Add the push webhook URL for this channel.')
+    if (trim(values.transport) === 'clawbot') return { tools: [] }
+    // Older state keeps the URL as a plain setting; move it into the credential store before
+    // this mount reads anything, keeping the plain value if the write fails.
+    try {
+      if (typeof secretName === 'function') await migrateWebhookUrl({ rt, id, settings: values, secretName })
+    } catch (error) {
+      rt.warn?.('ds-bot: the WeChat push URL of %s was not moved into the credential store: %s', id, error?.message ?? error)
+    }
+    await rt.loadSecrets?.()
+    const effective = { ...values, webhookUrl: webhookUrlOf(values, { ...secrets, [URL_SECRET]: secretValueOfField(rt, secrets, secretName, URL_SECRET) }) }
+    if (webhookOf(effective) === undefined) throw new Error('Add the push webhook URL for this channel.')
     const secretValue = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
       ? secrets[SECRET_NAME]
       : (typeof token === 'string' && token !== '' ? token : undefined)
     // The framework resolved this instance's credential into `secrets`; reading the bare
     // name through rt here would sign with the first instance's secret.
     const secretOf = () => secretValue
+    // A channel with an HMAC secret gets its inbound path; without one it keeps working for
+    // outbound notices and has no inbound path at all. The listener is shared by every
+    // channel of this plugin, so a mount only adds or removes its own route.
+    const hub = inboundFor(rt)
+    // A different Bot on the same channel is a rebind: the old Bot's Session is archived and
+    // every message waiting on it hears the rebound code before the new binding starts.
+    const bound = Object.values(rt.state?.channels?.[id]?.conversations ?? {}).map(entry => entry?.botId).find(value => typeof value === 'string')
+    if (bound !== undefined && bound !== botId) {
+      hub.rebound(id, 'rebind')
+      if (typeof rt.rebindChannel === 'function') await rt.rebindChannel(id, { reason: 'rebind' }).catch(() => {})
+    }
+    if (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '') {
+      // The Session half wants the boolean, the card stores the segmented word.
+      await hub.attach({ instance: id, botId, settings: { ...values, allowReadTools: trim(values.allowReadTools) === 'on' }, secret: secrets[SECRET_NAME], secretName })
+    }
     const tools = []
     if (level === 'write') {
-      tools.push(notifyTool({ channel: id, settings: values, secretOf, approve }))
+      tools.push(notifyTool({ channel: id, settings: effective, secretOf, approve }))
     }
-    return { tools }
+    return { tools, close: () => { void inboundFor(rt).detach(id) } }
   },
 }

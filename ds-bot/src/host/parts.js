@@ -244,7 +244,7 @@ export function install(rt) {
     'A Bot conversation makes room on its own, and read_own_chat searches all of it.'))
   const isBotTarget = (target) => {
     const id = target?.session?.id
-    return id !== undefined && (rt.selfOf(id) !== undefined || rt.roomOf(id) !== undefined)
+    return id !== undefined && rt.isChannelSession?.(id) !== true && (rt.selfOf(id) !== undefined || rt.roomOf(id) !== undefined)
   }
   const ownedByBot = target => isBotTarget(target) && !condensing.has(target.session.id)
   // The engine that serves this agent, when DS Bot can condense through it.

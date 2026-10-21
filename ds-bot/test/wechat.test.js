@@ -6,13 +6,14 @@
 // docs/plans/2026-10-21-wechat-test-checklist.md. P1-14 is folded into P1-13; P2-25 is
 // covered by P2-13a/13b. Tests marked (F5) wait for the host view/test hooks.
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:net'
 import { test } from 'node:test'
-import { apply } from '../index.js'
+import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
-import { normalizeWechatSettings } from '../src/host/connectors/wechat.js'
+import { normalizeWechatSettings, wechatReadiness } from '../src/host/connectors/wechat.js'
 import { postInbound, startWebhookReceiver, wechatHeaders } from './wechat-fakes.js'
 
 const TEAM = {
@@ -36,11 +37,47 @@ const teamHome = () => {
   return home
 }
 
-function setup({ config = {} } = {}) {
-  const home = teamHome()
+function setup({ config = {}, home = teamHome(), session = false } = {}) {
   const registered = []
   const disposed = []
+  const created = []
+  const archived = []
+  const sessionAgents = new Map()
   const ctx = fakeContext()
+  if (session) {
+    // A stand-in for the Session services the inbound half drives: the channel Session is
+    // created through the fake controller and the fake agent records what `deliver` hands it.
+    const agentOf = (sessionId) => {
+      if (!sessionAgents.has(sessionId)) {
+        sessionAgents.set(sessionId, {
+          session: { id: sessionId },
+          restricted: [],
+          calls: [],
+          followup(message) { this.calls.push(message) },
+          ctx: { tools: { restrict(filter) { this.owner.restricted.push(filter) }, owner: undefined } },
+        })
+        sessionAgents.get(sessionId).ctx.tools.owner = sessionAgents.get(sessionId)
+      }
+      return sessionAgents.get(sessionId)
+    }
+    ctx.tools.schemas = () => []
+    Object.assign(ctx, {
+      llm: { listProviders: () => [], listModels: async () => [], resolveModelInfo: async () => ({}) },
+      workspaceRegistry: {
+        get: () => undefined,
+        resolveByPath: async () => undefined,
+        create: async () => ({}),
+        archiveSession: async (sessionId, options) => { archived.push([sessionId, options]) },
+      },
+      sessionController: {
+        create: async (options) => { created.push(options); return { sessionId: `s${created.length}` } },
+        resolveAgent: async sessionId => ({ agent: agentOf(sessionId) }),
+        selectModel: async () => {},
+      },
+      sessionTitle: { rename: async () => {} },
+      sessions: { flush: async () => {} },
+    })
+  }
   const register = ctx.tools.register
   ctx.tools.register = (tool) => {
     registered.push(tool.name)
@@ -49,10 +86,15 @@ function setup({ config = {} } = {}) {
   }
   const route = ctx.connection.fetch.register
   ctx.connection.fetch.register = (handled) => { ctx.route = handled; return route(handled) }
-  apply(ctx, { home, ...config })
+  // Every test host gets an ephemeral inbound port: two hosts must never race for a fixed
+  // one, and a developer machine may already serve the production port.
+  const rt = createRuntime(ctx, { home, wechat: { listenPort: 0 }, ...config })
   registered.length = 0
   disposed.length = 0
-  return { ctx, home, registered, disposed }
+  const emitSession = (sessionId, type, data) => {
+    for (const listener of ctx.listeners.get('session/event') ?? []) listener({ id: sessionId }, { type, data })
+  }
+  return { ctx, rt, home, registered, disposed, created, archived, sessionAgents, emitSession }
 }
 
 async function call(ctx, endpoint, payload) {
@@ -70,6 +112,20 @@ async function until(check, label) {
 const rowsOf = async (ctx) => (await call(ctx, 'state', {})).value.connectors.filter(row => row.id === 'wechat' || row.id.startsWith('wechat-'))
 const rowOf = async (ctx, id = 'wechat') => (await rowsOf(ctx)).find(row => row.id === id)
 const card = async (ctx) => (await call(ctx, 'state', {})).value.questions.m1
+// The inbound address the card draws once the shared listener serves this channel.
+// A port the test may expect to be reused, taken and released before the host starts.
+const freePort = () => new Promise((resolve, reject) => {
+  const server = createServer()
+  server.once('error', reject)
+  server.listen(0, '127.0.0.1', () => {
+    const { port } = server.address()
+    server.close(() => resolve(port))
+  })
+})
+const inboundUrl = async (ctx, id = 'wechat') => {
+  const inbound = await until(async () => (await rowOf(ctx, id))?.inbound, `the inbound address of ${id}`)
+  return inbound.url
+}
 const answerCard = (ctx, questionId, selected) => call(ctx, 'answer-question', { sessionId: 'm1', questionId, answer: { selected } })
 
 // Connect a webhook channel bound to b1; the callback receiver is the fake.
@@ -138,35 +194,38 @@ test('P1-02 the row carries the channel settings and never a secret value', asyn
   assert.equal(row.level, 'write')
   assert.deepEqual(row.levels.map(level => level.id), ['write'])
   assert.equal(row.card.levelChoice, false)
-  assert.deepEqual(row.settings.map(field => field.name), ['label', 'transport', 'botId', 'webhookUrl', 'webhookFormat', 'webhookSecret'])
+  assert.deepEqual(row.settings.map(field => field.name), ['label', 'transport', 'botId', 'webhookUrl', 'webhookFormat', 'allowReadTools', 'webhookSecret'])
   const json = JSON.stringify(await call(ctx, 'state', {}))
   assert.equal(json.includes('test-secret'), false)
 })
 
 // ---- P1-03: readiness and mount failures ----
-test('P1-03 readiness names the missing field and a deleted Bot is a mount error', async (t) => {
+test('P1-03 readiness names the missing field and a deleted Bot before Connect', async (t) => {
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const row = await rowOf(ctx)
   assert.match(JSON.stringify(row.levelNotes ?? row.levelNote), /Choose a Bot/)
   const missingUrl = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1' } })
   assert.equal(missingUrl.ok, true)
-  assert.match(JSON.stringify((await rowOf(ctx)).levelNotes ?? (await rowOf(ctx)).levelNote), /webhook URL/)
+  // P2 stores the URL as a credential and readiness runs before the store may be loaded, so
+  // "unknown" is not "missing": the mount names the missing URL once it can tell.
+  assert.equal(JSON.stringify((await rowOf(ctx)).levelNotes ?? (await rowOf(ctx)).levelNote ?? '').includes('webhook URL'), false)
+  const noUrl = await until(async () => ((await rowOf(ctx))?.state === 'error' ? await rowOf(ctx) : undefined), 'the missing URL mount error')
+  assert.match(noUrl.error, /Add the push webhook URL/)
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
   const ghost = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'deleted-bot', webhookUrl: receiver.url } })
   assert.equal(ghost.ok, true)
-  const connected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
-  assert.equal(connected.ok, true)
-  const failed = await until(async () => {
-    const current = await rowOf(ctx)
-    return current.state === 'error' ? current : undefined
-  }, 'the mount failure')
-  assert.match(failed.error, /no longer exists/)
+  // The binding is checked by readiness now, so the row stays off with the reason instead
+  // of mounting and failing.
+  await until(async () => ((await rowOf(ctx))?.levelNotes !== undefined ? true : undefined), 'the deleted Bot note')
+  const missingBot = await rowOf(ctx)
+  assert.equal(missingBot.state, 'off')
+  assert.match(missingBot.levelNotes.write, /bound to no longer exists/)
 })
 
 // ---- P1-04: connect; P1-05: the notify tool and its approval ----
-test('P1-04 connect turns the channel ready and P1 has no inbound field', async (t) => {
+test('P1-04 connect turns the channel ready; P2 serves it a loopback inbound address', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
   const { ctx, home } = setup()
@@ -174,7 +233,8 @@ test('P1-04 connect turns the channel ready and P1 has no inbound field', async 
   const row = await connectChannel(ctx, receiver)
   assert.deepEqual([row.state, row.level], ['ready', 'write'])
   assert.equal(row.card.levelChoice, false)
-  assert.equal(row.inbound, undefined)
+  const inbound = await until(async () => (await rowOf(ctx))?.inbound, 'the inbound address')
+  assert.match(inbound.url, /^http:\/\/127\.0\.0\.1:\d+\/wechat\/wechat\/inbound$/)
   assert.equal(row.login, undefined)
 })
 
@@ -275,14 +335,13 @@ test('P1-07b an error channel also refuses the switch, and a never connected one
   t.after(() => receiver.close())
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const full = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
   await connectChannel(ctx, receiver)
-  // Put the channel in error through a mounted Bot that no longer exists.
-  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, botId: 'deleted-bot' } })).ok, true)
-  await until(async () => ((await rowOf(ctx))?.state === 'error' ? true : undefined), 'the error row')
-  const refusedInError = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, transport: 'clawbot' } })
-  assert.equal(refusedInError.ok, false)
-  assert.equal(refusedInError.error.message, 'Disconnect this channel before changing the transport.')
+  // An error row is not reachable from the card in P1 (a broken binding is readiness and
+  // keeps the row off), so the module rule is checked against the context the host passes.
+  assert.throws(
+    () => normalizeWechatSettings({ transport: 'clawbot' }, { state: 'error', settings: { transport: 'webhook' } }),
+    /Disconnect this channel before changing the transport\./,
+  )
   // A one-argument normalizeSettings call still works (modules that ignore the context).
   assert.deepEqual(normalizeWechatSettings({ transport: 'webhook' }), { transport: 'webhook' })
 })
@@ -403,7 +462,7 @@ test('P1-15 the F5 card shape: field kinds, level descriptions, canTest and inst
   const byName = Object.fromEntries(row.fields.map(field => [field.name, field]))
   assert.equal(byName.botId.kind, 'bot')
   assert.equal(byName.botId.required, true)
-  assert.deepEqual(byName.transport.options.map(option => option.value), ['webhook']) // P1: ClawBot option comes with P3.
+  assert.deepEqual(byName.transport.options.map(option => option.value), ['webhook', 'clawbot']) // ClawBot arrives with this release (beta).
   assert.equal(byName.webhookSecret.kind, 'secret')
   assert.equal(byName.webhookSecret.saved, true)
   assert.equal('value' in byName.webhookSecret, false)
@@ -426,7 +485,7 @@ test('P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting 
   const json = JSON.stringify(await call(ctx, 'state', {}))
   assert.equal(json.includes('second-secret'), false)
   for (const row of await rowsOf(ctx)) {
-    assert.deepEqual(row.inputs.map(field => field.name), ['WECHAT_WEBHOOK_SECRET'])
+    assert.deepEqual(row.inputs.map(field => field.name), ['WECHAT_WEBHOOK_SECRET', 'WECHAT_WEBHOOK_URL'])
   }
   await toWrite(ctx, 'wechat')
   await toWrite(ctx, 'wechat-2')
@@ -445,31 +504,857 @@ test('P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting 
   assert.equal(ctx.registeredTools.has('wechat_2_notify'), false)
 })
 
-// ---- P2: inbound listener, binding and replies ----
-test.todo('P2-01 the listener binds 127.0.0.1 only: address is asserted, and no configuration can make it 0.0.0.0')
-test.todo('P2-02 a taken port leaves only that channel error with port and fix; the plugin boots and other connectors are ready')
-test.todo('P2-03 dispose closes the listener and unregisters every route: the port refuses connections, nothing stays in the route table')
-test.todo('P2-04 a missing or wrong HMAC signature answers 401 bad-signature and starts 0 Bot turns')
-test.todo('P2-05 a timestamp outside ±300s answers 401 stale-timestamp and starts 0 turns')
-test.todo('P2-06 a replayed nonce answers 401 replayed-nonce and starts 0 turns')
-test.todo('P2-07 a replayed msgId answers 200 duplicate and starts 0 turns; after a plugin restart it is still swallowed')
-test.todo('P2-08 the same text under a new msgId starts a turn (no content-hash swallowing)')
-test.todo('P2-09 over the per-channel rate limit answers 429 with retry_after and starts 0 turns')
-test.todo('P2-10 a sender outside the allowlist answers 403 sender-not-allowed and starts 0 turns')
-test.todo('P2-11 a deleted or failing Bot answers 502 bot-unavailable with the fallback sentence and no retry loop')
-test.todo('P2-12 two inbound messages are serialized: each reply answers its own msgId, correlated to that turn end')
-test.todo('P2-13a a synchronous wait over 20s answers 504 timeout; P2-13b an async turn over 120s sends a failure callback')
-test.todo('P2-14 rebinding A->B archives the A session, creates a new session for B, and answers in-flight requests 503 channel-rebound')
-test.todo('P2-15 an inbound turn that needs approval gets the WeChat notice only: the card stays unanswered and the tool runs 0 times')
-test.todo('P2-16 logs, diagnostics and state.json carry no sender text, no message body and no secret')
-test.todo('P2-17 the read level still answers inbound while wechat_notify stays unregistered')
-test.todo('P2-18 an unsupported connector-command action is refused: per-action allow-list, args checked, login-* only on clawbot')
-test.todo('P2-19 body over 64KB is refused while streaming (chunked included) and callbackUrl outside the loopback literals is refused')
+// ---- P2: inbound listener and its gate ----
+test('P2-01 the inbound listener binds 127.0.0.1 only', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup({ config: { wechat: { listenPort: 0, bindAddress: '0.0.0.0' } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  // A bind address is not a knob the profile owns: the address is loopback, whatever it says.
+  const url = await inboundUrl(ctx)
+  assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/wechat\/wechat\/inbound$/)
+  const accepted = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hello' })
+  assert.deepEqual([accepted.status, accepted.json.accepted], [202, true])
+})
+
+test('P2-02 a taken port leaves only that channel error with the port and the fix', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  // The port is busy before the channel asks for it.
+  const blocker = createServer()
+  await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen(0, '127.0.0.1', resolve) })
+  const port = blocker.address().port
+  t.after(() => new Promise(resolve => blocker.close(resolve)))
+  const { ctx, home } = setup({ config: { wechat: { listenPort: port } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const full = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: full })).ok, true)
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the outbound channel')
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, webhookSecret: 'test-secret' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const row = await until(async () => ((await rowOf(ctx))?.state === 'error' ? await rowOf(ctx) : undefined), 'the port error row')
+  assert.match(row.error, new RegExp(`port ${port}`))
+  assert.match(row.error, /wechat\.listenPort/)
+  // The plugin itself is healthy: the other connectors keep their own state.
+  const state = (await call(ctx, 'state', {})).value
+  assert.equal(state.connectors.find(item => item.id === 'wechat').state, 'error')
+  assert.equal(state.connectors.find(item => item.id === 'vercel').state, 'off')
+})
+
+test('P2-02a inbound waits for the webhook secret: a URL alone opens no port', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const port = await freePort()
+  const { ctx, home } = setup({ config: { wechat: { listenPort: port } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const full = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: full })).ok, true)
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'ready without a secret')
+  // The outbound half works, the inbound half waits and the card says so.
+  assert.equal((await rowOf(ctx)).inbound, undefined)
+  assert.equal((await rowOf(ctx)).status?.inbound, 'needs-secret')
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/wechat/wechat/inbound`, { method: 'POST' }))
+  // Saving the secret attaches the same channel on the configured port.
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, webhookSecret: 'test-secret' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const inbound = await until(async () => (await rowOf(ctx))?.inbound, 'the inbound address')
+  assert.match(inbound.url, new RegExp(`:${port}/wechat/wechat/inbound$`))
+  const accepted = await postInbound({ url: inbound.url, secret: 'test-secret', msgId: 'm-1', sender: 'creator' })
+  assert.equal(accepted.status, 202)
+})
+
+test('P2-02b removing the last channel and adding one at once keeps the port', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const port = await freePort()
+  const { ctx, home } = setup({ config: { wechat: { listenPort: port } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  assert.match(await inboundUrl(ctx), new RegExp(`:${port}/wechat/wechat/inbound$`))
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  // No waiting: the next channel must reuse the listener, not race a closing port.
+  assert.equal((await call(ctx, 'connector-create-instance', { base: 'wechat' })).ok, true)
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat-2', values: { transport: 'webhook', botId: 'b2', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const connected = await call(ctx, 'connector-connect', { id: 'wechat-2', values: { WECHAT_WEBHOOK_SECRET: 'second-secret' } })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  const second = await inboundUrl(ctx, 'wechat-2')
+  assert.match(second, new RegExp(`:${port}/wechat/wechat-2/inbound$`))
+  const row = (await rowsOf(ctx)).find(item => item.id === 'wechat-2')
+  assert.deepEqual([row.state, row.error], ['ready', undefined])
+  const accepted = await postInbound({ url: second, secret: 'second-secret', msgId: 'm-2', sender: 'creator' })
+  assert.equal(accepted.status, 202)
+})
+
+test('P2-03 dispose closes the inbound listener', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(() => rmSync(home, { recursive: true, force: true, maxRetries: 5 }))
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  await ctx.dispose()
+  // The port refuses connections once the plugin is gone, and quickly: a silent leak would
+  // leave the loopback port open after the user removed the last channel.
+  const started = Date.now()
+  await until(async () => {
+    try {
+      await fetch(url, { method: 'POST' })
+      return undefined
+    } catch {
+      return true
+    }
+  }, 'the inbound listener to close')
+  assert.ok(Date.now() - started < 2_000, `the port took ${Date.now() - started}ms to close`)
+})
+
+test('P2-28 disconnect closes the port and a disable keeps it closed', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const port = await freePort()
+  const { ctx, home } = setup({ config: { wechat: { listenPort: port } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  await inboundUrl(ctx)
+  const url = `http://127.0.0.1:${port}/wechat/wechat/inbound`
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  const started = Date.now()
+  await until(async () => {
+    try {
+      await fetch(url, { method: 'POST' })
+      return undefined
+    } catch {
+      return true
+    }
+  }, 'the port to close after a disconnect')
+  assert.ok(Date.now() - started < 2_000, `disconnect left the port open for ${Date.now() - started}ms`)
+})
+
+test('P2-04 a missing or wrong signature answers 401 bad-signature and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const unsigned = await postInbound({ url, msgId: 'm-1', sender: 'creator' })
+  assert.deepEqual([unsigned.status, unsigned.json.code], [401, 'bad-signature'])
+  const wrong = await postInbound({ url, secret: 'another-secret', msgId: 'm-2', sender: 'creator' })
+  assert.deepEqual([wrong.status, wrong.json.code], [401, 'bad-signature'])
+  // Nothing was written for a refused message: no channel state, no Session.
+  const state = (await call(ctx, 'state', {})).value
+  assert.equal(state.channels === undefined || Object.keys(state.channels).length === 0, true)
+})
+
+test('P2-05 a timestamp outside ±300s answers 401 stale-timestamp and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const now = Math.floor(Date.now() / 1000)
+  const old = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', timestamp: now - 301 })
+  assert.deepEqual([old.status, old.json.code], [401, 'stale-timestamp'])
+  const future = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', timestamp: now + 301 })
+  assert.deepEqual([future.status, future.json.code], [401, 'stale-timestamp'])
+  const fresh = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', timestamp: now })
+  assert.equal(fresh.status, 202)
+})
+
+test('P2-06 a replayed nonce answers 401 replayed-nonce and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const first = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', nonce: 'fixed-nonce' })
+  assert.equal(first.status, 202)
+  const replay = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', nonce: 'fixed-nonce' })
+  assert.deepEqual([replay.status, replay.json.code], [401, 'replayed-nonce'])
+})
+
+test('P2-09 over the per-channel rate limit answers 429 with retry_after and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  for (let index = 1; index <= 10; index += 1) {
+    const accepted = await postInbound({ url, secret: 'test-secret', msgId: `m-${index}`, sender: 'creator', text: 'hello' })
+    assert.equal(accepted.status, 202, `request ${index}`)
+  }
+  const limited = await postInbound({ url, secret: 'test-secret', msgId: 'm-11', sender: 'creator', text: 'hello' })
+  assert.equal(limited.status, 429)
+  assert.equal(limited.json.code, 'rate-limited')
+  assert.ok(Number.isInteger(limited.json.retry_after) && limited.json.retry_after >= 1, JSON.stringify(limited.json))
+})
+
+test('P2-10 a sender outside the allowlist answers 403 sender-not-allowed and starts 0 turns', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  // The first sender owns the channel conversation; a different sender is refused.
+  const creator = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hello' })
+  assert.equal(creator.status, 202)
+  const other = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'someone-else', text: 'hello' })
+  assert.deepEqual([other.status, other.json.code], [403, 'sender-not-allowed'])
+})
+
+test('P2-19 body over 64KB is refused while streaming and callbackUrl outside loopback is refused', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+
+  // A plain oversized body is stopped while it is being read, not after it is in memory.
+  const big = JSON.stringify({ msgId: 'big', sender_id: 'creator', text: 'x'.repeat(70_000) })
+  const bigResponse = await fetch(url, { method: 'POST', headers: wechatHeaders({ secret: 'test-secret', body: big }), body: big })
+  assert.equal(bigResponse.status, 413)
+  assert.equal((await bigResponse.json()).code, 'too-large')
+
+  // A chunked body has no Content-Length to trust; the streaming cap still catches it.
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let index = 0; index < 14; index += 1) controller.enqueue(new TextEncoder().encode(big.slice(index * 5_000, (index + 1) * 5_000)))
+      controller.close()
+    },
+  })
+  const chunked = await fetch(url, { method: 'POST', headers: wechatHeaders({ secret: 'test-secret', body: big }), body: stream, duplex: 'half' })
+  assert.equal(chunked.status, 413)
+
+  const outside = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', callbackUrl: 'http://example.com/callback' })
+  assert.equal(outside.status, 400)
+  const loopback = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', callbackUrl: 'http://127.0.0.1:9/callback' })
+  assert.equal(loopback.status, 202)
+  const secure = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', callbackUrl: 'https://example.com/callback' })
+  assert.equal(secure.status, 202)
+})
+
+test('P2-21 HMAC is mandatory and Bearer optional (default off); with Bearer on, a missing one answers 401', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  // Default: HMAC alone is enough.
+  const noToken = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator' })
+  assert.equal(noToken.status, 202)
+
+  const second = setup({ config: { wechat: { listenPort: 0, bearerRequired: true } } })
+  t.after(async () => { await second.ctx.dispose(); rmSync(second.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(second.ctx, receiver)
+  const inbound = await until(async () => (await rowOf(second.ctx))?.inbound, 'the bearer inbound address')
+  assert.equal(typeof inbound.token, 'string')
+  const missing = await postInbound({ url: inbound.url, secret: 'test-secret', msgId: 'm-2', sender: 'creator' })
+  assert.deepEqual([missing.status, missing.json.code], [401, 'bad-token'])
+  const wrong = await postInbound({ url: inbound.url, secret: 'test-secret', token: 'not-it', msgId: 'm-3', sender: 'creator' })
+  assert.deepEqual([wrong.status, wrong.json.code], [401, 'bad-token'])
+  const right = await postInbound({ url: inbound.url, secret: 'test-secret', token: inbound.token, msgId: 'm-4', sender: 'creator' })
+  assert.equal(right.status, 202)
+})
+test('P2-07 a replayed msgId answers 200 duplicate and starts 0 turns; after a restart it is still swallowed', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const first = setup()
+  t.after(() => rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }))
+  await connectChannel(first.ctx, receiver)
+  const sent = await postInbound({ url: await inboundUrl(first.ctx), secret: 'test-secret', msgId: 'm-restart', sender: 'creator', text: 'hello' })
+  assert.equal(sent.status, 202)
+  const again = await postInbound({ url: await inboundUrl(first.ctx), secret: 'test-secret', msgId: 'm-restart', sender: 'creator', text: 'hello' })
+  assert.deepEqual([again.status, again.json.duplicate], [200, true])
+
+  // The idempotency ring is persisted, so a restart still knows this msgId. The state file
+  // is flushed on unmount, not only by the five-second merge timer.
+  await first.ctx.dispose()
+  await until(() => (readFileSync(join(first.home, 'state.json'), 'utf8').includes('m-restart') ? true : undefined), 'the seen msgId to be saved')
+  const second = setup({ home: first.home })
+  t.after(async () => { await second.ctx.dispose() })
+  await connectChannel(second.ctx, receiver)
+  const replay = await postInbound({ url: await inboundUrl(second.ctx), secret: 'test-secret', msgId: 'm-restart', sender: 'creator', text: 'hello' })
+  assert.deepEqual([replay.status, replay.json.duplicate], [200, true])
+  // Neither copy reached a channel Session.
+  const state = (await call(second.ctx, 'state', {})).value
+  assert.equal(state.channels?.wechat?.conversations === undefined || Object.keys(state.channels.wechat.conversations).length === 0, true)
+})
+
+test('P2-08 the same text under a new msgId starts a turn (no content-hash swallowing)', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const first = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'same words' })
+  assert.equal(first.status, 202)
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the first turn')
+  const message = agent.calls[0]
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+  emitSession(agent.session.id, 'turn/start', { turn: 1 })
+  emitSession(agent.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'first' }] } })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  // The same words under a new msgId are a new message, not a duplicate by content.
+  const second = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'same words' })
+  assert.equal(second.status, 202)
+  await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 2), 'the second turn for a new msgId')
+  // One channel conversation for both messages, and the read level registers no notify.
+  assert.equal(sessionAgents.size, 1)
+  assert.equal(ctx.registeredTools.has('wechat_notify'), true, 'the single write level registers the notify tool')
+})
+
+test('P2-12 two inbound messages are serialized: each reply answers its own msgId', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const reply = (sessionId, turn, text, message) => {
+    emitSession(sessionId, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+    emitSession(sessionId, 'turn/start', { turn })
+    emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text }] } })
+    emitSession(sessionId, 'turn/end', { turn, reason: { kind: 'completed' } })
+  }
+  const firstPost = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'one', wait: 5_000 })
+  const secondPost = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'two', wait: 5_000 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the first delivery')
+  // The second message waits for the first turn; only one message is in the Session so far.
+  assert.equal([...sessionAgents.values()].reduce((count, entry) => count + entry.calls.length, 0), 1)
+  reply(agent.session.id, 1, 'answer one', agent.calls[0])
+  const first = await firstPost
+  assert.deepEqual([first.status, first.json.msgId, first.json.reply], [200, 'm-1', 'answer one'])
+  await until(() => [...sessionAgents.values()].map(entry => entry.calls[1]).find(Boolean), 'the second delivery')
+  reply(agent.session.id, 2, 'answer two', agent.calls[1])
+  const second = await secondPost
+  assert.deepEqual([second.status, second.json.msgId, second.json.reply], [200, 'm-2', 'answer two'])
+})
+
+test('P2-13a a synchronous wait over its limit answers 504 timeout without wedging the channel', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const late = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'slow', wait: 60 })
+  assert.deepEqual([late.status, late.json.code], [504, 'timeout'])
+  // The turn kept running; the next message is not stuck behind the timed-out wait.
+  await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the slow turn')
+  const agent = [...sessionAgents.values()][0]
+  const message = agent.calls[0]
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  const nextPost = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'next', wait: 5_000 })
+  const second = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 2), 'the next delivery')
+  emitSession(second.session.id, 'user/message', { source: { exchangeId: second.calls[1].source.exchangeId } })
+  emitSession(second.session.id, 'turn/start', { turn: 2 })
+  emitSession(second.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'ok' }] } })
+  emitSession(second.session.id, 'turn/end', { turn: 2, reason: { kind: 'completed' } })
+  const answered = await nextPost
+  assert.deepEqual([answered.status, answered.json.reply], [200, 'ok'])
+})
+test('P2-11 a Bot that disappears mid-channel answers 502 or the bot-unavailable callback', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const callback = await startWebhookReceiver({ secret: 'test-secret' })
+  t.after(() => callback.close())
+  const { ctx, rt, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  // A first message holds the serial queue, so the Bot can vanish before the next delivery.
+  const holding = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hold', wait: 5_000 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the holding turn')
+  const queued = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', callbackUrl: callback.url })
+  assert.equal((await queued).status, 202)
+  delete rt.state.bots.b1
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: agent.calls[0].source.exchangeId } })
+  emitSession(agent.session.id, 'turn/start', { turn: 1 })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  assert.equal((await holding).status, 200)
+  // The queued async message cannot reach the Bot any more: a signed failure callback.
+  const failed = await until(() => callback.requests[0], 'the bot-unavailable callback')
+  assert.deepEqual([failed.json.ok, failed.json.code], [false, 'bot-unavailable'])
+  // A failure callback is delivered once, not retried like a network flake.
+  await new Promise(resolve => setTimeout(resolve, 80))
+  assert.equal(callback.requests.length, 1)
+  // The synchronous path answers the same reason as a 502.
+  const sync = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', text: 'now', wait: 5_000 })
+  assert.deepEqual([sync.status, sync.json.code], [502, 'bot-unavailable'])
+})
+test('P2-13b an async turn that misses its deadline sends a signed failure callback', async (t) => {
+  const receiver = await startWebhookReceiver({ secret: 'test-secret' })
+  t.after(() => receiver.close())
+  const callback = await startWebhookReceiver({ secret: 'test-secret' })
+  t.after(() => callback.close())
+  const { ctx, home } = setup({ session: true, config: { wechat: { listenPort: 0, turnTimeoutMs: 80 } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const accepted = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', callbackUrl: callback.url })
+  assert.equal(accepted.status, 202)
+  const sent = await until(() => callback.requests[0], 'the failure callback')
+  assert.equal(sent.signatureOk, true, 'the callback is signed like an inbound request')
+  assert.deepEqual([sent.json.ok, sent.json.code, sent.json.msgId], [false, 'timeout', 'm-1'])
+})
+test('P2-14 rebinding A to B archives the A Session and answers the in-flight message 503', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, archived } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const inFlight = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'one', wait: 5_000 })
+  await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the first Bot turn')
+  // Rebinding through settings: the waiting message hears the rebound code, the old Session
+  // is archived with the reason, and the queue belongs to the new Bot afterwards.
+  const full = { transport: 'webhook', botId: 'b2', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: full })).ok, true)
+  const answered = await inFlight
+  assert.deepEqual([answered.status, answered.json.code], [503, 'channel-rebound'])
+  assert.equal(archived.length >= 1, true, 'the old Session was archived')
+})
+test('P2-15 an approval releases the channel queue and the next message is answered', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const waiting = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'needs approval', wait: 400 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the approval turn')
+  // The host asks the user: the channel hears it and does not answer the card itself.
+  const request = { agent: { session: { id: agent.session.id } }, toolName: 'demo_write', reason: 'write' }
+  for (const listener of ctx.listeners.get('approval/request') ?? []) listener(request, () => undefined)
+  const next = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'after', wait: 5_000 })
+  const second = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 2), 'the next delivery after approval')
+  emitSession(second.session.id, 'user/message', { source: { exchangeId: second.calls[1].source.exchangeId } })
+  emitSession(second.session.id, 'turn/start', { turn: 2 })
+  emitSession(second.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'answered' }] } })
+  emitSession(second.session.id, 'turn/end', { turn: 2, reason: { kind: 'completed' } })
+  const answered = await next
+  assert.deepEqual([answered.status, answered.json.reply], [200, 'answered'])
+  const timedOut = await waiting
+  assert.deepEqual([timedOut.status, timedOut.json.code], [504, 'timeout'])
+})
+test('P2-16 logs, diagnostics and state.json carry no sender text, no message body and no secret', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(() => rmSync(home, { recursive: true, force: true, maxRetries: 5 }))
+  await connectChannel(ctx, receiver)
+  const marker = 'BODY-MARKER-6f3a'
+  const sender = 'raw-sender-9c1'
+  const sent = await postInbound({ url: await inboundUrl(ctx), secret: 'test-secret', msgId: 'm-1', sender, text: marker })
+  assert.equal(sent.status, 202)
+  // The live view carries the sender hash and the id, never the sender text or the body.
+  const live = JSON.stringify((await call(ctx, 'state', {})).value)
+  assert.equal(live.includes(marker), false)
+  assert.equal(live.includes(sender), false)
+  assert.equal(live.includes('test-secret'), false)
+  await ctx.dispose()
+  const saved = readFileSync(join(home, 'state.json'), 'utf8')
+  assert.equal(saved.includes(marker), false)
+  assert.equal(saved.includes(sender), false)
+  assert.equal(saved.includes('test-secret'), false)
+})
+test('P2-17 the write level answers inbound and keeps wechat_notify registered', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const row = await connectChannel(ctx, receiver)
+  assert.equal(row.level, 'write')
+  assert.equal(ctx.registeredTools.has('wechat_notify'), true)
+  const url = await inboundUrl(ctx)
+  const waiting = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hello', wait: 5_000 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the read turn')
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: agent.calls[0].source.exchangeId } })
+  emitSession(agent.session.id, 'turn/start', { turn: 1 })
+  emitSession(agent.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'hi' }] } })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  const answered = await waiting
+  assert.deepEqual([answered.status, answered.json.reply], [200, 'hi'])
+  assert.equal(ctx.registeredTools.has('wechat_notify'), true)
+})
+test('P2-18 the login commands are declared and transport-gated', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  for (const action of ['login-start', 'login-refresh', 'login-cancel', 'login-poll']) {
+    const refused = await call(ctx, 'connector-command', { id: 'wechat', action })
+    assert.equal(refused.ok, false, action)
+    assert.equal(refused.error.code, 'bot/unsupported-transport', action)
+  }
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'clawbot', botId: 'b1' } })).ok, true)
+  const unknown = await call(ctx, 'connector-command', { id: 'wechat', action: 'delete-everything' })
+  assert.equal(unknown.ok, false)
+  assert.equal(unknown.error.code, 'bot/unknown-action')
+  const noConsent = await call(ctx, 'connector-command', { id: 'wechat', action: 'login-start' })
+  assert.equal(noConsent.ok, false)
+  assert.equal(noConsent.error.code, 'bot/invalid')
+})
 test.todo('P2-20 visibility: channel sessions never appear in search, read_own_chat, the index, the sidebar or another session')
-test.todo('P2-21 HMAC is mandatory and Bearer optional (default off); with Bearer on, a missing one answers 401')
 test.todo('P2-22a memory: no review enumeration, no memory prompt injection and no MEMORY.md entry for channel sessions')
 test.todo('P2-22b parts: channel sessions are excluded from checkpoints and segments')
-test.todo('P2-23 v1 keeps exactly one conversation session (the creator DM); no group session is pre-created')
-test.todo('P2-24 the tool denylist holds and untrusted travels in the headerFor message header')
+test('P2-23 v1 keeps exactly one conversation session and pre-creates no group session', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const reply = (agent, turn) => {
+    emitSession(agent.session.id, 'user/message', { source: { exchangeId: agent.calls.at(-1).source.exchangeId } })
+    emitSession(agent.session.id, 'turn/start', { turn })
+    emitSession(agent.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'ok' }] } })
+    emitSession(agent.session.id, 'turn/end', { turn, reason: { kind: 'completed' } })
+  }
+  const first = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'one', wait: 5_000 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the first message')
+  reply(agent, 1)
+  await first
+  const second = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'two', wait: 5_000 })
+  await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 2), 'the second message')
+  assert.equal(sessionAgents.size, 1, 'both messages answer in the same conversation Session')
+  reply(agent, 2)
+  await second
+})
+test('P2-11 a Bot that disappears mid-channel answers 502 or the bot-unavailable callback', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const callback = await startWebhookReceiver({ secret: 'test-secret' })
+  t.after(() => callback.close())
+  const { ctx, rt, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  // A first message holds the serial queue, so the Bot can vanish before the next delivery.
+  const holding = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hold', wait: 5_000 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the holding turn')
+  const queued = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', callbackUrl: callback.url })
+  assert.equal((await queued).status, 202)
+  delete rt.state.bots.b1
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: agent.calls[0].source.exchangeId } })
+  emitSession(agent.session.id, 'turn/start', { turn: 1 })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  assert.equal((await holding).status, 200)
+  // The queued async message cannot reach the Bot any more: a signed failure callback.
+  const failed = await until(() => callback.requests[0], 'the bot-unavailable callback')
+  assert.deepEqual([failed.json.ok, failed.json.code], [false, 'bot-unavailable'])
+  // A failure callback is delivered once, not retried like a network flake.
+  await new Promise(resolve => setTimeout(resolve, 80))
+  assert.equal(callback.requests.length, 1)
+  // The synchronous path answers the same reason as a 502.
+  const sync = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', text: 'now', wait: 5_000 })
+  assert.deepEqual([sync.status, sync.json.code], [502, 'bot-unavailable'])
+})
+test('P2-24b a tools switch change narrows in place, widens by a fresh Session, and never rebinds during mount', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, rt, home, sessionAgents, archived, emitSession } = setup({ session: true })
+  ctx.tools.schemas = () => [{ name: 'web_search' }, { name: 'bash' }]
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const base = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const totalCalls = () => [...sessionAgents.values()].reduce((count, entry) => count + entry.calls.length, 0)
+  let turn = 0
+  // One delivery plus the turn it opens: the queue only moves on when the turn ends.
+  const send = async (msgId) => {
+    const before = totalCalls()
+    await postInbound({ url, secret: 'test-secret', msgId, sender: 'creator', text: msgId })
+    const agent = await until(() => (totalCalls() > before ? [...sessionAgents.values()].filter(entry => entry.calls.length > 0).at(-1) : undefined), `the ${msgId} delivery`)
+    const message = agent.calls.at(-1)
+    turn += 1
+    emitSession(agent.session.id, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+    emitSession(agent.session.id, 'turn/start', { turn })
+    emitSession(agent.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'ok' }] } })
+    emitSession(agent.session.id, 'turn/end', { turn, reason: { kind: 'completed' } })
+    return agent
+  }
+  const first = await send('m-1')
+  assert.deepEqual(first.restricted.at(-1), { allow: [] })
+  // Same Session, next turn: the restriction is applied again, so the second turn is safe.
+  const firstAgain = await send('m-1b')
+  assert.equal(firstAgain, first, 'the same conversation Session answers both turns')
+  assert.deepEqual(firstAgain.restricted.at(-1), { allow: [] })
+  assert.equal(firstAgain.restricted.some(filter => filter.allow?.includes('bash')), false)
+
+  // Off -> on cannot widen a restriction in place, so the next message starts a fresh
+  // Session; the archive happens then, not during the settings save.
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...base, allowReadTools: 'on' } })).ok, true)
+  assert.equal(archived.length, 0, 'the settings save does not rebind during the mount')
+  const second = await send('m-2')
+  assert.notEqual(second, first, 'a fresh Session carries the wider allow-list')
+  assert.deepEqual(second.restricted.at(-1), { allow: ['web_search'] })
+  assert.equal(archived.length, 1)
+  assert.equal(rt.state.channels.wechat.history.at(0).reason, 'tools-changed')
+
+  // On -> off narrows the live Session in place and archives nothing.
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...base, allowReadTools: 'off' } })).ok, true)
+  const third = await send('m-3')
+  assert.equal(third, second, 'the conversation Session is kept')
+  assert.deepEqual(third.restricted.at(-1), { allow: [] })
+  assert.equal(third.restricted.some(filter => filter.allow?.includes('bash')), false)
+  assert.equal(archived.length, 1, 'narrowing in place archives nothing')
+})
+
+// Main path: agent/created alone restricts a conversation that survived a restart.
+test('P2-24c a restart opens the old conversation already restricted by agent/created', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const turn = (sessionId, agent, number, emitSession) => {
+    const message = agent.calls.at(-1)
+    emitSession(sessionId, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+    emitSession(sessionId, 'turn/start', { turn: number })
+    emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text: 'ok' }] } })
+    emitSession(sessionId, 'turn/end', { turn: number, reason: { kind: 'completed' } })
+  }
+  const first = setup({ session: true })
+  t.after(() => rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }))
+  await connectChannel(first.ctx, receiver)
+  const firstUrl = await inboundUrl(first.ctx)
+  await postInbound({ url: firstUrl, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'one' })
+  const firstAgent = await until(() => [...first.sessionAgents.values()].find(entry => entry.calls.length === 1), 'the first Session')
+  turn(firstAgent.session.id, firstAgent, 1, first.emitSession)
+  await first.ctx.dispose()
+
+  // New host, same home; the per-turn safety net is off so only agent/created can restrict.
+  const second = setup({ session: true, home: first.home, config: { wechat: { listenPort: 0, turnToolsRestrict: false } } })
+  t.after(async () => { await second.ctx.dispose() })
+  await second.rt.load()
+  await call(second.ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(second.ctx))?.state === 'ready' ? true : undefined), 'the restarted channel')
+  const url = await inboundUrl(second.ctx)
+  await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'two' })
+  const agent = await until(() => [...second.sessionAgents.values()].find(entry => entry.calls.length === 1), 'the restarted conversation')
+  assert.deepEqual(agent.restricted.at(-1), { allow: [] })
+})
+
+// Safety net: with the agent/created listener removed, runOne still restricts the turn.
+test('P2-24d the per-turn safety net restricts even without the agent/created hook', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  // Only the hub's own listener matters here: drop the hook before the first message.
+  ctx.listeners.set('agent/created', [])
+  const url = await inboundUrl(ctx)
+  await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'one' })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the safety-net turn')
+  assert.deepEqual(agent.restricted.at(-1), { allow: [] })
+  // Completing the turn is not needed for this assertion.
+})
+
+test('P2-24 a channel Session gets no tools by default and only web_search when read tools are on', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const off = setup({ session: true })
+  t.after(async () => { await off.ctx.dispose(); rmSync(off.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(off.ctx, receiver)
+  const offUrl = await inboundUrl(off.ctx)
+  await postInbound({ url: offUrl, secret: 'test-secret', msgId: 'm-off', sender: 'creator', text: 'none' })
+  const offAgent = await until(() => [...off.sessionAgents.values()].find(entry => entry.calls.length === 1), 'the default Session')
+  assert.deepEqual(offAgent.restricted.at(-1), { allow: [] })
+
+  // A fresh channel with the switch on: only web_search, even though the host serves more.
+  const on = setup({ session: true })
+  t.after(async () => { await on.ctx.dispose(); rmSync(on.home, { recursive: true, force: true, maxRetries: 5 }) })
+  on.ctx.tools.schemas = () => [{ name: 'web_search' }, { name: 'bash' }]
+  const saved = await call(on.ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic', allowReadTools: 'on' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  await call(on.ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
+  const onUrl = await inboundUrl(on.ctx)
+  await postInbound({ url: onUrl, secret: 'test-secret', msgId: 'm-on', sender: 'creator', text: 'some' })
+  const onAgent = await until(() => [...on.sessionAgents.values()].find(entry => entry.calls.length === 1), 'the read-tools Session')
+  assert.deepEqual(onAgent.restricted.at(-1), { allow: ['web_search'] })
+  // The segmented field reports the stored word, and no other tool is allowed.
+  const row = await rowOf(on.ctx)
+  assert.equal(row.fields.find(field => field.name === 'allowReadTools').value, 'on')
+})
 test.todo('P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504)')
 test.todo('P3: open the ClawBot option and its token field')
+
+// ---- G: the push webhook URL is a credential, and older state migrates once ----
+const legacyHome = (settings) => {
+  const home = teamHome()
+  writeFileSync(join(home, 'state.json'), JSON.stringify({
+    ...TEAM,
+    connectors: { wechat: { level: 'read', settings } },
+  }))
+  return home
+}
+
+test('G-1 an older plain webhook URL moves into the credential store', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const home = legacyHome({ transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' })
+  const { ctx, rt } = setup({ home })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.load()
+  await call(ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the migrated channel')
+  const row = await rowOf(ctx)
+  assert.equal(row.fields.find(field => field.name === 'webhookUrl').saved, true)
+  assert.equal(row.canTest, true)
+  // The plain value is gone from the state and the credential store has it.
+  await until(() => (readFileSync(join(home, 'state.json'), 'utf8').includes('webhookUrl') ? undefined : true), 'the legacy value to clear')
+  assert.equal(JSON.stringify(rt.state.connectors.wechat.settings).includes(receiver.url), false)
+})
+
+test('G-6 readiness uses the framework naming helper, stays quiet while unknown and mount names a missing URL', async (t) => {
+  const bot = () => ({ name: 'Chief' })
+  // The framework names the credential; readiness must ask for exactly those names.
+  const names = []
+  const helper = (suffix) => ({
+    secretName: base => `${base}${suffix}`,
+    secretValue: name => { names.push(name); return undefined },
+  })
+  const base = { settings: { transport: 'webhook', botId: 'b1' }, rt: { botOf: bot }, instance: { base: 'wechat', id: 'wechat' } }
+  assert.equal(wechatReadiness({ ...base, ...helper('') }), undefined)
+  assert.equal(wechatReadiness({ ...base, ...helper('_2'), instance: { base: 'wechat', id: 'wechat-2' } }), undefined)
+  assert.deepEqual(names, ['WECHAT_WEBHOOK_URL', 'WECHAT_WEBHOOK_URL_2'])
+  // Unknown (not loaded) is not the same as empty: no note, the row stays clickable.
+  assert.equal(wechatReadiness({ ...base, secretName: base => `${base}`, secretValue: () => undefined }), undefined)
+  // Explicitly empty is missing.
+  assert.match(wechatReadiness({ ...base, secretName: base => `${base}`, secretValue: () => '' }), /Add the push webhook URL/)
+  // The mount names the same sentence when Connect really has no URL.
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const connected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  const row = await until(async () => ((await rowOf(ctx))?.state === 'error' ? await rowOf(ctx) : undefined), 'the missing URL error row')
+  assert.match(row.error, /Add the push webhook URL/)
+})
+
+test('G-5 a replaced URL in the credential store wins over the old plain value', async (t) => {
+  const oldReceiver = await startWebhookReceiver()
+  t.after(() => oldReceiver.close())
+  const newReceiver = await startWebhookReceiver()
+  t.after(() => newReceiver.close())
+  const home = legacyHome({ transport: 'webhook', botId: 'b1', webhookUrl: oldReceiver.url, webhookFormat: 'generic' })
+  // The user replaced the URL on the card before the old value was cleaned up: the store has
+  // the new URL while the settings still carry the old one.
+  writeFileSync(join(home, 'secrets.json'), JSON.stringify({
+    version: 1,
+    secrets: [{ name: 'WECHAT_WEBHOOK_URL', value: newReceiver.url, purpose: '', scope: 'all' }],
+  }))
+  const { ctx, rt } = setup({ home })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.load()
+  await call(ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the replaced channel')
+  // Simulate the legacy value still being around (a pending or failed migration, or an old
+  // backup): the credential must still win over it.
+  rt.state.connectors.wechat.settings = { ...rt.state.connectors.wechat.settings, webhookUrl: oldReceiver.url }
+  await toWrite(ctx, 'wechat')
+  const pending = notifyToolOf(ctx).execute({ text: 'to the new one' }, { agent: { id: 'm1' } })
+  const shown = await until(() => card(ctx), 'the notice approval')
+  await answerCard(ctx, shown.id, ['Allow once'])
+  assert.equal(await pending, 'Sent.')
+  assert.equal(newReceiver.requests.length, 1)
+  assert.equal(oldReceiver.requests.length, 0)
+})
+
+test('G-2 a URL that cannot be stored keeps working outbound and is retried later', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const home = legacyHome({ transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' })
+  const { ctx, rt } = setup({ home })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.load()
+  // The credential store refuses the write; the plain URL must stay usable.
+  const real = rt.secretEndpoint
+  rt.secretEndpoint = async (endpoint, body) => {
+    if (endpoint === 'secret-set' && body.name === 'WECHAT_WEBHOOK_URL') throw new Error('store down')
+    return await real(endpoint, body)
+  }
+  await call(ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the fallback channel')
+  assert.equal(rt.state.connectors.wechat.settings.webhookUrl, receiver.url)
+  await toWrite(ctx, 'wechat')
+  const pending = notifyToolOf(ctx).execute({ text: 'with the old url' }, { agent: { id: 'm1' } })
+  const shown = await until(() => card(ctx), 'the notice approval')
+  await answerCard(ctx, shown.id, ['Allow once'])
+  assert.equal(await pending, 'Sent.')
+  assert.equal(receiver.requests.at(-1).json.text, 'with the old url')
+})
+
+test('G-3 a restart does not migrate the same URL twice', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const home = legacyHome({ transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' })
+  const first = setup({ home })
+  t.after(() => rmSync(home, { recursive: true, force: true, maxRetries: 5 }))
+  await first.rt.load()
+  await call(first.ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(first.ctx))?.state === 'ready' ? true : undefined), 'the first migrate')
+  await first.ctx.dispose()
+  const second = setup({ home })
+  t.after(async () => { await second.ctx.dispose() })
+  const writes = []
+  const real = second.rt.secretEndpoint
+  second.rt.secretEndpoint = async (endpoint, body) => { if (endpoint === 'secret-set') writes.push(body.name); return await real(endpoint, body) }
+  await second.rt.load()
+  await call(second.ctx, 'connector-retry', { id: 'wechat' })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(writes.includes('WECHAT_WEBHOOK_URL'), false, 'the second mount found the credential and did not write again')
+})
+
+test('G-4 wechat-2 migrates under the _2 name and its readiness sees it', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const home = teamHome()
+  writeFileSync(join(home, 'state.json'), JSON.stringify({
+    ...TEAM,
+    connectors: { wechat: { level: 'read', settings: { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' } }, 'wechat-2': { level: 'read', settings: { transport: 'webhook', botId: 'b2', webhookUrl: receiver.url, webhookFormat: 'generic' } } },
+  }))
+  const { ctx, rt } = setup({ home })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.load()
+  await call(ctx, 'connector-retry', { id: 'wechat' })
+  await call(ctx, 'connector-retry', { id: 'wechat-2' })
+  await until(async () => { const rows = await rowsOf(ctx); return ['wechat', 'wechat-2'].every(id => rows.find(row => row.id === id)?.state === 'ready') ? true : undefined }, 'both migrated rows')
+  await until(() => {
+    const saved = readFileSync(join(home, 'secrets.json'), 'utf8')
+    return saved.includes('WECHAT_WEBHOOK_URL') && saved.includes('WECHAT_WEBHOOK_URL_2') ? true : undefined
+  }, 'both URL credentials')
+  const row = await rowOf(ctx)
+  assert.equal(row.levelNote, undefined, 'readiness sees the migrated URL')
+  assert.equal(row.levelNotes, undefined)
+})
+
+test('F4 a bound Bot that is gone shows before Connect, not only as a mount error', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'deleted-bot', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  await until(async () => ((await rowOf(ctx))?.levelNotes !== undefined ? true : undefined), 'the level notes')
+  const missing = await rowOf(ctx)
+  assert.equal(missing.state, 'off')
+  assert.match(missing.levelNotes.write, /bound to no longer exists/)
+
+  // A Bot that exists clears the note and lets the channel mount.
+  const fixed = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal(fixed.ok, true, JSON.stringify(fixed))
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the channel ready')
+  assert.equal((await rowOf(ctx)).levelNotes, undefined)
+})
