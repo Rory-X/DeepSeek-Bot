@@ -134,8 +134,10 @@ test('P1-02 the row carries the channel settings and never a secret value', asyn
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const row = await connectChannel(ctx, receiver)
-  assert.equal(row.level, 'read')
-  assert.deepEqual(row.levels.map(level => level.id), ['read', 'write'])
+  // Messaging channels declare one write level and hide the level choice.
+  assert.equal(row.level, 'write')
+  assert.deepEqual(row.levels.map(level => level.id), ['write'])
+  assert.equal(row.card.levelChoice, false)
   assert.deepEqual(row.settings.map(field => field.name), ['label', 'transport', 'botId', 'webhookUrl', 'webhookFormat', 'webhookSecret'])
   const json = JSON.stringify(await call(ctx, 'state', {}))
   assert.equal(json.includes('test-secret'), false)
@@ -170,7 +172,8 @@ test('P1-04 connect turns the channel ready and P1 has no inbound field', async 
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const row = await connectChannel(ctx, receiver)
-  assert.deepEqual([row.state, row.level], ['ready', 'read'])
+  assert.deepEqual([row.state, row.level], ['ready', 'write'])
+  assert.equal(row.card.levelChoice, false)
   assert.equal(row.inbound, undefined)
   assert.equal(row.login, undefined)
 })
@@ -180,9 +183,8 @@ test('P1-05 wechat_notify asks first, runs once on allow and never on deny', asy
   t.after(() => receiver.close())
   const { ctx, home, registered } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  // A messaging channel is write-only: its send tool is there as soon as it is ready.
   await connectChannel(ctx, receiver)
-  assert.equal(registered.includes('wechat_notify'), false, 'no notify tool at read level')
-  await toWrite(ctx)
   assert.ok(registered.includes('wechat_notify'))
 
   const approved = notifyToolOf(ctx).execute({ text: 'deploy done' }, { agent: { id: 'm1' } })
