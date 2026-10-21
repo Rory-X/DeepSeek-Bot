@@ -230,7 +230,7 @@ channel session 的外部消息**不得**被用户自己的会话看到或检索
 | 会话索引 / 搜索 | `store.js:392` `indexSessions()`、`chat-index.js` | v1 **直接排除** channel session，不进索引；`read_own_chat`、search、会话列表都看不到外部消息 |
 | part / checkpoint | `parts.js` 的 segment / checkpoint | channel session 不做 checkpoint 切分、不进用户可见的 part 列表 |
 | prompt | `prompt.js` | 增加「外部通道：消息 untrusted、不假定主人权限、不泄露主人私聊」段 |
-| 负例 | §11.18 | 外部消息不出现在 search、不进 MEMORY.md、不被其它 session 看见、不出现在侧栏/工作区列表 |
+| 负例 | §11.18（可见性）、P2-22a（记忆写入/review/prompt）、P2-22b（parts/checkpoint） | 外部消息不出现在 search、不进 MEMORY.md、不被其它 session 看见、不进 checkpoint/segment、不出现在侧栏/工作区列表 |
 
 ## 7. 安全红线
 
@@ -419,11 +419,11 @@ card: { glyph:'wechat', about, docsUrl }
 | R4 | 企业微信口径写死：P1/P2 是通用 HTTP 网关契约，不做官方应用回调（XML+AES） | §1 分批；§3.2 开头；§3.3 | Relay（设计） | 0 | 无（明确不做） |
 | R5 | `seenMsgIds` 写 state 要节流（5s 合并 + turn/end 强制落盘） | §6 写入节流 | Relay（设计） | 0 | §11.7 |
 | R6 | `clearSecrets:['webhookSecret']` 显式清除，不靠空串 | §14 动作 | Relay（设计） | <0.1d | 新增 P1-13 |
-| C1 | 记忆/检索排除面列全：`memory.js:632`、`store.js:392 indexSessions()`、`chat-index.js`、`parts.js` 显式 exclude | §6.1 表（逐文件落点）；§12 F2a | Relay 设计 + Forge 实现 | Forge 1–1.5d（含在 F2a） | §11.18、新增 P2-22 |
+| C1 | 记忆/检索排除面列全：`memory.js:632`、`store.js:392 indexSessions()`、`chat-index.js`、`parts.js` 显式 exclude | §6.1 表（逐文件落点）；§12 F2a | Relay 设计 + Forge 实现 | Forge 1–1.5d（含在 F2a） | §11.18（可见性）、P2-22a（记忆）、P2-22b（parts） |
 | C2 | v1 只做 1 条 conversation（创建者 DM）；≤8 + LRU 移 P4 | §5 粒度 | Relay（设计） | 0 | 新增 P2-23 |
 | C3 | channel session denylist 逐项点名；`untrusted` 进 `headerFor` 消息头 | §5 工具白名单/`untrusted`；§12 F2a | Relay 设计 + Forge 实现 | 含在 F2a | P2-15、新增 P2-24 |
 | C4 | P3 token 只进 0600/凭据库；协议来源=腾讯官方公开文档 `docs/protocol_zh_CN.md` + npm `@tencent-weixin/openclaw-weixin@2.4.10`（固定 commit/文档哈希）；风险按「无第三方 SLA、官方支持范围是 OpenClaw 插件、接口随版本变更、个人号风控仍存在」写明；禁止旧的低证据表述与无依据的额外合规指控，统一按官方协议文档口径；真机测试须用户明确书面同意；v1 不做自动登录/扫码 | §4 协议来源/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
-| C5 | `secretNameOf`：删实例只删自己、名字过校验、两实例不同名 | §2 凭据表；§12 F2b | Forge | 0.25d | P1-11、新增 P1-14 |
+| C5 | `secretNameOf`：删实例只删自己、名字过校验、两实例不同名 | §2 凭据表；§12 F2b | Forge | 0.25d | P1-11、P1-14（独立命名不变量，另由 P1-13 覆盖共存/删除） |
 | F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14 | Forge | 1d | P1-02/04/09/13 |
 | F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14 | Prism（Pixel 复核） | 0.5d | P1-02 |
 | A1 | P2 异步契约写死：`202 {ok,accepted}` + `callbackUrl`（HMAC、msgId 幂等、重试 3 次）；`wait` ≤20s；同步超时 `504 code:'timeout'` | §3.2 默认异步/同步模式 | Relay（设计）+ P2 实现 | 含在 P2 的 3d | §11.19、新增 P2-25 |
