@@ -160,7 +160,7 @@ nonce 用每实例 LRU（1,000 条）挡重放；`msgId` 幂等见 §6。
   - **`untrusted` 必须进消息头**：不能只存 `source`；框架的 `headerFor` 要在注入正文里带 `[external channel · untrusted]` 段，模型从正文即可看到；`source` 仍带 `sender`/`untrusted` 供审计。
   - 需要框架补的小改动：`source` 上允许 `untrusted: true` 与 `sender`（现在的 source 字段是白名单的），见 §12。
 - **串行处理**：同一通道内单飞行队列；一条入站处理完（回复或超时）才处理下一条。
-- **回复关联键**：`msgId → exchangeId`。`deliver` 返回的 exchangeId 用于在该 Session 的 `session/event` 里认出对应的 `user/message`，再取紧随的 `turn/start` 的 turn 号，收集该 turn 内的 `assistant/message` 文本，`turn/end` 时用最后一段文本作为回复。超时 120s。
+- **回复关联键**：`msgId → exchangeId`。`deliver` 返回的 exchangeId 用于在该 Session 的 `session/event` 里认出对应的 `user/message`，再取紧随的 `turn/start` 的 turn 号，收集该 turn 内的 `assistant/message` 文本，`turn/end` 时用最后一段文本作为回复。**内部 turn 收口上限 120s**；同步 `wait` 见 §3.2（≤20s 到点先回 504，消息继续跑完）；异步在 120s 内未完成发 failure callback。
 - **换绑**：`A → B` 的序列是：标记「换绑中」→ 丢弃在途消息（等待中的请求回 `503 channel-rebound`，不重试）→ 归档旧 Session（owner 仍是 A，记录 `{sessionId, botId:A, at, reason:'rebind'}`）→ 为 B **新建** Session（新 id，不继承上下文）→ 更新 owner → ready。旧 Session 不删除、不复用。
 - **解绑/关闭通道**：同样丢弃在途、归档 Session、记录 `{reason:'unbind'|'instance-deleted'|'transport-changed'}`，通道转 off。
 - **Bot 不可用**：Bot 被删/不在线/轮次报错时，入站返回 `502 { code:'bot-unavailable', message:'Bot 暂不可用，稍后再试' }`，状态卡记录原因；**不无限重试**（每个入站最多一次投递）。
@@ -189,7 +189,7 @@ ready/error ──关闭通道、删除实例、transport 改变──▶ off（
 ```
 state.channels[instanceId] = {
   boundBotId,
-  conversations: { "dm:<senderHash>": { sessionId, boundBotId, createdAt, lastUsedAt } },   // ≤8，LRU
+  conversations: { "dm:<senderHash>": { sessionId, boundBotId, createdAt, lastUsedAt } },   // v1 仅一条 dm:<senderHash>；≤8/LRU 见 P4
   sessionHistory: [{ sessionId, botId, conversation, at, reason }],                          // 归档记录，最多 20 条
   seenMsgIds: [{ id, at }],                                                                   // 幂等环，最多 200 条
   status: { lastInboundAt, lastOutboundAt, lastError, lastErrorAt, retryAt }
@@ -276,7 +276,8 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 10. **Bot 不存在**：mount 不 ready，文案可操作（去设置里选一个存在的 Bot）。
 11. **换绑归档**：A→B 后旧 Session 被归档且记录 `{botId:A, reason:'rebind'}`；新 Session id 不同；在途请求收到 `503 channel-rebound` 且不重试。
 12. **串行与关联**：两条入站按序处理，回复分别回到各自 msgId；并发第二条不会抢到第一条的回复。
-13. **超时**：120s 无回复 → 504 + `code:'timeout'`，不重试、不重复投递。
+13a. **同步超时**：`wait` 到点（≤20s）先回 504 `code:'timeout'`，消息继续跑完、不重试、不重复投递；
+13b. **异步超时**：120s 内未完成 → 发 failure callback（同一 HMAC、msgId 幂等），不重复投递。
 14. **不代答审批**：入站触发需要审批的工具 → 微信侧收到「请回 DS Bot 处理」，审批卡未被自动回答、工具零调用。
 15. **脱敏**：日志与 diagnostics 不含 sender 原文、正文、secret；state.json 不含正文与 secret。
 16. **级别**：`read` 级无 `wechat_notify`；写等级别下审批卡出现且 allow 只执行一次、deny/超时/取消零请求。
@@ -297,7 +298,7 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 | F4 | `readiness({level,settings,instance,rt})` 传只读 `rt`（或更窄 `{botOf}`）；每行每级都会调，要求纯内存、无 IO | Forge | 可选 | 0.25d |
 | F6 | Client 渲染：`fields.kind`（bot/segmented/secret）、`instance.max`、`inbound`、`login`、`canTest`、`connector-command` 动作的卡片/表单实现（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | Prism 实现，Pixel 复核 | P1 | 0.5d |
 
-Forge 已开分支 `feat/wechat-framework-p1`（worktree `dsbot-wechatfwwt`，基线 `6255c87`），F1/F2b 先交；F2a 明天交。没有 F1 之前实例机制用不了，**不做「不合主线」的单实例骨架**。
+Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbot-wechatfwwt`，基线 `6255c87`），F1/F2b 先交；F2a 明天交。没有 F1 之前实例机制用不了，**不做「不合主线」的单实例骨架**。
 
 ### 12.1 iLink 客户端附录（P3 可行性）
 
@@ -307,7 +308,6 @@ Forge 已开分支 `feat/wechat-framework-p1`（worktree `dsbot-wechatfwwt`，�
 - **测试**：本地 mock iLink（复用 `fakeWebServer` 模式），覆盖游标重启恢复、重复/乱序消息、`context_token` 传递、退避与 `-14`、断线重连。
 - **不进 v1**：媒体 CDN（AES-ECB 上传/下载）、voice SILK 转码。
 
-没有 F1 之前，实例机制用不了，P1 只能先做单实例的骨架与出站实现（可并行，但不合主线）。
 
 ## 13. 分阶段计划与工作量
 
