@@ -24,9 +24,9 @@ const seed = () => ({
   revision: 0,
 })
 
-async function start({ state = seed(), schemas = [] } = {}) {
-  const home = mkdtempSync(join(tmpdir(), 'dsb-channels-'))
-  writeFileSync(join(home, 'state.json'), JSON.stringify(state))
+async function start({ state = seed(), schemas = [], home: reuse } = {}) {
+  const home = reuse ?? mkdtempSync(join(tmpdir(), 'dsb-channels-'))
+  if (reuse === undefined) writeFileSync(join(home, 'state.json'), JSON.stringify(state))
   const ctx = fakeContext()
   const created = []
   const archived = []
@@ -72,7 +72,8 @@ async function start({ state = seed(), schemas = [] } = {}) {
     await ctx.dispose()
     rmSync(home, { recursive: true, force: true, maxRetries: 5 })
   }
-  return { rt, ctx, home, created, archived, workspaces, agents, emitSession, stop }
+  const dispose = async () => { await ctx.dispose() }
+  return { rt, ctx, home, created, archived, workspaces, agents, emitSession, stop, dispose }
 }
 
 const bind = (rt, overrides = {}) => rt.channelSessionFor({ instance: 'wechat', botId: 'a', conversationId: 'dm:u1', title: 'Chief · WeChat', settings: {}, ...overrides })
@@ -177,4 +178,63 @@ test('a channel turn ends with its text, or with the error that ended it', async
   const error = { message: 'model failed', code: 'UNKNOWN' }
   host.emitSession(sessionId, 'turn/end', { reason: { kind: 'error', error } })
   assert.deepEqual(replies.at(-1), { text: '', reason: { kind: 'error', error }, error })
+})
+
+test('a channel conversation is found again after a restart', async (t) => {
+  const first = await start()
+  t.after(async () => { rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }) })
+  const sessionId = await bind(first.rt)
+  await first.dispose()
+
+  // A restart rebuilds the ownership from the state file, without the module or a mount.
+  const second = await start({ home: first.home })
+  t.after(second.stop)
+  assert.equal(second.rt.isChannelSession(sessionId), true)
+  assert.equal(second.rt.selfOf(sessionId), 'a')
+  assert.equal(second.rt.channelOwners.get(sessionId).instance, 'wechat')
+  assert.equal(second.rt.channelOwners.get(sessionId).conversationId, 'dm:u1')
+})
+
+test('a channel keeps at most eight conversations and archives the oldest', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const ids = []
+  for (let index = 1; index <= 9; index += 1) ids.push(await bind(host.rt, { conversationId: `dm:u${index}` }))
+  const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
+  assert.equal(Object.keys(saved.channels.wechat.conversations).length, 8)
+  assert.equal(saved.channels.wechat.history.some(entry => entry.sessionId === ids[0] && entry.reason === 'lru'), true)
+  assert.equal(host.rt.isChannelSession(ids[0]), false)
+  assert.equal(host.rt.isChannelSession(ids.at(-1)), true)
+})
+
+test('closing a channel archives its conversations and keeps the record', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  await host.rt.closeChannel('wechat', 'instance-deleted')
+  assert.deepEqual(host.archived, [[sessionId, { stopActivity: true }]])
+  assert.equal(host.rt.isChannelSession(sessionId), false)
+  const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
+  assert.deepEqual(saved.channels.wechat.history.map(entry => [entry.sessionId, entry.reason]), [[sessionId, 'instance-deleted']])
+})
+
+test('a channel Session is not one of the Bot\'s own chat parts', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  assert.deepEqual(host.rt.partsOf('a').map(part => part.sessionId), ['a'])
+  assert.equal(host.rt.partsOf('a').some(part => part.sessionId === sessionId), false)
+  assert.equal(host.rt.chatOf('a'), 'a')
+})
+
+test('unsubscribing a reply handler stops the replies', async (t) => {
+  const host = await start()
+  t.after(host.stop)
+  const sessionId = await bind(host.rt)
+  const replies = []
+  const off = host.rt.onChannelReply(sessionId, reply => replies.push(reply))
+  off()
+  host.emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text: 'ignored' }] } })
+  host.emitSession(sessionId, 'turn/end', { reason: { kind: 'completed' } })
+  assert.deepEqual(replies, [])
 })
