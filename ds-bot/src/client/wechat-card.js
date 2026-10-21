@@ -81,6 +81,10 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     return note ?? fallbackNote
   }
   const connectNote = levelBlocked(currentLevel)
+  // The level rows already print their host reason; drawing the same sentence again above the
+  // remove block reads like a second error.
+  const connectNoteAlreadyShown = connectNote !== null
+    && levels.some(item => item.id !== currentLevel && levelBlocked(item.id) === connectNote)
   const run = (task, after) => {
     setBusy(true)
     setError(null)
@@ -208,7 +212,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
             item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null),
             blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
         })),
-      h('div', { className: 'bt-connector-hint' }, t('Changing the access level reconnects this channel.')))
+      h('div', { className: 'bt-connector-hint' }, t('Changing the access level changes what this channel can do.')))
     : null
   const inbound = transportOf(row) === 'webhook' && row.inbound !== null && typeof row.inbound === 'object' ? row.inbound : null
   const inboundBlock = inbound !== null
@@ -297,7 +301,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
             h('div', { className: 'bt-connector-form-row' },
               h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy || !settingsChanged, onClick: save }, t('Save settings'))),
             h('div', { className: 'bt-connector-hint' }, t('The name changes only this channel; the binding and its credentials stay the same.')))),
-        connectNote !== null && row.state !== 'ready' ? h('div', { className: 'bt-connector-hint' }, connectNote) : null,
+        connectNote !== null && row.state !== 'ready' && !connectNoteAlreadyShown ? h('div', { className: 'bt-connector-hint' }, connectNote) : null,
         loginBlock,
         inboundBlock,
         confirmTransport

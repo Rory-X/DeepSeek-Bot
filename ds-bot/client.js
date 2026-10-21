@@ -419,7 +419,7 @@ var ZH = {
   "Switching the transport disconnects this channel. Continue?": "切换传输方式会断开此通道，继续？",
   "Switch transport": "切换传输方式",
   Continue: "继续",
-  "Changing the access level reconnects this channel.": "切换访问级别会重新连接此通道。",
+  "Changing the access level changes what this channel can do.": "切换访问级别会改变这个通道能做的事。",
   "The name changes only this channel; the binding and its credentials stay the same.": "名称只改这个通道，绑定和凭据都不变。",
   "Copy failed — select the text instead.": "复制失败，请手动选择文本。",
   Saved: "已保存",
@@ -3493,6 +3493,7 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* A setting can also be a picker, a two-way switch or a secret the host only says it has. */
 .bt-connector-field-control{display:flex;align-items:center;gap:8px;min-width:0}
 .bt-connector-field-control .bt-q-field{flex:1 1 auto;min-width:0}
+.bt-connector-field-control .bt-connector-link{flex:none}
 .bt-connector-field-state{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
 .bt-connector-field .bt-select{min-width:0}
 /* Several instances of one module: each is a card of its own, the panel names the fields the
@@ -14601,6 +14602,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     return note ?? fallbackNote;
   };
   const connectNote = levelBlocked(currentLevel);
+  const connectNoteAlreadyShown = connectNote !== null && levels.some((item) => item.id !== currentLevel && levelBlocked(item.id) === connectNote);
   const run = (task, after) => {
     setBusy(true);
     setError(null);
@@ -14762,7 +14764,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
         );
       })
     ),
-    (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, t("Changing the access level reconnects this channel."))
+    (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, t("Changing the access level changes what this channel can do."))
   ) : null;
   const inbound = transportOf(row) === "webhook" && row.inbound !== null && typeof row.inbound === "object" ? row.inbound : null;
   const inboundBlock = inbound !== null ? (0, import_react37.createElement)(
@@ -14903,7 +14905,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
           (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, t("The name changes only this channel; the binding and its credentials stay the same."))
         )
       ),
-      connectNote !== null && row.state !== "ready" ? (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, connectNote) : null,
+      connectNote !== null && row.state !== "ready" && !connectNoteAlreadyShown ? (0, import_react37.createElement)("div", { className: "bt-connector-hint" }, connectNote) : null,
       loginBlock,
       inboundBlock,
       confirmTransport ? (0, import_react37.createElement)(

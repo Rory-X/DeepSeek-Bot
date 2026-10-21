@@ -190,7 +190,7 @@ const ZH = {
   'Switching the transport disconnects this channel. Continue?': '切换传输方式会断开此通道，继续？',
   'Switch transport': '切换传输方式',
   Continue: '继续',
-  'Changing the access level reconnects this channel.': '切换访问级别会重新连接此通道。',
+  'Changing the access level changes what this channel can do.': '切换访问级别会改变这个通道能做的事。',
   'The name changes only this channel; the binding and its credentials stay the same.': '名称只改这个通道，绑定和凭据都不变。',
   'Copy failed — select the text instead.': '复制失败，请手动选择文本。',
   Saved: '已保存',
