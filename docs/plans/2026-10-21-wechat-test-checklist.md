@@ -11,7 +11,7 @@
 |---|---|---|
 | P1-01 | 实例：创建 `wechat-2`、删除、再建第 9 个 | 前两者成功；第 9 个返回宿主原文，客户端禁用 Add |
 | P1-02 | 卡片字段描述符 | `fields` 带 `kind`（text/secret/bot/segmented）；`webhookSecret` 只有 `saved`，无 value |
-| P1-03 | readiness 四缺 | 缺 `botId` / Bot 被删 / 缺 `webhookUrl` / 缺 secret → `levelNotes` 各给一句，无 Connect |
+| P1-03 | readiness 三缺 + secret 可选 | 缺 `botId` / Bot 被删 / 缺 `webhookUrl` 三缺各给一句 `levelNotes`、无 Connect；`webhookSecret` 本批可选（设计 §3.1「secret 可选」），缺省仍 ready、出站 POST 不签名，配了才签。`connector-connect` 至少带一个凭据值是框架约束；只保存 settings 时框架会自动挂载 |
 | P1-04 | `connector-connect` webhook | 转 `ready`；`canTest:true`；P1 无 `inbound` 字段 |
 | P1-05 | `wechat_notify` 级别 | 仅 write 级注册；line 含通道名与 webhook host，不含完整 URL/secret |
 | P1-06 | 审批四路 | allow 只 POST 一次；deny/dismiss/timeout/cancel 各 0 请求 |
@@ -65,7 +65,7 @@
 | 未选 Bot | `Choose a Bot for this channel.` |
 | Bot 被删 | `The Bot this channel is bound to no longer exists. Choose another Bot.` |
 | 缺 webhook URL | `Add the push webhook URL for this channel.` |
-| 缺 webhook secret | `Add a webhook secret for this channel before it can receive messages.` |
+| 缺 webhook secret（P2 入站才需要；P1 出站可选） | `Add a webhook secret for this channel before it can receive messages.` |
 | 端口被占 | `The inbound port <port> is already in use. Change wechat.listenPort in the profile or stop the process using that port.` |
 | clawbot 未登录 | `This ClawBot channel is not logged in. Paste its bot token in the channel settings.` |
 | 改 transport（已连接） | `Disconnect this channel before changing the transport.` |
