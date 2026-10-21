@@ -24,7 +24,7 @@ const seed = () => ({
   revision: 0,
 })
 
-async function start({ state = seed(), schemas = [], home: reuse } = {}) {
+async function start({ state = seed(), schemas = [], home: reuse, config = {} } = {}) {
   const home = reuse ?? mkdtempSync(join(tmpdir(), 'dsb-channels-'))
   if (reuse === undefined) writeFileSync(join(home, 'state.json'), JSON.stringify(state))
   const ctx = fakeContext()
@@ -62,7 +62,7 @@ async function start({ state = seed(), schemas = [], home: reuse } = {}) {
     sessionTitle: { rename: async () => {} },
     sessions: { flush: async () => {} },
   })
-  const rt = createRuntime(ctx, { home })
+  const rt = createRuntime(ctx, { home, ...config })
   await rt.load()
   const listeners = name => ctx.listeners.get(name) ?? []
   const emitSession = (sessionId, type, data) => {
@@ -237,4 +237,24 @@ test('unsubscribing a reply handler stops the replies', async (t) => {
   host.emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text: 'ignored' }] } })
   host.emitSession(sessionId, 'turn/end', { reason: { kind: 'completed' } })
   assert.deepEqual(replies, [])
+})
+
+test('a channel turn reaches no memory review and no roster map', async (t) => {
+  const host = await start({ config: { memoryReviewDelayMs: 5 } })
+  t.after(host.stop)
+  // The review trigger itself works: a Bot chat Session ending schedules one.
+  host.ctx.emit('agent/status', { agent: { id: 'a' }, status: 'idle' })
+  assert.equal(host.rt.memoryReviews(), 1)
+  await new Promise(resolve => setTimeout(resolve, 30))
+
+  const sessionId = await bind(host.rt)
+  host.ctx.emit('agent/status', { agent: { id: sessionId }, status: 'idle' })
+  await new Promise(resolve => setTimeout(resolve, 30))
+  assert.equal(host.rt.memoryReviews(), 0)
+  // No roster map knows the channel Session, and the team roster is untouched.
+  assert.equal(host.rt.chatOwners.has(sessionId), false)
+  assert.equal(host.rt.groupOwners.has(sessionId), false)
+  assert.equal(host.rt.pastOwners.has(sessionId), false)
+  assert.deepEqual(Object.keys(host.rt.state.bots).sort(), ['a', 'b'])
+  assert.deepEqual(host.rt.state.rooms, {})
 })
