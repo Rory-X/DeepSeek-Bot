@@ -35,4 +35,7 @@ test('connect reads the declared fields and nothing else', () => {
   assert.throws(() => connectValues({ tokenSecret: 'WEREAD_API_KEY' }, { token: '  ' }), /Paste WEREAD_API_KEY first/)
   // An optional field left empty is skipped, not refused.
   assert.deepEqual(connectValues({ credentials: [{ name: 'A' }, { name: 'B', required: false }] }, { values: { A: 'x', B: '' } }), { A: 'x' })
+  // Every credential optional and none given: a channel that logs in later still connects.
+  assert.deepEqual(connectValues({ credentials: [{ name: 'CHANNEL_TOKEN', required: false }] }, {}), {})
+  assert.deepEqual(connectValues({ credentials: [{ name: 'CHANNEL_TOKEN', required: false }] }, { values: {} }), {})
 })

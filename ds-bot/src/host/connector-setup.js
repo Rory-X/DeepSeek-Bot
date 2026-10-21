@@ -36,6 +36,7 @@ export function connectValues(connector, body) {
     }
     values[field.name] = value
   }
-  if (Object.keys(values).length === 0) throw new Error('Paste the connector credentials first')
+  // Every required field was checked above. A connector whose credentials are all optional
+  // (a channel that logs in later) has nothing to paste, and that is a valid connect.
   return values
 }
