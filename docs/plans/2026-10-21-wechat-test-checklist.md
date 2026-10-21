@@ -106,51 +106,52 @@
 
 ## 清单 ID ↔ 测试名 ↔ 文件行（P2 验收前定稿）
 
-测试文件：`ds-bot/test/wechat.test.js`（行号基于 P1 tip；改文件后需同步本表）。`pass` = 已转绿，`todo` = P2 待实现。
-两个 fakes 自测不计入清单 ID：`fakes: signed request verifies`（第 93 行）、`fakes: one signature both directions`（第 103 行），均 pass。
+测试文件：`ds-bot/test/wechat.test.js`（行号基于 P1 最终 tip `24c2e4e`；改文件后需同步本表）。`pass` = 已转绿，`todo` = P2 待实现。
+两个 fakes 自测不计入清单 ID：`fakes: signed request verifies`（第 94 行）、`fakes: one signature both directions`（第 104 行），均 pass。
 
 | 清单 ID | 测试函数名 | 行 | 状态 | 覆盖断言 |
 |---|---|---|---|---|
-| P1-01 | P1-01 a channel is one instance: create adds wechat-2, delete removes it, the ninth is refused | 114 | pass | 实例上限/创建/删除/第九个拒绝 |
-| P1-02 | P1-02 the row carries the channel settings and never a secret value | 130 | pass | settings 行与 secret 不下发 |
-| P1-03 | P1-03 readiness names the missing field and a deleted Bot is a mount error | 144 | pass | readiness 文案 + Bot 不存在挂载错误 |
-| P1-04 | P1-04 connect turns the channel ready and P1 has no inbound field | 166 | pass | connect 后 ready、P1 无 inbound/login |
-| P1-05 | P1-05 wechat_notify asks first, runs once on allow and never on deny | 177 | pass | 审批卡、allow 一次、deny 零请求 |
-| P1-06 | P1-06 outbound errors map to the fixed sentences and over-long text fails first | 205 | pass | 错误映射 + 4000/2048 限长 |
-| P1-07 | P1-07 transport change while ready: needs a host settings-change hook (open gap with Forge, P2 blocker) | 235 | todo | 待 host settings-change 钩子（P2 阻塞） |
-| P1-10 | P1-10 deleting an instance stops its mount and leaves the other channel ready | 236 | todo | 删实例只停自己（todo） |
-| P1-11 | P1-11 profile wechat:false hides the rows and opens nothing | 237 | todo | profile false（todo） |
-| P1-12 | P1-12 an empty text field clears its stored value | 238 | pass | 文本空串清空 |
-| P1-08 | P1-08 connector-test posts the fixed notice and a failure stays on the row | 250 | pass | test 钩子成功/失败/清 error |
-| P1-09 | P1-09 a secret saved on the card shows saved, never a value, and clearSecrets removes it | 273 | pass | secret saved / 不下发值 / clearSecrets |
-| P1-14 | P1-14 F2b naming invariants: bare first, _2 second, coexist, delete only its own | 291 | pass | ①首实例裸名 ②`wechat-2` 派生 `_2` ③两实例 secret 共存互不覆盖 ④删 `wechat-2` 只删自己、首实例仍 ready |
-| P1-15 | P1-15 the F5 card shape: field kinds, level descriptions, canTest and instance.max | 314 | pass | F5 view/status：`fields.kind`（bot/segmented/secret）、`levels[].description`、`canTest:true`、`instance.max=8`、secret 只有 `saved` 无 value |
-| P1-13 | P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting it touches only its own | 333 | pass | 两通道 secret 共存 + 各自签名 + 删实例只删自己 |
-| P2-01 | P2-01 the listener binds 127.0.0.1 only: address is asserted, and no configuration can make it 0.0.0.0 | 371 | todo | 监听地址 127.0.0.1 |
-| P2-02 | P2-02 a taken port leaves only that channel error with port and fix; the plugin boots and other connectors are ready | 372 | todo | 端口被占降级 |
-| P2-03 | P2-03 dispose closes the listener and unregisters every route: the port refuses connections, nothing stays in the route table | 373 | todo | dispose 零路由 |
-| P2-04 | P2-04 a missing or wrong HMAC signature answers 401 bad-signature and starts 0 Bot turns | 374 | todo | HMAC 401 |
-| P2-05 | P2-05 a timestamp outside ±300s answers 401 stale-timestamp and starts 0 turns | 375 | todo | 时间戳 401 |
-| P2-06 | P2-06 a replayed nonce answers 401 replayed-nonce and starts 0 turns | 376 | todo | nonce 401 |
-| P2-07 | P2-07 a replayed msgId answers 200 duplicate and starts 0 turns; after a plugin restart it is still swallowed | 377 | todo | msgId 幂等（含重启） |
-| P2-08 | P2-08 the same text under a new msgId starts a turn (no content-hash swallowing) | 378 | todo | 新 msgId 同文本触发 |
-| P2-09 | P2-09 over the per-channel rate limit answers 429 with retry_after and starts 0 turns | 379 | todo | 429 限速 |
-| P2-10 | P2-10 a sender outside the allowlist answers 403 sender-not-allowed and starts 0 turns | 380 | todo | 403 发送者 |
-| P2-11 | P2-11 a deleted or failing Bot answers 502 bot-unavailable with the fallback sentence and no retry loop | 381 | todo | 502 Bot 不可用 |
-| P2-12 | P2-12 two inbound messages are serialized: each reply answers its own msgId, correlated to that turn end | 382 | todo | 串行与回复关联 |
-| P2-13a | P2-13a a synchronous wait over 20s answers 504 timeout; P2-13b an async turn over 120s sends a failure callback | 383 | todo | 同步 wait 504 |
-| P2-14 | P2-14 rebinding A->B archives the A session, creates a new session for B, and answers in-flight requests 503 channel-rebound | 384 | todo | 换绑归档/新 session/503 |
-| P2-15 | P2-15 an inbound turn that needs approval gets the WeChat notice only: the card stays unanswered and the tool runs 0 times | 385 | todo | 审批不代答 |
-| P2-16 | P2-16 logs, diagnostics and state.json carry no sender text, no message body and no secret | 386 | todo | 日志/state 脱敏 |
-| P2-17 | P2-17 the read level still answers inbound while wechat_notify stays unregistered | 387 | todo | read 级入站 |
-| P2-18 | P2-18 an unsupported connector-command action is refused: per-action allow-list, args checked, login-* only on clawbot | 388 | todo | connector-command 白名单/参数/transport |
-| P2-19 | P2-19 body over 64KB is refused while streaming (chunked included) and callbackUrl outside the loopback literals is refused | 389 | todo | 流式 64KB + callbackUrl loopback |
-| P2-20 | P2-20 visibility: channel sessions never appear in search, read_own_chat, the index, the sidebar or another session | 390 | todo | 可见性隔离 |
-| P2-21 | P2-21 HMAC is mandatory and Bearer optional (default off); with Bearer on, a missing one answers 401 | 391 | todo | HMAC 必选/Bearer 可选 |
-| P2-22a | P2-22a memory: no review enumeration, no memory prompt injection and no MEMORY.md entry for channel sessions | 392 | todo | memory review/prompt/MEMORY.md 排除 |
-| P2-22b | P2-22b parts: channel sessions are excluded from checkpoints and segments | 393 | todo | parts/checkpoint 排除 |
-| P2-23 | P2-23 v1 keeps exactly one conversation session (the creator DM); no group session is pre-created | 394 | todo | 单 conversation |
-| P2-24 | P2-24 the tool denylist holds and untrusted travels in the headerFor message header | 395 | todo | denylist + headerFor untrusted |
-| P2-25 | P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504) | 396 | todo | = P2-13a/13b |
+| P1-01 | P1-01 a channel is one instance: create adds wechat-2, delete removes it, the ninth is refused | 115 | pass | 实例上限/创建/删除/第九个拒绝 |
+| P1-02 | P1-02 the row carries the channel settings and never a secret value | 131 | pass | settings 行与 secret 不下发 |
+| P1-03 | P1-03 readiness names the missing field and a deleted Bot is a mount error | 145 | pass | readiness 文案 + Bot 不存在挂载错误 |
+| P1-04 | P1-04 connect turns the channel ready and P1 has no inbound field | 167 | pass | connect 后 ready、P1 无 inbound/login |
+| P1-05 | P1-05 wechat_notify asks first, runs once on allow and never on deny | 178 | pass | 审批卡、allow 一次、deny 零请求 |
+| P1-06 | P1-06 outbound errors map to the fixed sentences and over-long text fails first | 206 | pass | 错误映射 + 4000/2048 限长 |
+| P1-07 | P1-07 a connected channel refuses a transport change until it is disconnected | 236 | pass | ready 改 transport 拒绝（文案精确）+ 其它字段照常保存 |
+| P1-07b | P1-07b an error channel also refuses the switch, and a never connected one may switch | 254 | pass | error 改 transport 拒绝 + off 允许 + 单参 normalize 不受影响 |
+| P1-10 | P1-10 deleting one channel unmounts only it; the other stays ready | 275 | pass | 删实例只停自己 |
+| P1-11 | P1-11 the connector turned off in the profile has no row and registers nothing | 295 | pass | profile false 无行无工具（监听半边见 P2-02/P2-03） |
+| P1-12 | P1-12 an empty text field clears its stored value | 302 | pass | 文本空串清空 |
+| P1-08 | P1-08 connector-test posts the fixed notice and a failure stays on the row | 314 | pass | test 钩子成功/失败/清 error |
+| P1-09 | P1-09 a secret saved on the card shows saved, never a value, and clearSecrets removes it | 337 | pass | secret saved / 不下发值 / clearSecrets |
+| P1-14 | P1-14 F2b naming invariants: bare first, _2 second, coexist, delete only its own | 355 | pass | ①裸名 ②_2 ③共存互不覆盖 ④删只删自己且首实例 ready |
+| P1-15 | P1-15 the F5 card shape: field kinds, level descriptions, canTest and instance.max | 378 | pass | F5 view/status：fields kind/levels description/canTest/instance.max/secret saved |
+| P1-13 | P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting it touches only its own | 397 | pass | 两通道 secret 共存 + 各自签名 + 删实例只删自己 |
+| P2-01 | P2-01 the listener binds 127.0.0.1 only: address is asserted, and no configuration can make it 0.0.0.0 | 435 | todo | 监听地址 127.0.0.1 |
+| P2-02 | P2-02 a taken port leaves only that channel error with port and fix; the plugin boots and other connectors are ready | 436 | todo | 端口被占降级（含 P1-11 的 listener 半边） |
+| P2-03 | P2-03 dispose closes the listener and unregisters every route: the port refuses connections, nothing stays in the route table | 437 | todo | dispose 零路由（含 P1-11 的 listener 半边） |
+| P2-04 | P2-04 a missing or wrong HMAC signature answers 401 bad-signature and starts 0 Bot turns | 438 | todo | HMAC 401 |
+| P2-05 | P2-05 a timestamp outside ±300s answers 401 stale-timestamp and starts 0 turns | 439 | todo | 时间戳 401 |
+| P2-06 | P2-06 a replayed nonce answers 401 replayed-nonce and starts 0 turns | 440 | todo | nonce 401 |
+| P2-07 | P2-07 a replayed msgId answers 200 duplicate and starts 0 turns; after a plugin restart it is still swallowed | 441 | todo | msgId 幂等（含重启） |
+| P2-08 | P2-08 the same text under a new msgId starts a turn (no content-hash swallowing) | 442 | todo | 新 msgId 同文本触发 |
+| P2-09 | P2-09 over the per-channel rate limit answers 429 with retry_after and starts 0 turns | 443 | todo | 429 限速 |
+| P2-10 | P2-10 a sender outside the allowlist answers 403 sender-not-allowed and starts 0 turns | 444 | todo | 403 发送者 |
+| P2-11 | P2-11 a deleted or failing Bot answers 502 bot-unavailable with the fallback sentence and no retry loop | 445 | todo | 502 Bot 不可用 |
+| P2-12 | P2-12 two inbound messages are serialized: each reply answers its own msgId, correlated to that turn end | 446 | todo | 串行与回复关联 |
+| P2-13a | P2-13a a synchronous wait over 20s answers 504 timeout; P2-13b an async turn over 120s sends a failure callback | 447 | todo | 同步 wait 504 |
+| P2-14 | P2-14 rebinding A->B archives the A session, creates a new session for B, and answers in-flight requests 503 channel-rebound | 448 | todo | 换绑归档/新 session/503 |
+| P2-15 | P2-15 an inbound turn that needs approval gets the WeChat notice only: the card stays unanswered and the tool runs 0 times | 449 | todo | 审批不代答 |
+| P2-16 | P2-16 logs, diagnostics and state.json carry no sender text, no message body and no secret | 450 | todo | 日志/state 脱敏 |
+| P2-17 | P2-17 the read level still answers inbound while wechat_notify stays unregistered | 451 | todo | read 级入站 |
+| P2-18 | P2-18 an unsupported connector-command action is refused: per-action allow-list, args checked, login-* only on clawbot | 452 | todo | connector-command 白名单/参数/transport |
+| P2-19 | P2-19 body over 64KB is refused while streaming (chunked included) and callbackUrl outside the loopback literals is refused | 453 | todo | 流式 64KB + callbackUrl loopback |
+| P2-20 | P2-20 visibility: channel sessions never appear in search, read_own_chat, the index, the sidebar or another session | 454 | todo | 可见性隔离 |
+| P2-21 | P2-21 HMAC is mandatory and Bearer optional (default off); with Bearer on, a missing one answers 401 | 455 | todo | HMAC 必选/Bearer 可选 |
+| P2-22a | P2-22a memory: no review enumeration, no memory prompt injection and no MEMORY.md entry for channel sessions | 456 | todo | memory review/prompt/MEMORY.md 排除 |
+| P2-22b | P2-22b parts: channel sessions are excluded from checkpoints and segments | 457 | todo | parts/checkpoint 排除 |
+| P2-23 | P2-23 v1 keeps exactly one conversation session (the creator DM); no group session is pre-created | 458 | todo | 单 conversation |
+| P2-24 | P2-24 the tool denylist holds and untrusted travels in the headerFor message header | 459 | todo | denylist + headerFor untrusted |
+| P2-25 | P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504) | 460 | todo | = P2-13a/13b |
 
-**偏差与别名**：P2-25 由 P2-13a + P2-13b 覆盖，不单列；P2-20 管「可见性」，P2-22a 管「记忆 review/注入/MEMORY.md」，P2-22b 管「parts/checkpoint」；P1-07 因缺 host 的 settings-change 钩子暂为 todo（已报 Forge，P2 前置）。
+**偏差与别名**：P2-25 由 P2-13a + P2-13b 覆盖，不单列；P2-20 管「可见性」，P2-22a 管「记忆 review/注入/MEMORY.md」，P2-22b 管「parts/checkpoint」；P1-11 的「无 listener」半边挂到 P2-02/P2-03（P2 加监听时断言）；P1-07 由 P1-07 + P1-07b 两条覆盖 ready/error/off 三种状态。

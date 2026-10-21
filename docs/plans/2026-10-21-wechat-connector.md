@@ -314,6 +314,7 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 | F2a | 会话归属（P2）：`store.js` `channelOwners: Map<sessionId,{botId,instance}>`，`indexSessions()` 从 `state.channels[...].conversations[*].sessionId` 重建；`selfOf`/`isBotSession` 纳入 channel session；新 `src/host/channels.js`：`channelSessionFor`（createSession + 模型/权限/capabilities + 工具白名单）、`rebindChannel`/`closeChannel`（archiveSession + 归档记录，不删不复用）、`assistant/message` 累积 + `turn/end` 收口回调；`agent.ctx.tools.restrict({allow:[...]})`；`memory.js` exclude；`prompt.js` untrusted 段；`delivery.js:57` source 改为可扩展并处理 `headerFor` 与客户端标识 | Forge | P2 阻塞 | 1–1.5d，明天 |
 | F3 | `connectorRow` 增加模块 `status` 钩子（display-only，异常吞掉） | Forge | 可选 | 0.25d |
 | F4 | `readiness({level,settings,instance,rt})` 传只读 `rt`（或更窄 `{botOf}`）；每行每级都会调，要求纯内存、无 IO | Forge | 可选 | 0.25d |
+| F7 | `normalizeSettings(values, ctx)` 上下文扩展：`ctx = { ...instanceContextOf(id), settings: prior.settings, state: statuses.get(id)?.state ?? 'off', level }`，让模块能在已连接（ready/error）时拒绝设置变更；单参模块忽略多给字段。WeChat 用它拒绝已连接改 transport（文案 `Disconnect this channel before changing the transport.`），off 状态允许 | Relay（已实现） | P1 收口 | 0.25d，已完成 |
 | F6 | Client 渲染：`fields.kind`（bot/segmented/secret）、`instance.max`、`inbound`、`login`、`canTest`、`connector-command` 动作的卡片/表单实现（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | Prism 实现，Pixel 复核 | P1 | 0.5d |
 
 Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbot-wechatfwwt`，基线 `6255c87`），F1/F2b 先交；F2a 明天交。没有 F1 之前实例机制用不了，**不做「不合主线」的单实例骨架**。
@@ -426,6 +427,7 @@ card: { glyph:'wechat', about, docsUrl }
 | C5 | `secretNameOf`：删实例只删自己、名字过校验、两实例不同名 | §2 凭据表；§12 F2b | Forge | 0.25d | P1-11、P1-14（独立命名不变量，另由 P1-13 覆盖共存/删除） |
 | F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14 | Forge | 1d | P1-02/04/09/13 |
 | F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14 | Prism（Pixel 复核） | 0.5d | P1-02 |
+| F7 | `normalizeSettings` 上下文扩展（含 `settings`/`state`/`level`），WeChat 的 P1-07 依赖它 | §12 F7；§14 设置保存 | Relay | 0.25d（已完成） | P1-07、P1-07b |
 | A1 | P2 异步契约写死：`202 {ok,accepted}` + `callbackUrl`（HMAC、msgId 幂等、重试 3 次）；`wait` ≤20s；同步超时 `504 code:'timeout'` | §3.2 默认异步/同步模式 | Relay（设计）+ P2 实现 | 含在 P2 的 3d | §11.19、新增 P2-25 |
 
 > Chief 原话里的 `connector-wechat-login` 在实现时收敛为通用 `connector-command {id, action, args}`（Forge 建议），功能等价，只是端点名更通用；§14 与 F5 已按通用端点写。
