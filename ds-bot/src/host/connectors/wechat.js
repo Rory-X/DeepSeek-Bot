@@ -27,6 +27,8 @@ export const WECHAT_SETTINGS = [
   // credential: the card only ever sees saved/replace/remove, never the value.
   { name: 'webhookUrl', label: 'Push webhook URL', kind: 'secret', secret: URL_SECRET },
   { name: 'webhookFormat', label: 'Format', kind: 'segmented', options: [{ value: 'generic', label: 'Generic JSON' }, { value: 'wecom', label: 'WeCom group bot' }] },
+  // A channel Session carries no tools by default; turning this on allows only web_search.
+  { name: 'allowReadTools', label: 'Read tools', kind: 'segmented', options: [{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }] },
   { name: 'webhookSecret', label: 'Webhook secret', kind: 'secret', secret: SECRET_NAME },
 ]
 
@@ -127,6 +129,8 @@ export function normalizeWechatSettings(values = {}, context = {}) {
     webhookOf({ webhookUrl })
     normalized.webhookUrl = webhookUrl
   }
+  const allowReadTools = trim(given.allowReadTools)
+  if (allowReadTools === 'on' || allowReadTools === 'off') normalized.allowReadTools = allowReadTools
   const webhookFormat = trim(given.webhookFormat)
   if (webhookFormat !== '') {
     if (!FORMATS.includes(webhookFormat)) throw new Error('The webhook format is generic or wecom.')
@@ -303,7 +307,8 @@ export default {
       if (typeof rt.rebindChannel === 'function') await rt.rebindChannel(id, { reason: 'rebind' }).catch(() => {})
     }
     if (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '') {
-      await hub.attach({ instance: id, botId, settings: values, secret: secrets[SECRET_NAME], secretName })
+      // The Session half wants the boolean, the card stores the segmented word.
+      await hub.attach({ instance: id, botId, settings: { ...values, allowReadTools: trim(values.allowReadTools) === 'on' }, secret: secrets[SECRET_NAME], secretName })
     }
     const tools = []
     if (level === 'write') {

@@ -192,7 +192,7 @@ test('P1-02 the row carries the channel settings and never a secret value', asyn
   const row = await connectChannel(ctx, receiver)
   assert.equal(row.level, 'read')
   assert.deepEqual(row.levels.map(level => level.id), ['read', 'write'])
-  assert.deepEqual(row.settings.map(field => field.name), ['label', 'transport', 'botId', 'webhookUrl', 'webhookFormat', 'webhookSecret'])
+  assert.deepEqual(row.settings.map(field => field.name), ['label', 'transport', 'botId', 'webhookUrl', 'webhookFormat', 'allowReadTools', 'webhookSecret'])
   const json = JSON.stringify(await call(ctx, 'state', {}))
   assert.equal(json.includes('test-secret'), false)
 })
@@ -1028,7 +1028,32 @@ test('P2-11 a Bot that disappears mid-channel answers 502 or the bot-unavailable
   const sync = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', text: 'now', wait: 5_000 })
   assert.deepEqual([sync.status, sync.json.code], [502, 'bot-unavailable'])
 })
-test.todo('P2-24 the tool denylist holds and untrusted travels in the headerFor message header')
+test('P2-24 a channel Session gets no tools by default and only web_search when read tools are on', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const off = setup({ session: true })
+  t.after(async () => { await off.ctx.dispose(); rmSync(off.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(off.ctx, receiver)
+  const offUrl = await inboundUrl(off.ctx)
+  await postInbound({ url: offUrl, secret: 'test-secret', msgId: 'm-off', sender: 'creator', text: 'none' })
+  const offAgent = await until(() => [...off.sessionAgents.values()].find(entry => entry.calls.length === 1), 'the default Session')
+  assert.deepEqual(offAgent.restricted.at(-1), { allow: [] })
+
+  // A fresh channel with the switch on: only web_search, even though the host serves more.
+  const on = setup({ session: true })
+  t.after(async () => { await on.ctx.dispose(); rmSync(on.home, { recursive: true, force: true, maxRetries: 5 }) })
+  on.ctx.tools.schemas = () => [{ name: 'web_search' }, { name: 'bash' }]
+  const saved = await call(on.ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic', allowReadTools: 'on' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  await call(on.ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
+  const onUrl = await inboundUrl(on.ctx)
+  await postInbound({ url: onUrl, secret: 'test-secret', msgId: 'm-on', sender: 'creator', text: 'some' })
+  const onAgent = await until(() => [...on.sessionAgents.values()].find(entry => entry.calls.length === 1), 'the read-tools Session')
+  assert.deepEqual(onAgent.restricted.at(-1), { allow: ['web_search'] })
+  // The segmented field reports the stored word, and no other tool is allowed.
+  const row = await rowOf(on.ctx)
+  assert.equal(row.fields.find(field => field.name === 'allowReadTools').value, 'on')
+})
 test.todo('P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504)')
 test.todo('P3: open the ClawBot option and its token field')
 
