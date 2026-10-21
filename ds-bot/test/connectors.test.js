@@ -1610,3 +1610,73 @@ test('a REST write asks on the approval card and sends nothing before the answer
   assert.equal(await pending, '{"note_id":"n-1"}')
   assert.deepEqual(requests, [{ url: 'https://rest.demo.test/notes', method: 'POST', body: '{"content":"# Weekly"}' }])
 })
+
+// A custom multi-instance connector keeps one credential per instance: the first uses the
+// declared name, later ones append their number, and a removal clears only its own.
+function demoCredentialDefinition(overrides = {}) {
+  return {
+    displayName: 'Channel',
+    mode: 'custom',
+    tokenSecret: 'CHANNEL_TOKEN',
+    levels: ['read'],
+    defaultLevel: 'read',
+    instances: { prefix: 'demo', min: 1, max: 4 },
+    mount: ({ secretName, secrets, token, instance }) => ({
+      tools: [{
+        name: `${instance.id}_probe`,
+        description: 'Probe',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => JSON.stringify({ id: instance.id, token, name: secretName('CHANNEL_TOKEN'), mapped: secrets.CHANNEL_TOKEN }),
+      }],
+    }),
+    ...overrides,
+  }
+}
+
+const secretDesk = (store, calls) => async (endpoint, body) => {
+  calls.push({ endpoint, ...body })
+  if (endpoint === 'secret-set') store[body.name] = body.value
+  if (endpoint === 'secret-delete') delete store[body.name]
+}
+
+test('a custom instance keeps its own declared credential', async (t) => {
+  const store = { CHANNEL_TOKEN: 'token-one', CHANNEL_TOKEN_2: 'token-two' }
+  const calls = []
+  const state = { connectors: { demo: { level: 'read', settings: {} }, 'demo-2': { level: 'read', settings: {} } } }
+  const { ctx, rt, home } = hostSetup({ state, definition: demoCredentialDefinition(), secrets: store })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  rt.secretEndpoint = secretDesk(store, calls)
+
+  const one = await until(() => ctx.registeredTools.get('demo_probe'), 'the first instance tool')
+  const two = await until(() => ctx.registeredTools.get('demo-2_probe'), 'the second instance tool')
+  assert.deepEqual(JSON.parse(await one.execute({})), { id: 'demo', token: 'token-one', name: 'CHANNEL_TOKEN', mapped: 'token-one' })
+  assert.deepEqual(JSON.parse(await two.execute({})), { id: 'demo-2', token: 'token-two', name: 'CHANNEL_TOKEN_2', mapped: 'token-two' })
+  // The card names the declared credential; the stored name and its value never reach it.
+  const row = rt.connectorsView().find(item => item.id === 'demo-2')
+  assert.deepEqual(row.inputs.map(input => input.name), ['CHANNEL_TOKEN'])
+  assert.ok(!JSON.stringify(rt.connectorsView()).includes('token-two'))
+
+  // Removing the second instance clears only its own secret.
+  await rt.connectorEndpoint('connector-delete-instance', { id: 'demo-2' })
+  assert.deepEqual(calls.map(call => `${call.endpoint}:${call.name}`), ['secret-delete:CHANNEL_TOKEN_2'])
+  assert.equal(store.CHANNEL_TOKEN, 'token-one')
+  assert.equal(store.CHANNEL_TOKEN_2, undefined)
+})
+
+test('connecting a custom instance stores its credential under its own name', async (t) => {
+  const store = {}
+  const calls = []
+  const state = { connectors: { demo: { level: 'read', settings: {} }, 'demo-2': { level: 'read', settings: {} } } }
+  const { ctx, rt, home } = hostSetup({ state, definition: demoCredentialDefinition(), secrets: store })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  rt.secretEndpoint = secretDesk(store, calls)
+
+  await rt.connectorEndpoint('connector-connect', { id: 'demo-2', token: 'typed-token' })
+  assert.deepEqual(calls.map(call => `${call.endpoint}:${call.name}`), ['secret-set:CHANNEL_TOKEN_2'])
+  assert.equal(store.CHANNEL_TOKEN_2, 'typed-token')
+  assert.equal(store.CHANNEL_TOKEN, undefined)
+  const two = await until(() => ctx.registeredTools.get('demo-2_probe'), 'the connected tool')
+  assert.equal(JSON.parse(await two.execute({})).token, 'typed-token')
+  // The first instance never sees the second one's credential.
+  assert.equal(ctx.registeredTools.get('demo_probe'), undefined)
+})
