@@ -314,7 +314,7 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 | F2a | 会话归属（P2）：`store.js` `channelOwners: Map<sessionId,{botId,instance}>`，`indexSessions()` 从 `state.channels[...].conversations[*].sessionId` 重建；`selfOf`/`isBotSession` 纳入 channel session；新 `src/host/channels.js`：`channelSessionFor`（createSession + 模型/权限/capabilities + 工具白名单）、`rebindChannel`/`closeChannel`（archiveSession + 归档记录，不删不复用）、`assistant/message` 累积 + `turn/end` 收口回调；`agent.ctx.tools.restrict({allow:[...]})`；`memory.js` exclude；`prompt.js` untrusted 段；`delivery.js:57` source 改为可扩展并处理 `headerFor` 与客户端标识 | Forge | P2 阻塞 | 1–1.5d，明天 |
 | F3 | `connectorRow` 增加模块 `status` 钩子（display-only，异常吞掉） | Forge | 可选 | 0.25d |
 | F4 | `readiness({level,settings,instance,rt})` 传只读 `rt`（或更窄 `{botOf}`）；每行每级都会调，要求纯内存、无 IO | Forge | **已并入 F2a**（F2a `57b6fd1`；`connectors.js` 调用点 1 行随 Relay F7 带） | 随 F2a |
-| F8 | 自定义连接器的断开标记：`connector-disconnect` 在 `custom` 模式下写 `state.connectors[id].off = true` 再删 secret/unmount；`reconcile` 把 `off` 视为未配置（不自动 remount）；`connector-connect` 清除它，`connector-set-settings` 保留它；`off` 不进 view/status 与日志。仅 `custom` 生效 | Relay（已实现） | P1 收口 | 0.25d，已完成 |
+| F8 | 自定义连接器的断开标记：`connector-disconnect` 在 `custom` 模式下写 `state.connectors[id].off = true` 再删 secret/unmount；`reconcile` 把 `off` 视为未配置（不自动 remount）；`connector-connect` 清除它，`connector-set-settings` 保留它；`off` 不进 view/status 与日志。仅 `custom` 生效。**为什么存 `state.connectors[id].off` 而不会被重写冲掉**：disconnect 的保留对象自带该标记；其余写路径（set-settings、级别切换、oauth 授权/claim、chat/审计/account 补丁、失败回滚）全部展开 `prior`，只有 connect 与 delete-instance 有意清除；旧 team file 无该键时 `=== true` 不成立，行为不变 | Relay（已实现） | P1 收口 | 0.25d，已完成 |
 | F7 | `normalizeSettings(values, ctx)` 上下文扩展：`ctx = { ...instanceContextOf(id), settings: prior.settings, state: statuses.get(id)?.state ?? 'off', level }`，让模块能在已连接（ready/error）时拒绝设置变更；单参模块忽略多给字段。WeChat 用它拒绝已连接改 transport（文案 `Disconnect this channel before changing the transport.`），off 状态允许 | Relay（已实现） | P1 收口 | 0.25d，已完成 |
 | F6 | Client 渲染：`fields.kind`（bot/segmented/secret）、`instance.max`、`inbound`、`login`、`canTest`、`connector-command` 动作的卡片/表单实现（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | Prism 实现，Pixel 复核 | P1 | 0.5d |
 
@@ -429,7 +429,7 @@ card: { glyph:'wechat', about, docsUrl }
 | F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14 | Forge | 1d | P1-02/04/09/13 |
 | F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14 | Prism（Pixel 复核） | 0.5d | P1-02 |
 | F7 | `normalizeSettings` 上下文扩展（含 `settings`/`state`/`level`），WeChat 的 P1-07 依赖它 | §12 F7；§14 设置保存 | Relay | 0.25d（已完成） | P1-07、P1-07b |
-| F8 | 自定义连接器 Disconnect 的 `off` 标记（否则可选凭据会 remount 回 ready；P1-07 断开→改 transport→重连的死结由它解开） | §12 F8；§6 状态机 | Relay | 0.25d（已完成） | P1-07 |
+| F8 | 自定义连接器 Disconnect 的 `off` 标记（否则可选凭据会 remount 回 ready；P1-07 断开→改 transport→重连的死结由它解开） | §12 F8；§6 状态机 | Relay | 0.25d（已完成） | P1-07；框架级：断开后重启仍 off、旧 team file 无标记行为不变、断开后行仍在且可改 transport/重连（`test/connectors.test.js`） |
 | A1 | P2 异步契约写死：`202 {ok,accepted}` + `callbackUrl`（HMAC、msgId 幂等、重试 3 次）；`wait` ≤20s；同步超时 `504 code:'timeout'` | §3.2 默认异步/同步模式 | Relay（设计）+ P2 实现 | 含在 P2 的 3d | §11.19、新增 P2-25 |
 
 > Chief 原话里的 `connector-wechat-login` 在实现时收敛为通用 `connector-command {id, action, args}`（Forge 建议），功能等价，只是端点名更通用；§14 与 F5 已按通用端点写。

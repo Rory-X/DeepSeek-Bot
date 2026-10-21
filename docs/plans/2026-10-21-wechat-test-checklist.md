@@ -154,4 +154,4 @@
 | P2-24 | P2-24 the tool denylist holds and untrusted travels in the headerFor message header | 471 | todo | denylist + headerFor untrusted |
 | P2-25 | P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504) | 472 | todo | = P2-13a/13b |
 
-**偏差与别名**：P2-25 由 P2-13a + P2-13b 覆盖，不单列；P2-20 管「可见性」，P2-22a 管「记忆 review/注入/MEMORY.md」，P2-22b 管「parts/checkpoint」；P1-11 的「无 listener」半边挂到 P2-02/P2-03；P1-07 覆盖 ready/error/off/真实 disconnect/重连五种情况（含 F8 的 off 标记语义）。
+**偏差与别名**：P2-25 由 P2-13a + P2-13b 覆盖，不单列；P2-20 管「可见性」，P2-22a 管「记忆 review/注入/MEMORY.md」，P2-22b 管「parts/checkpoint」；P1-11 的「无 listener」半边挂到 P2-02/P2-03；P1-07 覆盖 ready/error/off/真实 disconnect/重连五种情况（含 F8 的 off 标记语义）。F8 的框架级用例（断开后重启仍 off、旧 team file 无标记行为不变、断开后行仍在且可改 transport/重连）在 `test/connectors.test.js`，不属于本清单的 P1/P2 编号。
