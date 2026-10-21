@@ -446,6 +446,8 @@ export default {
     const requestQr = async () => {
       try {
         const answer = await client.getQrCode()
+        // A remount replaced this login while the code was asked for: that card is gone.
+        if (loginOf(rt, id) !== login) return
         const image = qrForCard(answer?.qrcode_img_content)
         Object.assign(login, {
           state: 'qr',
@@ -457,6 +459,7 @@ export default {
           expiresAt: typeof answer?.expires_at === 'string' ? answer.expires_at : null,
         })
       } catch (error) {
+        if (loginOf(rt, id) !== login) return
         Object.assign(login, { state: 'protocol-error', qrcode: null, qr: null, scanned: false, error: String(error?.message ?? error) })
       }
     }
@@ -485,12 +488,10 @@ export default {
             Object.assign(login, { state: 'confirm-failed', qr: null, scanned: true, error: 'The phone did not confirm the login. Scan again.' })
             return
           }
-          if (token !== '') {
-            const name = secretName(ILINK_TOKEN)
-            await rt.secretEndpoint('secret-set', { name, value: token, purpose: 'WeChat ClawBot login', scope: [] })
-          }
-          if (!current()) return
-          Object.assign(login, { state: 'logged-in', qr: null, scanned: false, account: maskAccount(answer?.ilink_user_id) ?? null, error: null, expiresAt: null, qrcode: null })
+          // Persist the identity before the credential write: writing the token makes the
+          // framework reconcile and mount again, which bumps the login epoch and replaces the
+          // in-memory object. The remounted channel must already know its account id, or its
+          // notify tool and Test path would address an empty target.
           const channels = rt.state.channels ?? (rt.state.channels = {})
           const channel = channels[id] ?? (channels[id] = {})
           channel.ilink = {
@@ -498,7 +499,14 @@ export default {
             ...(typeof answer?.ilink_user_id === 'string' ? { ilinkUserId: answer.ilink_user_id } : {}),
             ...(typeof answer?.ilink_bot_id === 'string' ? { ilinkBotId: answer.ilink_bot_id } : {}),
           }
-          void rt.save().catch(() => {})
+          await rt.save().catch(() => {})
+          if (token !== '') {
+            const name = secretName(ILINK_TOKEN)
+            await rt.secretEndpoint('secret-set', { name, value: token, purpose: 'WeChat ClawBot login', scope: [] })
+          }
+          // That write may have remounted the channel: finish on whatever login object owns
+          // the id now (a token alone also reads as logged-in, this adds the masked account).
+          Object.assign(loginOf(rt, id), { state: 'logged-in', qr: null, scanned: false, account: maskAccount(answer?.ilink_user_id) ?? null, error: null, expiresAt: null, qrcode: null })
         } else if (mapped === 'wait') {
           Object.assign(login, { state: 'qr', scanned: false, error: null })
         } else if (mapped === 'scanned') {

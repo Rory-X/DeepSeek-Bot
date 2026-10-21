@@ -954,6 +954,27 @@ test('CB-12b a stuck send is reported as unreachable and audits the failure', as
   assert.match(audited.filter(entry => entry.source === 'wechat-notify').at(-1).text, /result error$/)
 })
 
+test('CB-17 a remount during the token write still persists the account and finishes logged-in', async (t) => {
+  const mock = await startIlinkMock({ statuses: ['confirmed'] })
+  t.after(() => mock.close())
+  const host = commandHost(mock.base)
+  t.after(() => closeCommandHost(host))
+  // Writing the token makes the framework reconcile and mount again; emulate that remount by
+  // bumping the login epoch inside the credential write, before the poll resumes.
+  host.secretEndpoint = async (endpoint, payload) => {
+    host.savedSecrets.push({ endpoint, payload, accountAtWrite: host.state.channels.wechat?.ilink?.ilinkUserId })
+    const channel = host.state.channels.wechat ?? (host.state.channels.wechat = {})
+    channel.ilink = { ...(channel.ilink ?? {}), epoch: (channel.ilink?.epoch ?? 0) + 1 }
+  }
+  await runWechat(host, 'login-start', { consent: true })
+  await runWechat(host, 'login-poll')
+  // The identity is on disk before the credential, so the remount already knows its account.
+  assert.equal(host.savedSecrets[0].accountAtWrite, 'ilink_user_123456')
+  assert.equal(host.state.channels.wechat.ilink.ilinkUserId, 'ilink_user_123456')
+  assert.equal(host.state.channels.wechat.ilink.ilinkBotId, 'bot-1')
+  assert.equal(loginViewOfHost(host).state, 'logged-in')
+})
+
 // ---- P2: inbound listener and its gate ----
 test('P2-01 the inbound listener binds 127.0.0.1 only', async (t) => {
   const receiver = await startWebhookReceiver()
