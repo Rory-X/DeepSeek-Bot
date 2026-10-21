@@ -67,7 +67,7 @@
 | 缺 webhook URL | `Add the push webhook URL for this channel.` |
 | 缺 webhook secret（P2 入站才需要；P1 出站可选） | `Add a webhook secret for this channel before it can receive messages.` |
 | 端口被占 | `The inbound port <port> is already in use. Change wechat.listenPort in the profile or stop the process using that port.` |
-| clawbot 未登录 | `This ClawBot channel is not logged in. Paste its bot token in the channel settings.` |
+| clawbot 选到（P1 保留选项并标注本批不可用；登录随 P3） | `ClawBot is not available in this release; use Webhook.` |
 | 改 transport（已连接） | `Disconnect this channel before changing the transport.` |
 
 **入站 HTTP（JSON `{ok:false, code, message}`）**
