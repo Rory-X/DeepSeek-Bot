@@ -403,6 +403,10 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 - QR 只回 `https://` 图片 URL 或 `data:` URL；内容串 → `qr:null` + `error:'The QR code was returned in an unsupported form; update DS Bot.'`；客户端绝不渲染原始串。
 - Disconnect 清登录态 + `WECHAT_ILINK_TOKEN`，回 `logged-out`；`account` 脱敏（前 4 后 2）；consent 持久化 `state.channels[instance].ilink.consent`；`expiresAt` ISO 或 null。
 
+**ClawBot 可配置项（Probe mock 矩阵用）**：`wechat.ilinkBase` 默认 `https://ilinkai.weixin.qq.com`（测试指向本地 mock HTTP loopback，走真实 fetch 路径，不做 fake fetch 注入）；`wechat.ilinkPauseMs` 默认 `3600000`（`-14` 暂停，测试设小值验证恢复）；`wechat.ilinkBackoffMaxMs` 默认 `60000`（退避封顶）。
+
+**命令形状定稿**：`connector-command {id, action, args}`；`commands` 声明 `login-start:{transport:'clawbot',args:['consent']}`，`login-refresh`/`login-cancel`/`login-poll` 均 `args:[]`。未带 `consent` 或参数不合法 → `bot/invalid`，**不出码、0 次取码请求**；`consent:true` 才调 `get_bot_qrcode`；consent 持久化 `state.channels[instance].ilink.consent`。
+
 **发布约束（Chief 四条，ClawBot v1 必须满足）**
 
 1. **beta 标注**：`card.about` 与 `releases.md` 都写「扫码登录为 beta、未做真机验证，失败不影响 Webhook 通道」；不得让用户当成稳定功能。
