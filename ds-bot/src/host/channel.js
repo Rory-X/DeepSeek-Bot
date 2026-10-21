@@ -340,6 +340,7 @@ export function install(rt) {
         case 'connector-oauth-start':
         case 'connector-create-instance':
         case 'connector-delete-instance':
+        case 'connector-command':
           await rt.load()
           return ok(await rt.connectorEndpoint(endpoint, body, meta))
         case 'capability-save':

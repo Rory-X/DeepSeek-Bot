@@ -190,3 +190,35 @@ test('a module id may not take the id another module reserves for an instance', 
     cleanup()
   }
 })
+
+test('settings kinds and commands are checked at load', async () => {
+  const accepted = await (async () => {
+    const { dir, cleanup } = withModules({
+      'demo.js': `export default { id: 'demo', displayName: 'Demo', mode: 'custom', tokenSecret: 'DEMO_TOKEN', settings: [{ name: 'transport', kind: 'segmented', options: [{ value: 'webhook', label: 'Webhook' }] }, { name: 'webhookSecret', kind: 'secret', secret: 'DEMO_SECRET' }], commands: { 'login-start': { transport: 'clawbot', args: [] } }, command() {}, view() {}, status() {}, test() {} }\n`,
+    })
+    try { return await loadConnectorModules(dir) } finally { cleanup() }
+  })()
+  assert.deepEqual(accepted.demo.settings.map(field => field.kind), ['segmented', 'secret'])
+  assert.deepEqual(accepted.demo.commands, { 'login-start': { transport: 'clawbot', args: [] } })
+
+  const cases = [
+    [`settings: [{ name: 'x', kind: 'rich' }]`, /unknown kind/],
+    [`settings: [{ name: 'webhookSecret', kind: 'secret', secret: 'lower' }]`, /credential name/],
+    [`settings: [{ name: 'webhookSecret', kind: 'secret' }]`, /credential name/],
+    [`settings: [{ name: 'transport', kind: 'segmented', options: [{ label: 'Webhook' }] }]`, /options must list values/],
+    [`commands: { 'login-start': { transport: 7 } }, command() {}`, /transport must be a string/],
+    [`commands: { 'Login': {} }, command() {}`, /lowercase letters/],
+    [`commands: { 'login-start': { args: 'refresh' } }, command() {}`, /args must list/],
+    [`commands: { 'login-start': {} }`, /needs a command function/],
+  ]
+  for (const [fragment, pattern] of cases) {
+    const { dir, cleanup } = withModules({
+      'demo.js': `export default { id: 'demo', displayName: 'Demo', mode: 'custom', tokenSecret: 'DEMO_TOKEN', ${fragment} }\n`,
+    })
+    try {
+      await assert.rejects(loadConnectorModules(dir), pattern, fragment)
+    } finally {
+      cleanup()
+    }
+  }
+})

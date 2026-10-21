@@ -97,6 +97,7 @@ const ENDPOINTS = [
   ['capability-delete', id => ({ name: id })],
   ['capability-approve', id => ({ name: id })],
   ['bot-capability', id => ({ botId: 'b2', name: id, attached: true })],
+  ['connector-command', id => ({ id, action: 'login-start' })],
   ['bot-capability', id => ({ botId: id, name: 'x', attached: true })],
   ['create-room', id => ({ members: [id, 'b2'] })],
   ['chat', id => ({ botId: id })],
