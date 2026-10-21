@@ -8,8 +8,36 @@ import { t } from './i18n.js'
 export const LOGIN_STATES = ['logged-out', 'qr', 'verified-needed', 'blocked', 'expired', 'cancelled', 'confirm-failed', 'protocol-error', 'logged-in', 'login-expired']
 const KNOWN = new Set(LOGIN_STATES)
 
-export const POLL_INTERVAL_MS = 2000
+// The iLink status call is a long poll: one answer can take half a minute. The card keeps
+// exactly one request in flight and waits a moment after each answer, so a slow host never
+// builds a queue; the whole wait is still bounded.
+export const POLL_GAP_MS = 500
 export const POLL_LIMIT_MS = 5 * 60 * 1000
+
+// One serialized wait: poll, wait out the gap, poll again, until cancelled or the limit
+// passes. `sleep`, `now` and `cancelled` are given by the caller so this can be tested.
+export const pollLoginSerially = async ({
+  poll,
+  cancelled = () => false,
+  now = () => Date.now(),
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  startedAt = now(),
+  gapMs = POLL_GAP_MS,
+  limitMs = POLL_LIMIT_MS,
+} = {}) => {
+  let calls = 0
+  while (!cancelled() && now() - startedAt < limitMs) {
+    calls += 1
+    try {
+      await poll()
+    } catch {
+      // One failed status call leaves the card as it is; the next round asks again.
+    }
+    if (cancelled()) break
+    await sleep(gapMs)
+  }
+  return calls
+}
 
 // A channel whose transport is clawbot carries its sign-in state under `login`; webhook
 // channels carry none, so nothing of this is drawn for them.
