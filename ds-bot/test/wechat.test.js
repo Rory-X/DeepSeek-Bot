@@ -1031,35 +1031,51 @@ test('P2-11 a Bot that disappears mid-channel answers 502 or the bot-unavailable
 test('P2-24b a tools switch change narrows in place, widens by a fresh Session, and never rebinds during mount', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
-  const { ctx, home, sessionAgents, archived } = setup({ session: true })
-  ctx.tools.schemas = () => [{ name: 'web_search' }]
+  const { ctx, rt, home, sessionAgents, archived, emitSession } = setup({ session: true })
+  ctx.tools.schemas = () => [{ name: 'web_search' }, { name: 'bash' }]
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const base = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
   await connectChannel(ctx, receiver)
   const url = await inboundUrl(ctx)
-  const calls = () => [...sessionAgents.values()].reduce((count, entry) => count + entry.calls.length, 0)
+  const totalCalls = () => [...sessionAgents.values()].reduce((count, entry) => count + entry.calls.length, 0)
+  let turn = 0
+  // One delivery plus the turn it opens: the queue only moves on when the turn ends.
   const send = async (msgId) => {
-    const before = calls()
+    const before = totalCalls()
     await postInbound({ url, secret: 'test-secret', msgId, sender: 'creator', text: msgId })
-    return await until(() => (calls() > before ? [...sessionAgents.values()].filter(entry => entry.calls.length > 0).at(-1) : undefined), `the ${msgId} delivery`)
+    const agent = await until(() => (totalCalls() > before ? [...sessionAgents.values()].filter(entry => entry.calls.length > 0).at(-1) : undefined), `the ${msgId} delivery`)
+    const message = agent.calls.at(-1)
+    turn += 1
+    emitSession(agent.session.id, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+    emitSession(agent.session.id, 'turn/start', { turn })
+    emitSession(agent.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'ok' }] } })
+    emitSession(agent.session.id, 'turn/end', { turn, reason: { kind: 'completed' } })
+    return agent
   }
   const first = await send('m-1')
   assert.deepEqual(first.restricted.at(-1), { allow: [] })
+  // Same Session, next turn: the restriction is applied again, so the second turn is safe.
+  const firstAgain = await send('m-1b')
+  assert.equal(firstAgain, first, 'the same conversation Session answers both turns')
+  assert.deepEqual(firstAgain.restricted.at(-1), { allow: [] })
+  assert.equal(firstAgain.restricted.some(filter => filter.allow?.includes('bash')), false)
 
-  // Off -> on cannot be widened in place, and the archive happens on the next message, not
-  // in the mount: saving the setting alone must not archive anything.
+  // Off -> on cannot widen a restriction in place, so the next message starts a fresh
+  // Session; the archive happens then, not during the settings save.
   assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...base, allowReadTools: 'on' } })).ok, true)
   assert.equal(archived.length, 0, 'the settings save does not rebind during the mount')
   const second = await send('m-2')
   assert.notEqual(second, first, 'a fresh Session carries the wider allow-list')
   assert.deepEqual(second.restricted.at(-1), { allow: ['web_search'] })
-  assert.equal(archived.length, 1, 'the old conversation was archived with the tools-change reason')
+  assert.equal(archived.length, 1)
+  assert.equal(rt.state.channels.wechat.history.at(0).reason, 'tools-changed')
 
-  // On -> off narrows the current Session in place: no archive, no new Session.
+  // On -> off narrows the live Session in place and archives nothing.
   assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...base, allowReadTools: 'off' } })).ok, true)
   const third = await send('m-3')
   assert.equal(third, second, 'the conversation Session is kept')
   assert.deepEqual(third.restricted.at(-1), { allow: [] })
+  assert.equal(third.restricted.some(filter => filter.allow?.includes('bash')), false)
   assert.equal(archived.length, 1, 'narrowing in place archives nothing')
 })
 

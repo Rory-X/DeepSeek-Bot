@@ -355,6 +355,21 @@ class InboundHub {
 
   // Narrow the tools of the conversation's current Session without archiving it: the
   // framework's restriction can only remove, so this covers tools being turned off.
+  // Only web_search is ever offered; the restriction is applied again for every delivery
+  // because the agent this turn runs may be a fresh one.
+  async applyTurnTools(route, sessionId) {
+    const wanted = route.settings?.allowReadTools === true ? ['web_search'] : []
+    route.lastAllow = wanted
+    if (typeof this.rt.resolveAgent !== 'function') return
+    try {
+      const agent = await this.rt.resolveAgent(sessionId)
+      const restrict = agent?.ctx?.tools?.restrict
+      if (typeof restrict === 'function') restrict.call(agent.ctx.tools, { allow: wanted })
+    } catch (error) {
+      this.rt.warn?.('ds-bot: the tools of the WeChat Session %s were not restricted: %s', sessionId, error?.message ?? error)
+    }
+  }
+
   async narrowTools(route) {
     if (typeof this.rt.resolveAgent !== 'function') return false
     const conversations = this.rt.state?.channels?.[route.id]?.conversations
@@ -402,6 +417,9 @@ class InboundHub {
     } catch {
       return { code: 'bot-unavailable', message: botUnavailableText }
     }
+    // Every turn restricts the agent that is about to run: an agent rebuilt per turn must
+    // not come back with the Harness's full tool surface.
+    await this.applyTurnTools(route, sessionId)
     let exchangeId
     try {
       exchangeId = await this.rt.deliver({ toId: route.botId, sessionId, text: message.text, role: 'request', untrusted: true, sender: { name: 'WeChat', id: message.sender } })
