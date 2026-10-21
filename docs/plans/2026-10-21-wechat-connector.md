@@ -403,6 +403,8 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 - QR 只回 `https://` 图片 URL 或 `data:` URL；内容串 → `qr:null` + `error:'The QR code was returned in an unsupported form; update DS Bot.'`；客户端绝不渲染原始串。
 - Disconnect 清登录态 + `WECHAT_ILINK_TOKEN`，回 `logged-out`；`account` 脱敏（前 4 后 2）；consent 持久化 `state.channels[instance].ilink.consent`；`expiresAt` ISO 或 null。
 
+**Probe 剩余口径（实现直接照此）**：游标 `state.channels[<instance>].ilink.cursor`（`rt.save` 节流 + turn/end 强制落盘，重启续读）；token 失效 → `login-expired` + 该通道 `row.state:'error'`，不自动重登/重试，Webhook 不受影响；非文本入站（图片/语音/文件/视频）v1 **忽略**——不建会话、不写正文、不触发 turn，只记一行审计，仍回 **202 accepted** 避免上游重推；长回复不拆条，>8000 字符截断加 `…(truncated)`；`account` 前 4 后 2、`binded_redirect` 可 null；token 只进凭据库 `WECHAT_ILINK_TOKEN`（`_2` 后缀），不进 state/日志/view；mock 用独立端口或 `LISTEN=0` 随机，CI 单实例。
+
 **consent 版本化**：`state.channels[instance].ilink = { consent: { at, version } }`（不是布尔）；模块定义 `CONSENT_VERSION` 常量，风险文案版本递增；`consentRequired = consent.version !== CONSENT_VERSION`——文案升级/协议变更时必须能再弹一次。取消/过期/刷新不重置 consent；删通道重建才重置。
 
 **`login-poll` 服务端护栏**：同一实例同一时间只允许一个轮询在飞（并发调用复用同一 promise 或直接返回当前 view）；没有进行中的登录（无 QR 会话）时直接返回当前 view、不重新生成二维码；≥500ms 内重复调用只回当前 view，防高频。
