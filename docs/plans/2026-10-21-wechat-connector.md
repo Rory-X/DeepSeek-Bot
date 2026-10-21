@@ -391,9 +391,16 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 | `expired` | `expired` | `The QR code expired. Refresh to try again.` | Refresh / Cancel |
 | `cancelled` | 用户 Cancel | `Login cancelled.` | Start |
 | `confirm-failed` | 已扫码但手机端确认失败（协议错误/拒绝） | `The phone did not confirm the login. Scan again.` | Start / Retry |
-| `protocol-error` | 登录服务不可用 / 网络失败（宿主原文进 `login.error`） | `The WeChat login service is not available right now.` | Retry |
+| `unavailable` | 登录服务不可用 / 网络失败（宿主原文进 `login.error`） | `The WeChat login service is not available right now.` | Retry |
 | `logged-in` | `confirmed` / `binded_redirect` | `Connected${account ? ` as ${account}` : ''}.` | — |
-| `login-expired` | 已登录后 token 失效/鉴权失败 | `The WeChat login expired. Webhook channels are not affected; scan the QR code again.`（不自动重登） | Start |
+| `session-expired` | 已登录后 token 失效/鉴权失败 | `The WeChat login expired. Webhook channels are not affected; scan the QR code again.`（不自动重登） | Start |
+
+**失败态来源（与 Prism 对齐）**
+
+- `cancelled`：用户点 Cancel 时宿主**写一次** `cancelled`（不静默回 logged-out），UI 显示「已取消 + Start login」；Start/refresh 后清除；重启后无残留即回 `logged-out`。
+- `confirm-failed`：只有「`confirmed` 但缺 `bot_token`/凭据解析失败」才记该态；纯超时按 `expired`，其它错误按 `unavailable`（协议没有「手机明确拒绝」状态，宿主不臆造）。
+- `unavailable`：`login-start`/`login-poll` 的网络/协议错误**写进 view**（`state:'unavailable'` + `login.error` 宿主原文）并正常返回 view，不用 HTTP 错误；该通道 row 不因登录瞬时失败转 error。
+- `session-expired`：已登录后 iLink 鉴权失败统一此态 + 该通道 `row.state:'error'`，Webhook 不受影响，不自动重登。
 
 登录失效口径：仅该通道 `row.state:'error'`，**Webhook 通道完全不受影响**，不自动重登；用户点 Start 重新扫码。
 
