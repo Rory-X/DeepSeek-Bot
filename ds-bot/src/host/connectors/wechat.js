@@ -41,7 +41,7 @@ const rememberConsent = (rt, id) => {
   channel.ilink = { ...(channel.ilink ?? {}), consent: { at: Date.now(), version: CONSENT_VERSION } }
   void rt.save().catch(() => {})
 }
-const loginViewOf = (rt, id, secrets, secretValue) => {
+const loginViewOf = (rt, id, secrets) => {
   const login = loginOf(rt, id)
   const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
   const stored = typeof token === 'string' && token !== '' ? token : undefined
@@ -298,6 +298,22 @@ export default {
     'login-refresh': { transport: 'clawbot', args: [] },
     'login-cancel': { transport: 'clawbot', args: [] },
     'login-poll': { transport: 'clawbot', args: [] },
+  },
+  // The row's display state only: a ClawBot login that expired errors its own row, while a
+  // protocol error stays a retryable note inside the login block (no row error).
+  status({ id, rt, settings }) {
+    const values = settings !== null && typeof settings === 'object' ? settings : {}
+    if (trim(values.transport) !== 'clawbot') {
+      // The webhook half keeps its listener status in the row (same shape the view draws);
+      // with no route at all the secret is what is missing.
+      const hub = inboundFor(rt)
+      return hub.statusOf(id).status ?? { inbound: 'needs-secret' }
+    }
+    const login = loginOf(rt, id)
+    if (login.state === 'login-expired') {
+      return { state: 'error', error: 'The WeChat login expired. Webhook channels are not affected; scan the QR code again.' }
+    }
+    return {}
   },
   async command({ id, rt, action, args, secretName }) {
     const login = loginOf(rt, id)
