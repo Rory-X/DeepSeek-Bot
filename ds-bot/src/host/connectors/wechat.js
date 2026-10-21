@@ -25,8 +25,12 @@ const ilinkLogins = new WeakMap()
 const loginOf = (rt, id) => {
   let byId = ilinkLogins.get(rt)
   if (byId === undefined) { byId = new Map(); ilinkLogins.set(rt, byId) }
+  const epoch = rt.state?.channels?.[id]?.ilink?.epoch ?? 0
   let login = byId.get(id)
-  if (login === undefined) { login = { state: 'logged-out', qr: null, scanned: false, account: null, error: null, expiresAt: null, qrcode: null }; byId.set(id, login) }
+  if (login === undefined || login.epoch !== epoch) {
+    login = { epoch, state: 'logged-out', qr: null, scanned: false, account: null, error: null, expiresAt: null, qrcode: null }
+    byId.set(id, login)
+  }
   return login
 }
 const consentOf = (rt, id) => rt.state?.channels?.[id]?.ilink?.consent
@@ -37,10 +41,13 @@ const rememberConsent = (rt, id) => {
   channel.ilink = { ...(channel.ilink ?? {}), consent: { at: Date.now(), version: CONSENT_VERSION } }
   void rt.save().catch(() => {})
 }
-const loginViewOf = (rt, id) => {
+const loginViewOf = (rt, id, secrets, secretValue) => {
   const login = loginOf(rt, id)
+  const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
+  const stored = typeof token === 'string' && token !== '' ? token : undefined
+  const state = login.qrcode === null && login.state === 'logged-out' && stored !== undefined ? 'logged-in' : login.state
   return {
-    state: login.state,
+    state,
     qr: login.qr,
     scanned: login.scanned === true,
     account: login.account,
@@ -85,12 +92,9 @@ const webhookOf = (settings) => {
 // secret optional: a receiver that cannot verify a signature still gets its notice.
 export function wechatReadiness({ settings, rt, secretName, secretValue } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
-  if (trim(values.transport) === 'clawbot') {
-    const token = typeof secretName === 'function' && typeof secretValue === 'function'
-      ? secretValue(secretName(ILINK_TOKEN))
-      : undefined
-    return typeof token === 'string' && token !== '' ? undefined : 'Scan the QR code to connect this ClawBot channel. (beta; Webhook channels are not affected)'
-  }
+  // A ClawBot channel is ready while logged out too: the card walks the login states, and
+  // only the inbound/outbound halves depend on the token.
+  if (trim(values.transport) === 'clawbot') return undefined
   const botId = trim(values.botId)
   if (botId === '') return 'Choose a Bot for this channel.'
   if (typeof rt?.botOf === 'function' && rt.botOf(botId) === undefined) return 'The Bot this channel is bound to no longer exists. Choose another Bot.'
@@ -338,10 +342,18 @@ export default {
       try {
         const answer = await client.pollQrStatus(login.qrcode)
         const mapped = qrStateOf(answer?.status)
-        if (mapped === 'confirmed') {
+        if (mapped === 'confirmed' || mapped === 'bound') {
           const token = typeof answer?.bot_token === 'string' ? answer.bot_token : ''
-          const name = secretName(ILINK_TOKEN)
-          if (token !== '') await rt.secretEndpoint('secret-set', { name, value: token, purpose: 'WeChat ClawBot login', scope: [] })
+          if (mapped === 'confirmed' && token === '') {
+            // The phone confirmed but the answer carries no credential: say so instead of
+            // pretending the channel is connected.
+            Object.assign(login, { state: 'confirm-failed', qr: null, scanned: true, error: 'The phone did not confirm the login. Scan again.' })
+            return
+          }
+          if (token !== '') {
+            const name = secretName(ILINK_TOKEN)
+            await rt.secretEndpoint('secret-set', { name, value: token, purpose: 'WeChat ClawBot login', scope: [] })
+          }
           Object.assign(login, { state: 'logged-in', qr: null, scanned: false, account: maskAccount(answer?.ilink_user_id) ?? null, error: null, expiresAt: null, qrcode: null })
         } else if (mapped === 'scanned') {
           Object.assign(login, { state: 'qr', scanned: true })
@@ -353,7 +365,10 @@ export default {
           Object.assign(login, { state: 'expired', qr: null, scanned: false, qrcode: null })
         }
       } catch (error) {
-        Object.assign(login, { state: 'protocol-error', error: String(error?.message ?? error) })
+        const auth = Number(error?.status) === 401 || Number(error?.status) === 403
+        Object.assign(login, auth
+          ? { state: 'login-expired', qr: null, scanned: false, qrcode: null, error: 'The WeChat login expired. Webhook channels are not affected; scan the QR code again.' }
+          : { state: 'protocol-error', error: String(error?.message ?? error) })
       }
     }
   },
@@ -373,7 +388,7 @@ export default {
       ...(Object.keys(inbound).length === 0 && webhook ? hub.needsSecret() : {}),
       ...inbound,
       ...hub.statusOf(id),
-      ...(webhook ? {} : { login: loginViewOf(rt, id) }),
+      ...(webhook ? {} : { login: loginViewOf(rt, id, secrets) }),
     }
   },
   // One test notice through the same path a real notice takes. A failure stays on the card
@@ -390,11 +405,47 @@ export default {
   async mount({ rt, settings, instance, level, approve, secrets, token, secretName }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const id = instance?.id ?? 'wechat'
-    if (trim(values.transport) === 'clawbot') throw new Error('ClawBot is not available in this release. Use the Webhook transport.')
     const botId = trim(values.botId)
     if (botId === '') throw new Error('Choose a Bot for this channel.')
     if (rt.botOf(botId) === undefined) throw new Error('The Bot this channel is bound to no longer exists. Choose another Bot.')
-    if (trim(values.transport) === 'clawbot') return { tools: [] }
+    if (trim(values.transport) === 'clawbot') {
+      // A connect or settings change starts a fresh login card: the state carries an epoch,
+      // so an in-memory QR from an earlier mount can never be shown again.
+      const channels = rt.state.channels ?? (rt.state.channels = {})
+      const channel = channels[id] ?? (channels[id] = {})
+      channel.ilink = { ...(channel.ilink ?? {}), epoch: (channel.ilink?.epoch ?? 0) + 1 }
+      ilinkLogins.get(rt)?.delete(id)
+      void rt.save().catch(() => {})
+      // The inbound half is a 35s long poll; the cursor lives in the channel state so a
+      // restart continues where it stopped. There is no webhook URL or HMAC secret here.
+      const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
+      const controller = new AbortController()
+      const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
+      if (typeof token === 'string' && token !== '') {
+        const client = createIlinkClient({
+          base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+          pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
+          backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
+        })
+        void (async () => {
+          while (!controller.signal.aborted) {
+            try {
+              const answer = await client.getUpdates({ token, cursor: channel.ilink?.cursor, signal: controller.signal })
+              if (controller.signal.aborted) return
+              if (typeof answer?.get_updates_buf === 'string') {
+                channel.ilink.cursor = answer.get_updates_buf
+                void rt.save().catch(() => {})
+              }
+            } catch (error) {
+              if (controller.signal.aborted) return
+              const paused = client.noteError(error?.body?.errcode ?? error?.errcode)
+              await new Promise(resolve => setTimeout(resolve, paused.paused ? Math.min(paused.pauseMs, 1_000) : client.backoffMs()))
+            }
+          }
+        })()
+      }
+      return { tools: [], close: () => { controller.abort(); ilinkLogins.get(rt)?.delete(id) } }
+    }
     // Older state keeps the URL as a plain setting; move it into the credential store before
     // this mount reads anything, keeping the plain value if the write fails.
     try {
