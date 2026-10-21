@@ -796,7 +796,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
 
   // A connector whose protocol the framework does not know mounts its own tools through
   // `mountTools`, which returns disposers and an optional close.
-  function mountConnectorTools(id) {
+  async function mountConnectorTools(id) {
     const connector = options[id]
     const mount = connector.mountTools ?? connector.mount
     if (typeof mount !== 'function') throw new Error(`${connector.displayName} has no tools to mount`)
@@ -811,7 +811,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
         defaultApprovalLine(tool, undefined),
       ))
     }
-    const mounted = mount({
+    // A module may open a listener here: an async mount lets a bind failure become the
+    // row's own error instead of escaping the connector host.
+    const mounted = await mount({
       ctx,
       rt,
       connector,
@@ -1202,7 +1204,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       try {
         const mounted = connector.mode === 'rest-tools'
           ? mountRestTools(id)
-          : connector.mode === 'notify' ? mountNotify(id) : mountConnectorTools(id)
+          : connector.mode === 'notify' ? mountNotify(id) : await mountConnectorTools(id)
         if (stopped || mounts.get(id) !== attempt) {
           for (const undo of mounted.dispose) undo()
           mounted.close?.()
