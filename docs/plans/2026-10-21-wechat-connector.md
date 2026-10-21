@@ -47,7 +47,7 @@
 
 | 凭据名 | 来源 | 用途 |
 |---|---|---|
-| `WECHAT_WEBHOOK_SECRET`（首实例）/ `WECHAT_WEBHOOK_SECRET_2`（`wechat-2`） | 用户通过安全卡片（`request_secret`）提供 | 出站签名 + 入站 HMAC 校验 |
+| `WECHAT_WEBHOOK_SECRET`（基名；`-N` 实例由 `secretNameOf` 加 `_N`） | 设置页 secret 字段（F5）为主；`request_secret` 只用于 CLI/调试 | 出站签名（可选）+ 入站 HMAC 校验（必选）；两边都落 DSH 凭据库 |
 | `WECHAT_INBOUND_TOKEN`（首实例）/ `WECHAT_INBOUND_TOKEN_2` | 模块生成（32 字节随机），写入 DSH 凭据库 | 入站 Bearer 校验（可选）；用户在 Secrets 页读取，配置到网关 |
 
 clawbot 模式的登录凭据是**本地文件** `<rt.home>/wechat/<instance>.json`（目录 0700、文件 0600），不进 DSH 凭据库、不进 state；结构见 §6。
@@ -69,6 +69,7 @@ P1 只有出站：通道可配置、可连接、可发通知、卡片可见，**
 - 每次调用先走插件审批卡（`approve`，line 写「向 <通道名> 发送通知」+ 目标 URL 的 host，不显示完整 URL/密钥候选项），批准后 POST 到 `webhookUrl`。
 - 文本限长：`generic` 4,000 字符；`wecom` 2,048 字符；超长直接报错、不截断。
 - 请求头带 HMAC 签名（同 §3.2 的格式，方向反过来），便于接收端校验来源。
+- **secret 可选**：P1 出站不强制配 secret——缺 secret 时仍可 ready，POST **不签名**并在卡片提示「未配置 secret，接收端无法校验来源」；配了才签。secret 轮换同时影响出站签名与入站验签（同一把 secret，两处共用）。
 - 超时 10s；错误映射：401/403 → 凭据被拒；404 → 地址不对；429 → 限流并给 retry 提示；其他 → 状态码 + 服务端短消息。错误文案不含 URL 全文、不含密钥。
 - 结果：成功返回「已发送到 <通道名>」；不返回响应体全文，避免把接收端内容带进对话。
 
@@ -97,8 +98,9 @@ POST /wechat/<instance>/inbound
 **数值上限**（超限返回码写死）：
 
 - **限速**：每实例 **30 req/min，burst 10**（令牌桶）；超出 → **429** + `retry_after` 秒。
-- **请求体**：≤ **64 KB**；超出 → **413**（在看 body 之前按 Content-Length 拒绝）。
+- **请求体**：≤ **64 KB**；超出 → **413**。**不能只信 `Content-Length`**：chunked 请求要**流式累计**，超过 64KB 立即断开并回 413（不先把 body 读进内存）。
 - **入站文本**：≤ **8 KB**（UTF-8 字节）；超出 → **413**。
+- **`callbackUrl` 白名单**：只接受 `https://` 或 **三个 loopback 字面值**（`127.0.0.1`、`localhost`、`::1`）；其余 `http://` 一律拒绝，防 SSRF。
 
 **签名头**：
 
@@ -156,7 +158,7 @@ nonce 用每实例 LRU（1,000 条）挡重放；`msgId` 幂等见 §6。
   - **粒度（v1 只做 1 条）**：每通道只有**创建者 DM 一条** conversation session（`dm:<senderHash>`）。「≤8 条 conversation + LRU 归档」与 `group:<group_id>` 都移到 **P4**；P2 的状态与表按单 conversation 设计，不预先建空会话。
   - 选择「专属 channel session」而不是「隐藏 room」：room 有成员/群渲染语义，隐藏 room 会牵动侧栏与会话列表；专属 session 不挂任何列表，影响面最小。
   - 消息注入用 `rt.deliver({ sessionId, toId: botId, text, role: 'request', exchangeId })`（`deliver` 已支持显式 sessionId），不调用 `rt.chatOf(botId)`。
-  - **工具白名单**：channel session 默认**无任何工具**（`agent.ctx.tools.restrict({ allow: [] })`）；`settings.allowReadTools === true` 时只允许 `['web_search']`。**denylist 逐项点名**：连接器写、文件、bash、记忆写、`ask_user`、`request_secret`、审批代答、Bot 管理。
+  - **工具白名单**：channel session 默认**无任何工具**。`restrict({ allow })` 形态尚未验证（仓库现有用法只有 `restrict({ deny })`，见 `agents.js:61`）；**P2 开工前与 Forge 确认**：若只支持 deny，则改为「deny 全量已知工具 + 新注册工具默认不放行」，并加负例（后注册的工具也不会漏进 channel session）。`settings.allowReadTools === true` 时只放行 `web_search`。**denylist 逐项点名**：连接器写、文件、bash、记忆写、`ask_user`、`request_secret`、审批代答、Bot 管理。
   - **`untrusted` 必须进消息头**：不能只存 `source`；框架的 `headerFor` 要在注入正文里带 `[external channel · untrusted]` 段，模型从正文即可看到；`source` 仍带 `sender`/`untrusted` 供审计。
   - 需要框架补的小改动：`source` 上允许 `untrusted: true` 与 `sender`（现在的 source 字段是白名单的），见 §12。
 - **串行处理**：同一通道内单飞行队列；一条入站处理完（回复或超时）才处理下一条。
@@ -292,7 +294,7 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 |---|---|---|---|---|
 | F1 | `registry.js:105` `checkInstances` 放宽为 `mode` ∈ {`oauth-mcp`, `custom`}；其余校验（prefix、min/max、id 长度、`checkInstanceIds`）不动；custom 模块必须自己声明 `credentials`/`tokenSecret`。测试：custom+instances 通过、rest-tools+instances 仍拒绝、缺凭据声明报错清楚 | Forge | P1 阻塞（**先落 F1 再开 P1 实例**） | 0.5d，今天 |
 | F2b | `secretNameOf(id, field)`：首实例裸名、`-N` 实例 `_N` 后缀（须过 `SECRET_NAME` 校验，两实例不得同名）；`configuredOf`/`credentialKeyOf`/`secretMapOf`/connect 写 secret/disconnect 删 secret/`notifyTokenOf` 全走它；mount 给模块 `secretName(field)`。测试：两实例互不覆盖、删实例只删自己、view/state/logs 不含值 | Forge | P1 阻塞 | 0.25d，今天 |
-| F5 | Host 侧缺口：① `connector-test` 增加模块 `test` 钩子（custom 也能测）；② `connector-set-settings` 支持 secret 字段（缺省/空串=保留、非空=替换写凭据库、`clearSecrets` 显式清除）；③ 通用 `connector-command {id, action, args}` → 模块 `command` 钩子（替代逐个端点，登录等自定义动作都走它）；④ view 由模块 `view`/`status` 钩子合并进 row，`instance.max` 从 `instances.max` 填 | Forge | P1 阻塞（卡片/测试/登录） | 1d |
+| F5 | Host 侧缺口：① `connector-test` 增加模块 `test` 钩子（custom 也能测）；② `connector-set-settings` 支持 secret 字段（缺省/空串=保留、非空=替换写凭据库、`clearSecrets` 显式清除）；③ 通用 `connector-command {id, action, args}` → 模块 `command` 钩子（per-action 白名单 + 参数校验 + 仅 clawbot，禁止透传）；④ view 由模块 `view`/`status` 钩子合并进 row，`instance.max` 从 `instances.max` 填 | Forge | P1 阻塞（卡片/测试/登录） | 1d |
 | F2a | 会话归属（P2）：`store.js` `channelOwners: Map<sessionId,{botId,instance}>`，`indexSessions()` 从 `state.channels[...].conversations[*].sessionId` 重建；`selfOf`/`isBotSession` 纳入 channel session；新 `src/host/channels.js`：`channelSessionFor`（createSession + 模型/权限/capabilities + 工具白名单）、`rebindChannel`/`closeChannel`（archiveSession + 归档记录，不删不复用）、`assistant/message` 累积 + `turn/end` 收口回调；`agent.ctx.tools.restrict({allow:[...]})`；`memory.js` exclude；`prompt.js` untrusted 段；`delivery.js:57` source 改为可扩展并处理 `headerFor` 与客户端标识 | Forge | P2 阻塞 | 1–1.5d，明天 |
 | F3 | `connectorRow` 增加模块 `status` 钩子（display-only，异常吞掉） | Forge | 可选 | 0.25d |
 | F4 | `readiness({level,settings,instance,rt})` 传只读 `rt`（或更窄 `{botOf}`）；每行每级都会调，要求纯内存、无 IO | Forge | 可选 | 0.25d |
@@ -374,7 +376,7 @@ card: { glyph:'wechat', about, docsUrl }
   - **已连接（ready/error）时改 `transport` 会被拒绝**，错误文案固定为 “Disconnect this channel before changing the transport.”；客户端先 `connector-disconnect` 再保存（与 Prism 方案一致）。
 - `connector-disconnect { id }`：停监听/轮询，state 转 off；保留 settings 与凭据，供重连。
 - `connector-create-instance { base:'wechat' }` / `connector-delete-instance { id }`：上限 8（min 1），实例 id 为 `wechat`、`wechat-2`…；删除时模块在 `close` 里清理该实例的凭据文件、secret 名与监听路由（best effort，失败只告警）。
-- **新增通用动作** `connector-command { id, action, args? }`（**F5 host + F6 client**），转发到模块 `command` 钩子。WeChat 的 action：`login-start` / `login-refresh` / `login-cancel`（仅 clawbot；结果在 `login` 回，UI 轮询 state）。TTL 到期宿主把 `login.state` 置 `expired`，刷新走 `login-refresh`（不自动轮换）。**v1 登录是 token 粘贴**，`qr/expired` 随 P4。
+- **新增通用动作** `connector-command { id, action, args? }`（**F5 host + F6 client**），转发到模块 `command` 钩子。**安全约束**：per-action 白名单（模块声明允许的 action 列表）、每个 action 参数校验、**仅 `transport==='clawbot'` 可用**；其它 transport 调 `login-*` 返回 400 `unsupported-transport`，**禁止任意 action 透传**。WeChat 的 action：`login-start` / `login-refresh` / `login-cancel`（结果在 `login` 回，UI 轮询 state）。TTL 到期宿主把 `login.state` 置 `expired`，刷新走 `login-refresh`（不自动轮换）。**v1 登录是 token 粘贴**，`qr/expired` 随 P4。
 - view 的 `fields`/`inbound`/`login`/`levels` 对象化与 `instance.max` 由 F5 的模块 `view`/`status` 钩子给出，框架合并进 row。
 - `connector-set-level { id, level }` 不变。
 
