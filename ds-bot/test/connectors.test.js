@@ -1950,3 +1950,18 @@ test('a failing view hides only its own data', async (t) => {
   assert.equal(row.inbound, undefined)
   assert.equal(row.login, undefined)
 })
+
+// A module's readiness hook sees the running host: it can tell a missing Bot from a missing
+// project id before the user presses Connect, not only after a failed mount.
+test('readiness receives the read-only runtime and the instance', async (t) => {
+  const seen = []
+  const definition = demoDefinition({ readiness: (context) => { seen.push(context); return undefined } })
+  const { ctx, rt, home } = hostSetup({ state: { connectors: { demo: { level: 'read', settings: {} } } }, definition })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  rt.connectorsView()
+  // The view asks each declared level, so the read-level question is among them.
+  const context = seen.find(entry => entry.level === 'read')
+  assert.equal(context.rt, rt)
+  assert.equal(typeof context.rt.botOf, 'function')
+  assert.deepEqual(context.instance, { base: 'demo', id: 'demo' })
+})

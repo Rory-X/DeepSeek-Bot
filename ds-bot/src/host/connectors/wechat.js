@@ -41,10 +41,12 @@ const webhookOf = (settings) => {
 
 // A channel is ready once it knows which Bot it speaks for and where to post. P1 keeps the
 // secret optional: a receiver that cannot verify a signature still gets its notice.
-export function wechatReadiness({ settings } = {}) {
+export function wechatReadiness({ settings, rt } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
   if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release. Use the Webhook transport.'
-  if (trim(values.botId) === '') return 'Choose a Bot for this channel.'
+  const botId = trim(values.botId)
+  if (botId === '') return 'Choose a Bot for this channel.'
+  if (typeof rt?.botOf === 'function' && rt.botOf(botId) === undefined) return 'The Bot this channel is bound to no longer exists. Choose another Bot.'
   if (trim(values.webhookUrl) === '') return 'Add the push webhook URL for this channel.'
   return undefined
 }

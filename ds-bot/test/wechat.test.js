@@ -142,7 +142,7 @@ test('P1-02 the row carries the channel settings and never a secret value', asyn
 })
 
 // ---- P1-03: readiness and mount failures ----
-test('P1-03 readiness names the missing field and a deleted Bot is a mount error', async (t) => {
+test('P1-03 readiness names the missing field and a deleted Bot before Connect', async (t) => {
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const row = await rowOf(ctx)
@@ -154,13 +154,12 @@ test('P1-03 readiness names the missing field and a deleted Bot is a mount error
   t.after(() => receiver.close())
   const ghost = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'deleted-bot', webhookUrl: receiver.url } })
   assert.equal(ghost.ok, true)
-  const connected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
-  assert.equal(connected.ok, true)
-  const failed = await until(async () => {
-    const current = await rowOf(ctx)
-    return current.state === 'error' ? current : undefined
-  }, 'the mount failure')
-  assert.match(failed.error, /no longer exists/)
+  // The binding is checked by readiness now, so the row stays off with the reason instead
+  // of mounting and failing.
+  await until(async () => ((await rowOf(ctx))?.levelNotes !== undefined ? true : undefined), 'the deleted Bot note')
+  const missingBot = await rowOf(ctx)
+  assert.equal(missingBot.state, 'off')
+  assert.match(missingBot.levelNotes.read, /bound to no longer exists/)
 })
 
 // ---- P1-04: connect; P1-05: the notify tool and its approval ----
@@ -273,14 +272,13 @@ test('P1-07b an error channel also refuses the switch, and a never connected one
   t.after(() => receiver.close())
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const full = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
   await connectChannel(ctx, receiver)
-  // Put the channel in error through a mounted Bot that no longer exists.
-  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, botId: 'deleted-bot' } })).ok, true)
-  await until(async () => ((await rowOf(ctx))?.state === 'error' ? true : undefined), 'the error row')
-  const refusedInError = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...full, transport: 'clawbot' } })
-  assert.equal(refusedInError.ok, false)
-  assert.equal(refusedInError.error.message, 'Disconnect this channel before changing the transport.')
+  // An error row is not reachable from the card in P1 (a broken binding is readiness and
+  // keeps the row off), so the module rule is checked against the context the host passes.
+  assert.throws(
+    () => normalizeWechatSettings({ transport: 'clawbot' }, { state: 'error', settings: { transport: 'webhook' } }),
+    /Disconnect this channel before changing the transport\./,
+  )
   // A one-argument normalizeSettings call still works (modules that ignore the context).
   assert.deepEqual(normalizeWechatSettings({ transport: 'webhook' }), { transport: 'webhook' })
 })
@@ -471,3 +469,22 @@ test.todo('P2-23 v1 keeps exactly one conversation session (the creator DM); no 
 test.todo('P2-24 the tool denylist holds and untrusted travels in the headerFor message header')
 test.todo('P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504)')
 test.todo('P3: open the ClawBot option and its token field')
+
+test('F4 a bound Bot that is gone shows before Connect, not only as a mount error', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'deleted-bot', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  await until(async () => ((await rowOf(ctx))?.levelNotes !== undefined ? true : undefined), 'the level notes')
+  const missing = await rowOf(ctx)
+  assert.equal(missing.state, 'off')
+  assert.match(missing.levelNotes.read, /bound to no longer exists/)
+
+  // A Bot that exists clears the note and lets the channel mount.
+  const fixed = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal(fixed.ok, true, JSON.stringify(fixed))
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the channel ready')
+  assert.equal((await rowOf(ctx)).levelNotes, undefined)
+})

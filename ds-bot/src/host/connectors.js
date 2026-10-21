@@ -583,7 +583,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     const connector = options[id]
     if (typeof connector.readiness !== 'function') return undefined
     try {
-      const note = connector.readiness({ level, settings, instance: instanceContextOf(id) })
+      const note = connector.readiness({ level, settings, instance: instanceContextOf(id), rt })
       return typeof note === 'string' && note !== '' ? note : undefined
     } catch (error) {
       return reason(error)
