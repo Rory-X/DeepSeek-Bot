@@ -34,8 +34,8 @@ export async function clearLegacyExchangeTurns(state, { home, statePath, warn, n
 export function install(rt) {
   const { ctx, home, statePath } = rt
 
-  /** @type {{version:1, workspaceId?:string, mainBotIds:string[], bots:Record<string,any>, rooms:Record<string,any>, agents:Record<string,any>, capabilities:{items:Record<string,any>}, exchanges:any[], exchangeTurns:Record<string,number[]>, exchangeTurnsCleared?:true, revision:number}} */
-  const state = { version: 1, mainBotIds: [], bots: {}, rooms: {}, agents: {}, capabilities: { items: {} }, exchanges: [], exchangeTurns: {}, works: {}, questions: {}, prefs: {}, switching: {}, revision: 0 }
+  /** @type {{version:1, workspaceId?:string, mainBotIds:string[], bots:Record<string,any>, rooms:Record<string,any>, agents:Record<string,any>, capabilities:{items:Record<string,any>}, exchanges:any[], exchangeTurns:Record<string,number[]>, exchangeTurnsCleared?:true, works:Record<string,any>, questions:Record<string,any>, views:Record<string,any>, prefs:Record<string,any>, switching:Record<string,any>, revision:number}} */
+  const state = { version: 1, mainBotIds: [], bots: {}, rooms: {}, agents: {}, capabilities: { items: {} }, exchanges: [], exchangeTurns: {}, works: {}, questions: {}, views: {}, prefs: {}, switching: {}, revision: 0 }
   let loaded = null
   let writing = Promise.resolve()
   const { warn } = rt
@@ -177,6 +177,7 @@ export function install(rt) {
       migrated = true
     }
     if (state.works === null || typeof state.works !== 'object' || Array.isArray(state.works)) state.works = {}
+    if (state.views === null || typeof state.views !== 'object' || Array.isArray(state.views)) state.views = {}
     // LEGACY: Bots no longer count the rounds they start in a group.
     for (const room of Object.values(state.rooms)) {
       if (!('botRounds' in room)) continue

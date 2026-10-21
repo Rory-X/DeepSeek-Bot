@@ -571,7 +571,13 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   }
   const storedLevelOf = id => state.connectors?.[id]?.level
   const levelOf = (id) => {
+    // A read-only host keeps its own rule: nothing here may turn a write on.
     if (rt.readOnly() !== undefined) return 'read'
+    // A connector that only declares write has nothing to do at read, so an older team file
+    // that still stores `read` runs at write instead of silently losing its send tool. The
+    // stored value is left as it is: this file is not migrated.
+    const levels = levelsOf(options[id])
+    if (levels.length === 1 && levels[0] === 'write') return 'write'
     const stored = storedLevelOf(id)
     if (stored !== undefined && CONNECTOR_LEVELS.includes(stored)) return stored
     return legacyLevelOf(id) ?? defaultLevelOf(options[id])

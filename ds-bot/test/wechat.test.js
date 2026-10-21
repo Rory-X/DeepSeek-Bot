@@ -190,8 +190,10 @@ test('P1-02 the row carries the channel settings and never a secret value', asyn
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const row = await connectChannel(ctx, receiver)
-  assert.equal(row.level, 'read')
-  assert.deepEqual(row.levels.map(level => level.id), ['read', 'write'])
+  // Messaging channels declare one write level and hide the level choice.
+  assert.equal(row.level, 'write')
+  assert.deepEqual(row.levels.map(level => level.id), ['write'])
+  assert.equal(row.card.levelChoice, false)
   assert.deepEqual(row.settings.map(field => field.name), ['label', 'transport', 'botId', 'webhookUrl', 'webhookFormat', 'allowReadTools', 'webhookSecret'])
   const json = JSON.stringify(await call(ctx, 'state', {}))
   assert.equal(json.includes('test-secret'), false)
@@ -219,7 +221,7 @@ test('P1-03 readiness names the missing field and a deleted Bot before Connect',
   await until(async () => ((await rowOf(ctx))?.levelNotes !== undefined ? true : undefined), 'the deleted Bot note')
   const missingBot = await rowOf(ctx)
   assert.equal(missingBot.state, 'off')
-  assert.match(missingBot.levelNotes.read, /bound to no longer exists/)
+  assert.match(missingBot.levelNotes.write, /bound to no longer exists/)
 })
 
 // ---- P1-04: connect; P1-05: the notify tool and its approval ----
@@ -229,7 +231,8 @@ test('P1-04 connect turns the channel ready; P2 serves it a loopback inbound add
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const row = await connectChannel(ctx, receiver)
-  assert.deepEqual([row.state, row.level], ['ready', 'read'])
+  assert.deepEqual([row.state, row.level], ['ready', 'write'])
+  assert.equal(row.card.levelChoice, false)
   const inbound = await until(async () => (await rowOf(ctx))?.inbound, 'the inbound address')
   assert.match(inbound.url, /^http:\/\/127\.0\.0\.1:\d+\/wechat\/wechat\/inbound$/)
   assert.equal(row.login, undefined)
@@ -240,9 +243,8 @@ test('P1-05 wechat_notify asks first, runs once on allow and never on deny', asy
   t.after(() => receiver.close())
   const { ctx, home, registered } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  // A messaging channel is write-only: its send tool is there as soon as it is ready.
   await connectChannel(ctx, receiver)
-  assert.equal(registered.includes('wechat_notify'), false, 'no notify tool at read level')
-  await toWrite(ctx)
   assert.ok(registered.includes('wechat_notify'))
 
   const approved = notifyToolOf(ctx).execute({ text: 'deploy done' }, { agent: { id: 'm1' } })
@@ -781,7 +783,7 @@ test('P2-08 the same text under a new msgId starts a turn (no content-hash swall
   await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 2), 'the second turn for a new msgId')
   // One channel conversation for both messages, and the read level registers no notify.
   assert.equal(sessionAgents.size, 1)
-  assert.equal(ctx.registeredTools.has('wechat_notify'), false, 'read level registers no notify tool')
+  assert.equal(ctx.registeredTools.has('wechat_notify'), true, 'the single write level registers the notify tool')
 })
 
 test('P2-12 two inbound messages are serialized: each reply answers its own msgId', async (t) => {
@@ -940,14 +942,14 @@ test('P2-16 logs, diagnostics and state.json carry no sender text, no message bo
   assert.equal(saved.includes(sender), false)
   assert.equal(saved.includes('test-secret'), false)
 })
-test('P2-17 the read level answers inbound while wechat_notify stays unregistered', async (t) => {
+test('P2-17 the write level answers inbound and keeps wechat_notify registered', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
   const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   const row = await connectChannel(ctx, receiver)
-  assert.equal(row.level, 'read')
-  assert.equal(ctx.registeredTools.has('wechat_notify'), false)
+  assert.equal(row.level, 'write')
+  assert.equal(ctx.registeredTools.has('wechat_notify'), true)
   const url = await inboundUrl(ctx)
   const waiting = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hello', wait: 5_000 })
   const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the read turn')
@@ -957,7 +959,7 @@ test('P2-17 the read level answers inbound while wechat_notify stays unregistere
   emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
   const answered = await waiting
   assert.deepEqual([answered.status, answered.json.reply], [200, 'hi'])
-  assert.equal(ctx.registeredTools.has('wechat_notify'), false)
+  assert.equal(ctx.registeredTools.has('wechat_notify'), true)
 })
 test('P2-18 the module declares no commands, so connector-command refuses every action', async (t) => {
   const receiver = await startWebhookReceiver()
@@ -1317,7 +1319,7 @@ test('F4 a bound Bot that is gone shows before Connect, not only as a mount erro
   await until(async () => ((await rowOf(ctx))?.levelNotes !== undefined ? true : undefined), 'the level notes')
   const missing = await rowOf(ctx)
   assert.equal(missing.state, 'off')
-  assert.match(missing.levelNotes.read, /bound to no longer exists/)
+  assert.match(missing.levelNotes.write, /bound to no longer exists/)
 
   // A Bot that exists clears the note and lets the channel mount.
   const fixed = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' } })

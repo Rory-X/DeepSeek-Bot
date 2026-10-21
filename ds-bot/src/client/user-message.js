@@ -4,6 +4,7 @@ import { mentionSpans } from '../shared/mentions.js'
 import { BotMark } from './mark.js'
 import { CheckIcon, CopyIcon } from './icons.js'
 import { dateLocale, t } from './i18n.js'
+import { clockLabel, messageClock } from './text.js'
 import { useFold } from './fold.js'
 import { splitQuote, QuoteCard } from './quote.js'
 
@@ -92,6 +93,7 @@ export function UserMessageCell({ node, sessionId, useRoster, actions, renderMes
   const referenceLabels = data.referenceLabels ?? []
   const references = openFile && openSkill ? { openFile, openSkill } : undefined
   const steering = node.kind === 'steering'
+  const groupTime = roster.roomsById?.[sessionId] && Number.isFinite(data.time) ? messageClock(data.time) : undefined
   const { shown, folded, control } = useFold(words, { markdown: false })
   const body = h(UserText, { text: shown, bots: mentionableBots(roster, sessionId), referenceLabels, skillNames: data.skillNames ?? [], references, actions })
   return h('div', { className: 'bt-umsg', 'data-steering': steering || undefined },
@@ -102,7 +104,8 @@ export function UserMessageCell({ node, sessionId, useRoster, actions, renderMes
         words !== '' ? (control ? h('div', { className: 'bt-fold-body' }, body) : body) : null,
         control,
         rest.map((block, index) => (ui.JsonBlock ? h(ui.JsonBlock, { key: index, label: t('Content'), payload: block }) : null))) : null,
-      referenceLabels.length > 0 ? h('div', { className: 'bt-urefs' }, t('Referenced {labels}', { labels: referenceLabels.join(t(', ')) })) : null),
+      referenceLabels.length > 0 ? h('div', { className: 'bt-urefs' }, t('Referenced {labels}', { labels: referenceLabels.join(t(', ')) })) : null,
+      groupTime ? h('div', { className: 'bt-utime', title: clockLabel(data.time) }, groupTime) : null),
     text === '' ? null : h('div', { className: 'bt-utools' }, h(CopyButton, { text })))
 }
 

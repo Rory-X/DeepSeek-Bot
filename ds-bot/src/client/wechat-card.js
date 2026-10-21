@@ -5,12 +5,20 @@
 import { createElement as h, useState } from 'react'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
-import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
+import { SettingField, declaredSettingsOf, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
 
-// Two speech bubbles of our own drawing; no brand artwork is copied into the bundle.
+// Two chat bubbles of our own drawing, one weight throughout: a larger one at the upper
+// left and a smaller one at the lower right, each with two eyes and a short tail. No brand
+// artwork is copied into the bundle.
 export const WeChatMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-  h('path', { d: 'M3 6.2c0-1.6 1.6-2.9 3.7-2.9s3.7 1.3 3.7 2.9-1.6 2.9-3.7 2.9c-.4 0-.9-.1-1.3-.2L3.6 10l.5-1.6C3.4 7.9 3 7.1 3 6.2z' }),
-  h('path', { d: 'M9.6 12.8c0-1.6 1.6-2.9 3.7-2.9s3.7 1.3 3.7 2.9-1.6 2.9-3.7 2.9c-.4 0-.9-.1-1.3-.2L10.2 16.6l.5-1.6c-.7-.5-1.1-1.3-1.1-2.2z' }))
+  h('ellipse', { cx: 7.2, cy: 6.9, rx: 4.9, ry: 4 }),
+  h('path', { d: 'M5.36 10.61 L3.31 11.99 L3.92 9.87' }),
+  h('circle', { cx: 5.6, cy: 6.4, r: 0.55, fill: 'currentColor', stroke: 'none' }),
+  h('circle', { cx: 8.3, cy: 6.4, r: 0.55, fill: 'currentColor', stroke: 'none' }),
+  h('ellipse', { cx: 13, cy: 13, rx: 4.2, ry: 3.5 }),
+  h('path', { d: 'M15.81 15.6 L16.23 17.3 L14.57 16.25' }),
+  h('circle', { cx: 11.7, cy: 12.5, r: 0.5, fill: 'currentColor', stroke: 'none' }),
+  h('circle', { cx: 14, cy: 12.5, r: 0.5, fill: 'currentColor', stroke: 'none' }))
 
 const aboutOf = (row) => {
   const about = row?.card?.about
@@ -54,7 +62,7 @@ const loginText = (login) => {
 
 // One channel: its own settings, level and connection. The module card above it holds the
 // add button and the summary; the row holds every action for this channel.
-function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = false, onToggle, lastOne = false }) {
+export function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = false, onToggle, lastOne = false }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [settingDraft, setSettingDraft] = useState(null)
@@ -195,7 +203,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
       secret: secretOf(field),
     })
   }
-  const levelBlock = levels.length > 0
+  const levelBlock = levelChoiceVisible(row)
     ? h('div', { className: 'bt-connector-setting' },
       h('div', { className: 'bt-connector-action-title' }, t('Access level')),
       h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },

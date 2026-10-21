@@ -29,6 +29,8 @@
 //   报错 (fake rejected key, 401; also as the text of 转告, so the receiving Bot fails)
 //   卡片 K (K×1000 characters, then a question card) · 笔记模式 截断一次|缺节一次|总截断|总缺节|失败|正常
 //   记住[@话题] 事实 · 团队记住 事实 (remember) · 忘掉 事实 (forget) · 回忆 [词] (recall)
+//   视图选项 (options card, waits) · 视图表单 (form card, waits) · 视图展示 (display-only
+//   stack) · 大视图 (display-only, just under the byte limit)
 //   查能力 [词] (names the mcp__ tools and catalog skills that contain 词; also in a group)
 //   A message with a file (a long Bot message as a file, a file the user sent): the Bot
 //   reads the saved path, then says how many lines it read and how the file ends.
@@ -36,6 +38,8 @@
 //   删掉|remove N, 改|edit N: X change entries, anything else gets the entry count.
 // Commands in a group:
 //   把X拉进群 · 把X踢出群 · 群名改成X · 讨论 (admin @all) · 私聊聊了啥 (repeats the briefing)
+//   记住[@话题] 事实 (the admin saves to the group memory) · 自己记住 / 团队记住 事实 (own / team)
+//   忘掉 事实 (the admin) · 回忆 [词] (every member)
 //   查私聊 关键词 (read_own_chat) · 长文 N · 上下文里有 词 · 撑爆 · 报错 [名] (that member's call, or every member's, fails with 401)
 //   提权 (members other than the admin run a shell command that asks for full access)
 //   写成文字 (members write their tool call as text instead of making it; also in a Bot's own chat)
@@ -146,8 +150,8 @@ function decide(body) {
 
   // The memory panel: a prose summary of the entries it lists, and "ask or update".
   if (system.includes('You write the memory summary')) return [text(memorySummary(textOf(last?.content)))]
-  if (system.includes('You keep the memory of one Bot')) return [text(JSON.stringify(memoryAsk(textOf(last?.content))))]
-  if (system.includes('You keep the long-term memory of one Bot')) return [text(JSON.stringify(memoryReview(textOf(last?.content))))]
+  if (/You keep the memory of one (Bot|group chat)/.test(system)) return [text(JSON.stringify(memoryAsk(textOf(last?.content))))]
+  if (/You keep the long-term memory of one (Bot|group chat)/.test(system)) return [text(JSON.stringify(memoryReview(textOf(last?.content))))]
 
   const kind = isSummary(body)
   if (kind === 'checkpoint') {
@@ -360,6 +364,13 @@ function decide(body) {
       const earlier = messages.slice(0, -1).map(m => textOf(m.content)).join('\n')
       return [text(earlier.includes(ask[1]) ? `上下文里有「${ask[1]}」。` : `上下文里没有「${ask[1]}」。`)]
     }
+    // Group memory: the admin saves, so a round of members does not save it twice.
+    if ((ask = /^User: (团队|自己)?记住(?:@(\S+))?\s*[:：]?\s*(.+)$/.exec(userLine)) && tools.has('remember')) {
+      if (!leads) return [text('[PASS]')]
+      return [tool('remember', { text: ask[3].trim(), ...(ask[2] ? { topic: ask[2] } : {}), ...(ask[1] ? { scope: ask[1] === '团队' ? 'team' : 'own' } : {}) })]
+    }
+    if ((ask = /^User: 忘掉\s*[:：]?\s*(.+)$/.exec(userLine)) && tools.has('forget')) return leads ? [tool('forget', { entry: ask[1].trim() })] : [text('[PASS]')]
+    if ((ask = /^User: 回忆(?:\s+(.+))?$/.exec(userLine)) && tools.has('recall')) return [tool('recall', ask[1] ? { query: ask[1].trim() } : {})]
     // Group Sessions: the frozen brief is in the Session's first message, the lookup a tool.
     if ((ask = /查能力\s*(\S*)/.exec(userLine))) return [text(capabilityReport(me, tools, messages, ask[1]))]
     if ((ask = /查私聊\s*(\S*)/.exec(userLine))) return [tool('read_own_chat', ask[1] ? { query: ask[1] } : {})]
@@ -481,6 +492,31 @@ function decide(body) {
   if (/^\s*阻塞提问/.test(userText) && tools.has('ask_user_question')) {
     return [tool('ask_user_question', { questions: [{ id: 'start', header: 'Choose', question: '先从哪块开始？', options: [{ label: '先定目标 (Recommended)', description: '先把要做成什么说清楚' }, { label: '整理日常事务' }] }] })]
   }
+  // View cards: 视图选项 and 视图表单 wait for an answer; 视图展示 and 大视图 are
+  // display-only — the latter sits just under the view byte limit.
+  if (/^\s*视图选项/.test(userText) && tools.has('show_view')) {
+    return [tool('show_view', { title: 'Pick a lane', view: { type: 'options', id: 'lane', options: [{ label: 'Ship now' }, { label: 'One more pass' }] } })]
+  }
+  if (/^\s*视图表单/.test(userText) && tools.has('show_view')) {
+    return [tool('show_view', { title: 'A few details', view: { type: 'form', id: 'ask', submitLabel: 'Send', fields: [{ id: 'name', label: 'Name', placeholder: 'Ada' }, { id: 'note', label: 'Note' }] } })]
+  }
+  if (/^\s*视图展示/.test(userText) && tools.has('show_view')) {
+    return [tool('show_view', {
+      title: 'Status board', await_reply: false,
+      view: {
+        type: 'stack',
+        children: [
+          { type: 'text', text: '**Release readiness** — all checks are in.' },
+          { type: 'metric', label: 'Open issues', value: 3, tone: 'warn' },
+          { type: 'table', columns: [{ key: 'item', label: 'Item' }, { key: 'state', label: 'State' }], rows: [['Tests', 'green'], ['Docs', 'draft'], ['Changelog', 'done']] },
+          { type: 'progress', label: 'Reviewed', percent: 72 },
+        ],
+      },
+    })]
+  }
+  if (/^\s*大视图/.test(userText) && tools.has('show_view')) {
+    return [tool('show_view', { title: 'A long note', view: { type: 'text', text: 'x'.repeat(7800) }, await_reply: false })]
+  }
   // Streams slowly, then checks the team: exercises the activity row stepping aside
   // for a streaming reply and coming back for the tool.
   if (/^\s*慢慢说/.test(userText) && tools.has('list_bots')) {
@@ -500,7 +536,8 @@ function decide(body) {
 
 // The memory panel's summary: headed paragraphs that restate the listed entries.
 function memorySummary(request) {
-  const name = /Here is everything (.+?) remembers/.exec(request)?.[1] ?? 'Bot'
+  const asked = /Here is everything (?:the group chat "(.+?)"|(.+?)) remembers/.exec(request)
+  const name = asked?.[1] ?? asked?.[2] ?? 'Bot'
   const zh = /Write the summary in [^,]*Chinese/.test(request)
   const [own = [], team = []] = request.split(/^## .*$/m).slice(1, 3).map(part => part.split('\n')
     .filter(line => line.startsWith('- ')).map(line => line.slice(2).replace(/^\[\[[^\]]+\]\]\s*/, '').replace(/[。.]$/u, '')))

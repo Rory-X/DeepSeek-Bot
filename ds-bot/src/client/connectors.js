@@ -3,8 +3,8 @@ import { useMorph } from './motion.js'
 import { MaskedInput } from './secret-card.js'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
-import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf } from './connector-shared.js'
-import { WeChatCard } from './wechat-card.js'
+import { SettingField, declaredSettingsOf, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf } from './connector-shared.js'
+import { WeChatCard, WeChatMark } from './wechat-card.js'
 
 export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true },
   h('path', { d: 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z' }))
@@ -74,6 +74,7 @@ const CARD_GLYPHS = {
   weread: WeReadMark,
   gmail: GmailMark,
   qqmail: QQMailMark,
+  wechat: WeChatMark,
 }
 const ABOUT = {
   github: () => t('Repositories, issues, and pull requests'),
@@ -318,7 +319,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   }
   // A connector with a level or capabilities opens its panel; settings and instances live on
   // the module's grouped card instead.
-  const hasOptions = levels.length > 0 || (on && (capabilities.length > 0 || permissions !== null))
+  const hasOptions = levelChoiceVisible(connector) || (on && (capabilities.length > 0 || permissions !== null))
   const [details, setDetails] = useState(false)
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : undefined
   // The card names its own glyph; a host that declares none keeps the mark its id had.
@@ -343,7 +344,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
           locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
       })))
     : null
-  const levelBlock = levels.length > 0
+  const levelBlock = levelChoiceVisible(connector)
     ? h('div', { className: 'bt-connector-setting' },
       h('div', { className: 'bt-connector-action-title' }, t('Access level')),
       h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
@@ -623,7 +624,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
         : null,
     })
   }
-  const levelBlock = levels.length > 0
+  const levelBlock = levelChoiceVisible(connector)
     ? h('div', { className: 'bt-connector-setting' },
       h('div', { className: 'bt-connector-action-title' }, t('Access level')),
       h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
@@ -755,7 +756,7 @@ function AddProjectForm({ base, baseId, existingIds, actions, onCreated, onCance
   return h('div', { className: 'bt-connector-add-form' },
     fieldInput('label', t('Name (optional)'), t('The project name, if you want a different card name')),
     valueFields.map(field => fieldInput(field.name, typeof field.label === 'string' && field.label !== '' ? field.label : field.name, field.label ?? field.name)),
-    levels.length > 0
+    levelChoiceVisible(base)
       ? h('div', { className: 'bt-connector-setting' },
         h('div', { className: 'bt-connector-action-title' }, t('Access level')),
         h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': t('Access level') },
