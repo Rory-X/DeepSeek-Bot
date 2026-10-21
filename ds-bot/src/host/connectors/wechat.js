@@ -282,6 +282,7 @@ function notifyToolClawbot({ channel, token, account, client, rt }) {
         if (status === 429) throw new Error('WeChat is rate-limited; try again in a moment.')
         throw new Error('Could not reach WeChat.')
       }
+      auditSend(rt, channel, text.length, 'ok')
       return 'Sent.'
     },
   }
