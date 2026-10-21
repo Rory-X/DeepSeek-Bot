@@ -225,6 +225,10 @@ test('a channel Session is not one of the Bot\'s own chat parts', async (t) => {
   assert.deepEqual(host.rt.partsOf('a').map(part => part.sessionId), ['a'])
   assert.equal(host.rt.partsOf('a').some(part => part.sessionId === sessionId), false)
   assert.equal(host.rt.chatOf('a'), 'a')
+  // Nothing about the channel becomes a part of the Bot's chat or a group segment, so the
+  // checkpoint/segment machinery never sees it.
+  assert.equal(host.rt.state.bots.a.segments, undefined)
+  assert.deepEqual(Object.keys(host.rt.state.rooms), [])
 })
 
 test('unsubscribing a reply handler stops the replies', async (t) => {
