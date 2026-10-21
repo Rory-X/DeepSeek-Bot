@@ -148,7 +148,8 @@ nonce 用每实例 LRU（1,000 条）挡重放；`msgId` 幂等见 §6。
 - **协议**：`https://ilinkai.weixin.qq.com`，公共头 `iLink-App-Id: bot`、`iLink-App-ClientVersion: <uint32>`；POST 另带 `AuthorizationType: ilink_bot_token`、`Authorization: Bearer <token>`、`X-WECHAT-UIN`（随机 uint32→十进制→base64）。
 - **能力**：`getUpdates` 长轮询（服务端最长挂 35s，`get_updates_buf` 游标必须持久化，否则重收）、`sendMessage`（`context_token` 回传以匹配会话）、`getconfig`/`sendtyping` 可选。
 - **登录（v1，合规约束）**：用**官方 CLI 登录拿 `bot_token`，粘贴到卡片**（secret 字段）。token **只进 DSH 凭据库或 `<rt.home>/wechat/<instance>.json`（0600）**，不得进 state、日志、设置页明文。v1 **不做自动登录/扫码轮询**；二维码（接口返回 data URL，不需要二维码库）放 P4。
-- **合规门槛**：iLink 是逆向/非公开协议，个人微信号有封号风险。**只有用户明确书面同意后才做**（P3 spike 前先拿到两个结论：灰度状态 + 风险接受），风险说明单独成文，不默认开启。
+- **协议来源（官方开源，不是逆向）**：iLink 协议由腾讯官方以 MIT 许可公开发布——GitHub [`Tencent/openclaw-weixin`](https://github.com/Tencent/openclaw-weixin)（Tencent 组织、公开、LICENSE 文本为 MIT）与 npm [`@tencent-weixin/openclaw-weixin`](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin)（author `Tencent`、license `MIT`、v2.4.10，2026-10-11）。第三方实现（如 [`wechat-clawbot`](https://github.com/nightsailer/wechat-clawbot)）在其 README 自述为「Ported from @tencent-weixin/openclaw-weixin，synced with upstream v2.1.1」，即官方插件的移植。
+- **合规门槛**：风险不在「逆向」，而在**官方支持范围**——①该微信后端接口没有面向第三方的公开开发者文档/SLA，官方支持的是 OpenClaw 插件本身；②基于同一协议的自实现不在官方支持承诺内，接口可能变更、可能触发风控或账号限制；③MIT 许可允许代码复用，但不等于微信平台授权任何第三方客户端接入。因此**只有用户明确书面同意后才做真机测试**（P3 spike 前先拿到两个结论：灰度状态 + 风险接受），风险说明单独成文，不默认开启。
 - **守护**：mount 启动长轮询；断线指数退避（1s→2s→…→60s 封顶，带抖动）；`dispose`/通道关闭时停止；日志只记状态与错误码，不记消息正文与凭据。
 - **可行性验证产出**：协议客户端 spike（mock 服务端单测）、QR CLI 原型、灰度与合规风险清单。**在 §1 的两个结论出来前不排上线开发。**
 
@@ -419,7 +420,7 @@ card: { glyph:'wechat', about, docsUrl }
 | C1 | 记忆/检索排除面列全：`memory.js:632`、`store.js:392 indexSessions()`、`chat-index.js`、`parts.js` 显式 exclude | §6.1 表（逐文件落点）；§12 F2a | Relay 设计 + Forge 实现 | Forge 1–1.5d（含在 F2a） | §11.18、新增 P2-22 |
 | C2 | v1 只做 1 条 conversation（创建者 DM）；≤8 + LRU 移 P4 | §5 粒度 | Relay（设计） | 0 | 新增 P2-23 |
 | C3 | channel session denylist 逐项点名；`untrusted` 进 `headerFor` 消息头 | §5 工具白名单/`untrusted`；§12 F2a | Relay 设计 + Forge 实现 | 含在 F2a | P2-15、新增 P2-24 |
-| C4 | P3 token 只进 0600/凭据库；逆向+封号风险「用户明确同意才做」；v1 不做自动登录/扫码 | §4 登录/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
+| C4 | P3 token 只进 0600/凭据库；协议来源=腾讯官方 MIT 开源（Tencent/openclaw-weixin + 官方 npm），风险按「无第三方公开文档/SLA、自实现不在官方支持内、可能变更/风控」写明，删除「逆向」表述；真机测试须用户明确书面同意；v1 不做自动登录/扫码 | §4 协议来源/合规门槛；§12.1 | Relay（设计） | 0 | 新增 P3-01 |
 | C5 | `secretNameOf`：删实例只删自己、名字过校验、两实例不同名 | §2 凭据表；§12 F2b | Forge | 0.25d | P1-11、新增 P1-14 |
 | F5 | Host 缺口：`connector-test` 模块钩子、secret 字段与 clearSecrets、通用 `connector-command`（承载 `login-start/refresh/cancel`）、view/status 合并、`instance.max` | §12 F5；§14 | Forge | 1d | P1-02/04/09/13 |
 | F6 | Client 渲染上述字段/动作（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | §12 F6；§14 | Prism（Pixel 复核） | 0.5d | P1-02 |
