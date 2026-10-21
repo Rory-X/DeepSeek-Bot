@@ -13,7 +13,7 @@ import { createServer } from 'node:net'
 import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
-import { normalizeWechatSettings } from '../src/host/connectors/wechat.js'
+import { normalizeWechatSettings, wechatReadiness } from '../src/host/connectors/wechat.js'
 import { postInbound, startWebhookReceiver, wechatHeaders } from './wechat-fakes.js'
 
 const TEAM = {
@@ -1040,6 +1040,49 @@ test('G-1 an older plain webhook URL moves into the credential store', async (t)
   // The plain value is gone from the state and the credential store has it.
   await until(() => (readFileSync(join(home, 'state.json'), 'utf8').includes('webhookUrl') ? undefined : true), 'the legacy value to clear')
   assert.equal(JSON.stringify(rt.state.connectors.wechat.settings).includes(receiver.url), false)
+})
+
+test('G-6 readiness stays quiet while the credential store is unknown and mount names a missing URL', async (t) => {
+  const bot = () => ({ name: 'Chief' })
+  // Unknown (not loaded) is not the same as empty: no note, the row stays clickable.
+  assert.equal(wechatReadiness({ settings: { transport: 'webhook', botId: 'b1' }, rt: { botOf: bot, secretValue: () => undefined }, instance: { base: 'wechat', id: 'wechat' } }), undefined)
+  // Explicitly empty is missing.
+  assert.match(wechatReadiness({ settings: { transport: 'webhook', botId: 'b1' }, rt: { botOf: bot, secretValue: () => '' }, instance: { base: 'wechat', id: 'wechat' } }), /Add the push webhook URL/)
+  // The mount names the same sentence when Connect really has no URL.
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'webhook', botId: 'b1' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const connected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  const row = await until(async () => ((await rowOf(ctx))?.state === 'error' ? await rowOf(ctx) : undefined), 'the missing URL error row')
+  assert.match(row.error, /Add the push webhook URL/)
+})
+
+test('G-5 a replaced URL in the credential store wins over the old plain value', async (t) => {
+  const oldReceiver = await startWebhookReceiver()
+  t.after(() => oldReceiver.close())
+  const newReceiver = await startWebhookReceiver()
+  t.after(() => newReceiver.close())
+  const home = legacyHome({ transport: 'webhook', botId: 'b1', webhookUrl: oldReceiver.url, webhookFormat: 'generic' })
+  // The user replaced the URL on the card before the old value was cleaned up: the store has
+  // the new URL while the settings still carry the old one.
+  writeFileSync(join(home, 'secrets.json'), JSON.stringify({
+    version: 1,
+    secrets: [{ name: 'WECHAT_WEBHOOK_URL', value: newReceiver.url, purpose: '', scope: 'all' }],
+  }))
+  const { ctx, rt } = setup({ home })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await rt.load()
+  await call(ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the replaced channel')
+  await toWrite(ctx, 'wechat')
+  const pending = notifyToolOf(ctx).execute({ text: 'to the new one' }, { agent: { id: 'm1' } })
+  const shown = await until(() => card(ctx), 'the notice approval')
+  await answerCard(ctx, shown.id, ['Allow once'])
+  assert.equal(await pending, 'Sent.')
+  assert.equal(newReceiver.requests.length, 1)
+  assert.equal(oldReceiver.requests.length, 0)
 })
 
 test('G-2 a URL that cannot be stored keeps working outbound and is retried later', async (t) => {

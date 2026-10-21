@@ -61,10 +61,13 @@ export function wechatReadiness({ settings, rt, instance } = {}) {
   const botId = trim(values.botId)
   if (botId === '') return 'Choose a Bot for this channel.'
   if (typeof rt?.botOf === 'function' && rt.botOf(botId) === undefined) return 'The Bot this channel is bound to no longer exists. Choose another Bot.'
+  // Readiness runs often and may run before the credential store has loaded: a value that is
+  // merely unknown (undefined) is not an answer, so only an explicitly empty store counts as
+  // missing. A real "no URL" is refused by the mount, which runs after the store loaded.
   const stored = typeof rt?.secretValue === 'function'
     ? rt.secretValue(secretNameFor(instance?.id, URL_SECRET))
     : undefined
-  if (trim(values.webhookUrl) === '' && (typeof stored !== 'string' || stored === '')) return 'Add the push webhook URL for this channel.'
+  if (trim(values.webhookUrl) === '' && stored === '') return 'Add the push webhook URL for this channel.'
   return undefined
 }
 
