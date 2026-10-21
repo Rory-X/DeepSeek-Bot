@@ -317,10 +317,18 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 | F2a | 会话归属（P2）：`store.js` `channelOwners: Map<sessionId,{botId,instance,conversationId}>`，`indexSessions()` 从 `state.channels[...].conversations[*].sessionId` 重建；`selfOf` 纳入、`isBotSession` 保持 false（turns/记忆不把通道当 Bot session）；新 `src/host/channels.js`：`channelSessionFor`（显式 cwd、不进 workspace、模型/权限/capabilities、工具白名单）、`rebindChannel`/`closeChannel`（archiveSession + 归档记录，不删不复用）、`assistant/message` 累积 + `turn/end` 收口回调；`agent.ctx.tools.restrict({allow:[...]})`；`memory.js`/`prompt.js`/`parts.js`/`chat-index.js` 排除；`delivery.js` source 可扩展并渲染 untrusted 头 | Forge | **已完成（F2a 分支，tip `50b7fc4`；`57b6fd1`→`27d8015`→`a9230a4`→`f4d4bae`，F4 `580eb8b`，收尾 `50b7fc4`；基线已 merge `d2e53ad`）** | 1–1.5d |
 | F3 | `connectorRow` 增加模块 `status` 钩子（display-only，异常吞掉） | Forge | 可选 | 0.25d |
 | F4 | `readiness({level,settings,instance,rt})` 传只读 `rt`（或更窄 `{botOf}`）；每行每级都会调，要求纯内存、无 IO | Forge | **已完成（F2a `580eb8b`）** | 随 F2a |
+| F10 | 异步 mount：`mountConnectorTools` 改 async、其唯一调用点 `reconcile` await，让模块在 mount 里 await 监听 bind，`EADDRINUSE` 等失败落到现有 row error 路径（不是 unhandled rejection）；队列串行与删除中的 mount 行为不变 | Forge | **已完成（F2a `3c4a057`）** | 0.25d |
+| F11 | readiness 凭据上下文：`readiness` 只补 `secretName`/`secretValue`（与 mount/`hookContextOf` 一致），模块不再镜像 F2b 命名；`connectorEndpoint` 服务前 `await rt.loadSecrets()` 作时序兜底 | Forge | **已完成（F2a `e1e9f8e`）** | 0.25d |
 | F9 | 通道卸载原因：host 的 `unmount` 不带原因、`delete-instance` 先 unmount 再删 state，P2 只能保证 `rebind`（A→B）与 `closeChannel`（disconnect/删除时由模块推断）的 reason 准确，`transport-changed`/`instance-deleted` 可能退化为 `unbind`。后续由 Forge 加 `close({reason})` 或 host 在生命周期点传 reason（3–5 行），P2 不做 | Forge | follow-up（P2 后按需） | 0.25d |
 | F8 | 自定义连接器的断开标记：`connector-disconnect` 在 `custom` 模式下写 `state.connectors[id].off = true` 再删 secret/unmount；`reconcile` 把 `off` 视为未配置（不自动 remount）；`connector-connect` 清除它，`connector-set-settings` 保留它；`off` 不进 view/status 与日志。仅 `custom` 生效。**为什么存 `state.connectors[id].off` 而不会被重写冲掉**：disconnect 的保留对象自带该标记；其余写路径（set-settings、级别切换、oauth 授权/claim、chat/审计/account 补丁、失败回滚）全部展开 `prior`，只有 connect 与 delete-instance 有意清除；旧 team file 无该键时 `=== true` 不成立，行为不变 | Relay（已实现） | P1 收口 | 0.25d，已完成 |
 | F7 | `normalizeSettings(values, ctx)` 上下文扩展：`ctx = { ...instanceContextOf(id), settings: prior.settings, state: statuses.get(id)?.state ?? 'off', level }`，让模块能在已连接（ready/error）时拒绝设置变更；单参模块忽略多给字段。WeChat 用它拒绝已连接改 transport（文案 `Disconnect this channel before changing the transport.`），off 状态允许 | Relay（已实现） | P1 收口 | 0.25d，已完成 |
 | F6 | Client 渲染：`fields.kind`（bot/segmented/secret）、`instance.max`、`inbound`、`login`、`canTest`、`connector-command` 动作的卡片/表单实现（通道列表、Bot 下拉、segmented、secret 只显 saved、异步回调说明） | Prism 实现，Pixel 复核 | P1 | 0.5d |
+
+**F11 契约（readiness 的凭据上下文）**
+
+- `readiness({ level, settings, instance, rt, secretName, secretValue })`：`secretName`/`secretValue` 与 mount/`hookContextOf` 同一实现，模块不得自己镜像 `secretNameOf` 规则。
+- **未知不报缺**：凭据存储尚未加载时 `secretValue` 返回 `undefined`；readiness 必须把「未知」当作不报缺，只有明确存过又为空才报缺。这是模块侧必须保留的兜底——boot 的初 mount 已在加载后，但 `connectorsView` 是同步渲染，旁路调用可能早于加载（`channel.js:85` 的 `state` 直接调 view）。
+- 时序兜底：`connectorEndpoint` 在服务前 `await rt.loadSecrets()`（promise 缓存、无重复读、失败 warn 后继续、无 view 语义变化）；`reconcile`/`ensureInstances` 不加加载。`channel.js` 的 state 端点也不加（非 F11 必需，列 follow-up：若用户反馈加载窗口内看不到提示，再评估）。
 
 **F2a 框架 API（Relay 的 P2 模块按此接线）**
 
