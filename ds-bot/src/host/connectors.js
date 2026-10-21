@@ -1790,8 +1790,11 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       await rt.loadSecrets()
       await connector.command({ ...hookContextOf(body.id), action, args })
       // A command may write a credential (a login token). Reconciling now lets the mount see
-      // it; with an unchanged credential key the reconcile returns without remounting.
-      await refresh(body.id)
+      // it; with an unchanged credential key the reconcile returns without remounting. A
+      // concurrent command runs outside the queue, so its refresh takes the queue: the mount
+      // still never races another change.
+      if (spec.concurrent === true) await serialise(() => refresh(body.id))
+      else await refresh(body.id)
       return connectorsView()
     },
     // One test run through the module's real path (a notification's send, a channel's test
@@ -1873,6 +1876,13 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   const connectorEndpoint = async (endpoint, body, meta) => {
     ensureInstances()
     await rt.loadSecrets().catch(error => rt.warn('ds-bot: secrets not loaded before %s: %s', endpoint, reason(error)))
+    // A command marked `concurrent` does its own waiting (a ClawBot QR poll may last 30s):
+    // it stays out of the change queue so unrelated connector requests keep flowing. The
+    // state change it makes still refreshes through the queue inside the handler.
+    const concurrent = endpoint === 'connector-command'
+      && typeof body?.id === 'string'
+      && options[body.id]?.commands?.[body.action]?.concurrent === true
+    if (concurrent) return await endpoints[endpoint](body ?? {}, meta ?? {})
     return await serialise(() => endpoints[endpoint](body ?? {}, meta ?? {}))
   }
 
