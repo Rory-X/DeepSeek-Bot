@@ -1028,6 +1028,41 @@ test('P2-11 a Bot that disappears mid-channel answers 502 or the bot-unavailable
   const sync = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', text: 'now', wait: 5_000 })
   assert.deepEqual([sync.status, sync.json.code], [502, 'bot-unavailable'])
 })
+test('P2-24b a tools switch change narrows in place, widens by a fresh Session, and never rebinds during mount', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, archived } = setup({ session: true })
+  ctx.tools.schemas = () => [{ name: 'web_search' }]
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const base = { transport: 'webhook', botId: 'b1', webhookUrl: receiver.url, webhookFormat: 'generic' }
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const calls = () => [...sessionAgents.values()].reduce((count, entry) => count + entry.calls.length, 0)
+  const send = async (msgId) => {
+    const before = calls()
+    await postInbound({ url, secret: 'test-secret', msgId, sender: 'creator', text: msgId })
+    return await until(() => (calls() > before ? [...sessionAgents.values()].filter(entry => entry.calls.length > 0).at(-1) : undefined), `the ${msgId} delivery`)
+  }
+  const first = await send('m-1')
+  assert.deepEqual(first.restricted.at(-1), { allow: [] })
+
+  // Off -> on cannot be widened in place, and the archive happens on the next message, not
+  // in the mount: saving the setting alone must not archive anything.
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...base, allowReadTools: 'on' } })).ok, true)
+  assert.equal(archived.length, 0, 'the settings save does not rebind during the mount')
+  const second = await send('m-2')
+  assert.notEqual(second, first, 'a fresh Session carries the wider allow-list')
+  assert.deepEqual(second.restricted.at(-1), { allow: ['web_search'] })
+  assert.equal(archived.length, 1, 'the old conversation was archived with the tools-change reason')
+
+  // On -> off narrows the current Session in place: no archive, no new Session.
+  assert.equal((await call(ctx, 'connector-set-settings', { id: 'wechat', values: { ...base, allowReadTools: 'off' } })).ok, true)
+  const third = await send('m-3')
+  assert.equal(third, second, 'the conversation Session is kept')
+  assert.deepEqual(third.restricted.at(-1), { allow: [] })
+  assert.equal(archived.length, 1, 'narrowing in place archives nothing')
+})
+
 test('P2-24 a channel Session gets no tools by default and only web_search when read tools are on', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
