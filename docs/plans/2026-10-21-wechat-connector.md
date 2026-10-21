@@ -410,7 +410,7 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 3. **非 owner 入站复用 P2 丢弃路径**：不建会话、不写 state、不落正文日志，沿用 P2 的 hash/长度规则；clawbot 不另写一套。
 4. **失败降级干净**：登录失效/协议变更 → 该通道 `error`；Webhook 通道完全不受影响；不自动重登、不无限重试（退避封顶后停止，等用户手动 `login-refresh`）。
 
-**`view.login` 形状**：`{ state:'logged-out'|'qr'|'logged-in'|'expired', qr?, expiresAt?, account? }`；`qr` 支持 `http(s)://` 图片 URL 与 `data:` URL 两种；内容是普通串时 v1 报错/提示（不引入 QR 库）。命令：`login-start`/`login-refresh`/`login-cancel`（`connector-command`，仅 clawbot transport）。
+**`view.login` 形状（10 态定稿）**：`{ state:'logged-out'|'qr'|'verified-needed'|'blocked'|'expired'|'cancelled'|'confirm-failed'|'protocol-error'|'logged-in'|'login-expired', qr?: string|null, scanned?: boolean, account?: string|null, error?: string|null, expiresAt?: string|null, consentRequired: boolean }`；`qr` 支持 `http(s)://` 图片 URL 与 `data:` URL 两种；内容是普通串时 v1 报错/提示（不引入 QR 库）。命令：`login-start`/`login-refresh`/`login-cancel`（`connector-command`，仅 clawbot transport）。
 
 **协议头区分**：取二维码 POST = JSON + `AuthorizationType` + `X-WECHAT-UIN`（无 `Authorization`/`base_info`）；状态轮询 GET = `iLink-App-Id`/`iLink-App-ClientVersion`（+可选 `SKRouteTag`），无授权头；Bot API（getupdates/sendmessage）= Bearer + `base_info{channel_version,bot_agent}`，`iLink-App-ClientVersion` 用 `0x00MMNNPP`。
 
@@ -462,7 +462,7 @@ levelNote?, levelNotes?, needsReauth?,
 transport: 'webhook'|'clawbot',
 fields: [ { name, kind:'text'|'secret'|'bot'|'segmented', label, required?, saved?, options? } ],
 inbound?: { url, token },        // 仅 webhook；url 同机默认 loopback，配了 publicBaseUrl 才是公网地址
-login?:   { state:'logged-out'|'qr'|'logged-in'|'expired', qr?:'data:image/png;base64,…', expiresAt?, account? }, // 仅 clawbot；v1 只有 logged-out/logged-in（token 粘贴），qr/expired 随 P4
+login?:   { state:'logged-out'|'qr'|'verified-needed'|'blocked'|'expired'|'cancelled'|'confirm-failed'|'protocol-error'|'logged-in'|'login-expired', qr?: string|null, scanned?: boolean, account?: string|null, error?: string|null, expiresAt?: string|null, consentRequired: boolean }, // 仅 clawbot；v1 做扫码登录（八协议态映射到十 UI 态，cancelled/confirm-failed/protocol-error 为一次性 UI 态）
 canTest: boolean,                // webhook ready 时为 true
 card: { glyph:'wechat', about, docsUrl }
 ```
