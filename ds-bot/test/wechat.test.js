@@ -37,10 +37,47 @@ const teamHome = () => {
   return home
 }
 
-function setup({ config = {}, home = teamHome() } = {}) {
+function setup({ config = {}, home = teamHome(), session = false } = {}) {
   const registered = []
   const disposed = []
+  const created = []
+  const archived = []
+  const sessionAgents = new Map()
   const ctx = fakeContext()
+  if (session) {
+    // A stand-in for the Session services the inbound half drives: the channel Session is
+    // created through the fake controller and the fake agent records what `deliver` hands it.
+    const agentOf = (sessionId) => {
+      if (!sessionAgents.has(sessionId)) {
+        sessionAgents.set(sessionId, {
+          session: { id: sessionId },
+          restricted: [],
+          calls: [],
+          followup(message) { this.calls.push(message) },
+          ctx: { tools: { restrict(filter) { this.owner.restricted.push(filter) }, owner: undefined } },
+        })
+        sessionAgents.get(sessionId).ctx.tools.owner = sessionAgents.get(sessionId)
+      }
+      return sessionAgents.get(sessionId)
+    }
+    ctx.tools.schemas = () => []
+    Object.assign(ctx, {
+      llm: { listProviders: () => [], listModels: async () => [], resolveModelInfo: async () => ({}) },
+      workspaceRegistry: {
+        get: () => undefined,
+        resolveByPath: async () => undefined,
+        create: async () => ({}),
+        archiveSession: async (sessionId, options) => { archived.push([sessionId, options]) },
+      },
+      sessionController: {
+        create: async (options) => { created.push(options); return { sessionId: `s${created.length}` } },
+        resolveAgent: async sessionId => ({ agent: agentOf(sessionId) }),
+        selectModel: async () => {},
+      },
+      sessionTitle: { rename: async () => {} },
+      sessions: { flush: async () => {} },
+    })
+  }
   const register = ctx.tools.register
   ctx.tools.register = (tool) => {
     registered.push(tool.name)
@@ -54,7 +91,10 @@ function setup({ config = {}, home = teamHome() } = {}) {
   apply(ctx, { home, wechat: { listenPort: 0 }, ...config })
   registered.length = 0
   disposed.length = 0
-  return { ctx, home, registered, disposed }
+  const emitSession = (sessionId, type, data) => {
+    for (const listener of ctx.listeners.get('session/event') ?? []) listener({ id: sessionId }, { type, data })
+  }
+  return { ctx, home, registered, disposed, created, archived, sessionAgents, emitSession }
 }
 
 async function call(ctx, endpoint, payload) {
@@ -717,7 +757,81 @@ test('P2-07 a replayed msgId answers 200 duplicate and starts 0 turns; after a r
   assert.equal(state.channels?.wechat?.conversations === undefined || Object.keys(state.channels.wechat.conversations).length === 0, true)
 })
 
-test.todo('P2-08 the same text under a new msgId starts a turn (no content-hash swallowing)')
+test('P2-08 the same text under a new msgId starts a turn (no content-hash swallowing)', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const first = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'same words' })
+  assert.equal(first.status, 202)
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the first turn')
+  const message = agent.calls[0]
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+  emitSession(agent.session.id, 'turn/start', { turn: 1 })
+  emitSession(agent.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'first' }] } })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  // The same words under a new msgId are a new message, not a duplicate by content.
+  const second = await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'same words' })
+  assert.equal(second.status, 202)
+  await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 2), 'the second turn for a new msgId')
+  // One channel conversation for both messages, and the read level registers no notify.
+  assert.equal(sessionAgents.size, 1)
+  assert.equal(ctx.registeredTools.has('wechat_notify'), false, 'read level registers no notify tool')
+})
+
+test('P2-12 two inbound messages are serialized: each reply answers its own msgId', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const reply = (sessionId, turn, text, message) => {
+    emitSession(sessionId, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+    emitSession(sessionId, 'turn/start', { turn })
+    emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text }] } })
+    emitSession(sessionId, 'turn/end', { turn, reason: { kind: 'completed' } })
+  }
+  const firstPost = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'one', wait: 5_000 })
+  const secondPost = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'two', wait: 5_000 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the first delivery')
+  // The second message waits for the first turn; only one message is in the Session so far.
+  assert.equal([...sessionAgents.values()].reduce((count, entry) => count + entry.calls.length, 0), 1)
+  reply(agent.session.id, 1, 'answer one', agent.calls[0])
+  const first = await firstPost
+  assert.deepEqual([first.status, first.json.msgId, first.json.reply], [200, 'm-1', 'answer one'])
+  await until(() => [...sessionAgents.values()].map(entry => entry.calls[1]).find(Boolean), 'the second delivery')
+  reply(agent.session.id, 2, 'answer two', agent.calls[1])
+  const second = await secondPost
+  assert.deepEqual([second.status, second.json.msgId, second.json.reply], [200, 'm-2', 'answer two'])
+})
+
+test('P2-13a a synchronous wait over its limit answers 504 timeout without wedging the channel', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  const late = await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'slow', wait: 60 })
+  assert.deepEqual([late.status, late.json.code], [504, 'timeout'])
+  // The turn kept running; the next message is not stuck behind the timed-out wait.
+  await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the slow turn')
+  const agent = [...sessionAgents.values()][0]
+  const message = agent.calls[0]
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  const nextPost = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'next', wait: 5_000 })
+  const second = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 2), 'the next delivery')
+  emitSession(second.session.id, 'user/message', { source: { exchangeId: second.calls[1].source.exchangeId } })
+  emitSession(second.session.id, 'turn/start', { turn: 2 })
+  emitSession(second.session.id, 'assistant/message', { message: { content: [{ type: 'text', text: 'ok' }] } })
+  emitSession(second.session.id, 'turn/end', { turn: 2, reason: { kind: 'completed' } })
+  const answered = await nextPost
+  assert.deepEqual([answered.status, answered.json.reply], [200, 'ok'])
+})
 test.todo('P2-11 a deleted or failing Bot answers 502 bot-unavailable with the fallback sentence and no retry loop')
 test.todo('P2-12 two inbound messages are serialized: each reply answers its own msgId, correlated to that turn end')
 test.todo('P2-13a a synchronous wait over 20s answers 504 timeout; P2-13b an async turn over 120s sends a failure callback')
