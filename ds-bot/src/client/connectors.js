@@ -4,7 +4,7 @@ import { MaskedInput } from './secret-card.js'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
 import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf } from './connector-shared.js'
-import { WeChatCard } from './wechat-card.js'
+import { WeChatCard, WeChatMark } from './wechat-card.js'
 
 export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true },
   h('path', { d: 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z' }))
@@ -52,12 +52,6 @@ export const GmailMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 2
 export const QQMailMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
   h('rect', { x: 2.8, y: 4.8, width: 14.4, height: 10.4, rx: 2 }),
   h('path', { d: 'M3.4 15.2 8.4 10.6M16.6 15.2 11.6 10.6' }))
-
-// The WeChat card's mark: two chat bubbles of our own drawing. The back bubble's line stops
-// on the front one's edge, so the pair reads as one chat without any brand artwork.
-export const WeChatMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-  h('path', { d: 'M8.25 9.9 L7.4 9.9 L5.2 11.9 L5.2 9.9 L5 9.9 A2.4 2.4 0 0 1 2.6 7.5 L2.6 5.9 A2.4 2.4 0 0 1 5 3.5 L9 3.5 A2.4 2.4 0 0 1 11.4 5.9 L11.4 7.9' }),
-  h('path', { d: 'M10.7 7.9 L14.5 7.9 A2.5 2.5 0 0 1 17 10.4 L17 11.8 A2.5 2.5 0 0 1 14.5 14.3 L14.3 14.3 L14.3 16.1 L12.4 14.3 L10.7 14.3 A2.5 2.5 0 0 1 8.2 11.8 L8.2 10.4 A2.5 2.5 0 0 1 10.7 7.9 Z' }))
 
 // A mark for a connector that names a glyph this client does not draw: a plug, of our own
 // drawing, says "a service" without pretending to be any service's logo.
