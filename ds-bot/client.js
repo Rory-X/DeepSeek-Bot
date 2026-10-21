@@ -404,6 +404,33 @@ var ZH = {
   "Copy these into the WeChat push settings.": "把这两项填到微信侧的推送配置里。",
   "QR code": "二维码",
   "Scan the QR code with WeChat to link this channel.": "用微信扫码绑定此通道。",
+  "Start login": "开始登录",
+  "Refresh": "刷新",
+  "Retry": "重试",
+  "Waiting for the scan…": "等待扫码…",
+  "Scanned — confirm on your phone.": "已扫码，请在手机上确认",
+  "Enter the code shown in WeChat.": "请在微信中查看并输入验证码",
+  "Too many wrong codes; refresh the QR code.": "验证码错误次数过多，请刷新二维码",
+  "QR code expired; refresh to try again.": "二维码已过期，请刷新后重试",
+  "QR code unavailable. Refresh to try again.": "二维码暂时无法显示，请刷新重试",
+  "Login cancelled.": "已取消登录。",
+  "WeChat did not confirm the login.": "微信未确认登录。",
+  "WeChat login service is unavailable.": "微信登录服务暂不可用。",
+  "Try again in a moment.": "请稍后重试。",
+  "Login expired; scan again.": "登录已失效，请重新扫码。",
+  "Logged in": "已登录",
+  "Not logged in — this channel cannot send or receive yet.": "未登录，该通道暂时无法收发消息",
+  "Incoming messages from this channel only answer you.": "该通道只回应你的消息",
+  "Log in to link this channel first.": "请先登录再连接此通道",
+  "Beta": "Beta",
+  "Scanning login is beta and has not been tested on a real device. A failure does not affect the Webhook channel.": "扫码登录为 beta，尚未真机验证；失败不影响 Webhook 通道",
+  "Sign-in risks": "登录前须知",
+  "Your WeChat account is a personal account and may be limited by WeChat.": "使用的是个人微信号，可能受微信风控限制。",
+  "The protocol follows public official documentation and has no third-party support commitment.": "协议依据官方公开文档，无第三方支持承诺。",
+  "Scanning login is beta and has not been tested on a real device.": "扫码登录为 beta，尚未真机验证。",
+  "I understand, continue": "我了解，继续",
+  "Starting…": "正在开始…",
+  "Working…": "处理中…",
   "Expires in {seconds}s": "{seconds} 秒后过期",
   "Refresh QR": "刷新二维码",
   "Re-scan": "重新扫码",
@@ -1804,14 +1831,14 @@ function isAgentSession(roster, cache, sessionId) {
   return cache.has(sessionId);
 }
 var heldCardKey = (kind, requestId) => JSON.stringify([kind, requestId]);
-function countCards(state, sessionId, callIds, delta) {
-  const own = { ...state[sessionId] };
+function countCards(state2, sessionId, callIds, delta) {
+  const own = { ...state2[sessionId] };
   for (const callId of callIds) {
     const count = (own[callId] ?? 0) + delta;
     if (count > 0) own[callId] = count;
     else delete own[callId];
   }
-  return { ...state, [sessionId]: own };
+  return { ...state2, [sessionId]: own };
 }
 
 // src/client/media.js
@@ -1971,7 +1998,7 @@ function installRightColumns({ ui: ui2, isDesktop, rightbar, onError }) {
       onError?.(error);
     }
   };
-  const closeDrawer = () => ui2.set((state) => state.details ? { ...state, details: null, view: "details" } : state);
+  const closeDrawer = () => ui2.set((state2) => state2.details ? { ...state2, details: null, view: "details" } : state2);
   const read = () => {
     const now = isDesktop() && isOpen();
     if (now && !open) closeDrawer();
@@ -2028,9 +2055,9 @@ function installNavHistory({ mobileNav, navLevel, onLeave, onEnter }) {
   };
   const write = (level, replace) => {
     try {
-      const state = { ...window.history.state, [NAV_LEVEL_KEY]: level };
-      if (replace) window.history.replaceState(state, "");
-      else window.history.pushState(state, "");
+      const state2 = { ...window.history.state, [NAV_LEVEL_KEY]: level };
+      if (replace) window.history.replaceState(state2, "");
+      else window.history.pushState(state2, "");
     } catch {
     }
   };
@@ -2075,10 +2102,10 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
   const memoryOf = (id) => roster.getSnapshot().roomsById[id] ? { roomId: id } : { botId: id };
   return {
     openBotFolders: (start = {}) => {
-      ui2.set((state) => ({ ...state, botFolders: start, menu: null, newChat: null, palette: null }));
+      ui2.set((state2) => ({ ...state2, botFolders: start, menu: null, newChat: null, palette: null }));
     },
     closeBotFolders: () => {
-      ui2.set((state) => ({ ...state, botFolders: null }));
+      ui2.set((state2) => ({ ...state2, botFolders: null }));
     },
     saveBotFolder: (payload) => after(call2("bot-folder-save", payload)),
     deleteBotFolder: (payload) => after(call2("bot-folder-delete", payload)),
@@ -2086,80 +2113,80 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     dissolveBotFolder: (payload) => after(call2("bot-folder-dissolve", payload)),
     ungroupBot: (id) => after(call2("bot-folder-assign", { name: "", botIds: [id] })),
     openNewChat: (mode) => {
-      ui2.set((state) => ({ ...state, newChat: mode, menu: null, palette: null }));
+      ui2.set((state2) => ({ ...state2, newChat: mode, menu: null, palette: null }));
     },
     openPalette: (query = "") => {
-      ui2.set((state) => ({ ...state, palette: { query, token: Date.now() }, newChat: null, menu: null }));
+      ui2.set((state2) => ({ ...state2, palette: { query, token: Date.now() }, newChat: null, menu: null }));
     },
     // The token keeps a late exit timer from closing a palette opened again since.
     closePalette: (token) => {
-      ui2.set((state) => state.palette && (token === void 0 || state.palette.token === token) ? { ...state, palette: null } : state);
+      ui2.set((state2) => state2.palette && (token === void 0 || state2.palette.token === token) ? { ...state2, palette: null } : state2);
     },
     // `at` names the exchange line that was tapped, so the dialog can open on it.
     openExchange: (a, b, at) => {
-      if (a && b) ui2.set((state) => ({ ...state, exchange: [a, b], exchangeAt: at ?? null }));
+      if (a && b) ui2.set((state2) => ({ ...state2, exchange: [a, b], exchangeAt: at ?? null }));
     },
     openVoice: (id) => {
-      if (id) ui2.set((state) => ({ ...state, voice: id, menu: null }));
+      if (id) ui2.set((state2) => ({ ...state2, voice: id, menu: null }));
     },
     closeVoice: () => {
-      ui2.set((state) => state.voice ? { ...state, voice: null } : state);
+      ui2.set((state2) => state2.voice ? { ...state2, voice: null } : state2);
     },
     toggleDetails: (id, force) => {
-      ui2.set((state) => {
-        const details = force || state.details !== id || state.view !== "details" ? id : null;
-        return { ...state, renaming: false, tab: null, details, view: "details" };
+      ui2.set((state2) => {
+        const details = force || state2.details !== id || state2.view !== "details" ? id : null;
+        return { ...state2, renaming: false, tab: null, details, view: "details" };
       });
     },
     // The open panel follows the main view; a subject with no browser (a group
     // chat, an outside Session) settles on the details view.
     followPanel: (id) => {
-      ui2.set((state) => {
-        if (!state.details || state.details === id) return state;
-        const view = state.view === "browser" && roster.getSnapshot().byId[id] === void 0 ? "details" : state.view;
-        return { ...state, details: id, view, renaming: false, tab: null };
+      ui2.set((state2) => {
+        if (!state2.details || state2.details === id) return state2;
+        const view = state2.view === "browser" && roster.getSnapshot().byId[id] === void 0 ? "details" : state2.view;
+        return { ...state2, details: id, view, renaming: false, tab: null };
       });
     },
     showDetails: (id, tab = null) => {
-      ui2.set((state) => ({ ...state, details: id, view: "details", renaming: false, tab }));
+      ui2.set((state2) => ({ ...state2, details: id, view: "details", renaming: false, tab }));
     },
     // Opening the conversation would move focus to its composer and blur the name field.
     renameBot: (id) => {
-      ui2.set((state) => ({ ...state, details: id, view: "details", renaming: true, tab: null }));
+      ui2.set((state2) => ({ ...state2, details: id, view: "details", renaming: true, tab: null }));
     },
     // `id` opens one Bot (page 'bots') or one group chat (page 'groups').
     openSettings: (page = "general", id = null) => {
-      ui2.set((state) => ({ ...state, settings: { page, id }, menu: null, palette: null, newChat: null }));
+      ui2.set((state2) => ({ ...state2, settings: { page, id }, menu: null, palette: null, newChat: null }));
     },
     closeSettings: () => {
-      ui2.set((state) => state.settings ? { ...state, settings: null } : state);
+      ui2.set((state2) => state2.settings ? { ...state2, settings: null } : state2);
     },
     openMemory: (id) => {
-      ui2.set((state) => ({ ...state, memory: id, menu: null, palette: null }));
+      ui2.set((state2) => ({ ...state2, memory: id, menu: null, palette: null }));
     },
     closeMemory: () => {
-      ui2.set((state) => state.memory ? { ...state, memory: null } : state);
+      ui2.set((state2) => state2.memory ? { ...state2, memory: null } : state2);
     },
     openConnectors: () => {
-      ui2.set((state) => ({ ...state, settings: { page: "connectors", id: null }, menu: null, palette: null, newChat: null }));
+      ui2.set((state2) => ({ ...state2, settings: { page: "connectors", id: null }, menu: null, palette: null, newChat: null }));
     },
     setPanelView: (view) => {
       if (view !== "details" && view !== "browser") return;
-      ui2.set((state) => state.details && state.view !== view ? { ...state, view } : state);
+      ui2.set((state2) => state2.details && state2.view !== view ? { ...state2, view } : state2);
     },
     closePanel: () => {
-      ui2.set((state) => state.details ? { ...state, details: null, view: "details", renaming: false, tab: null } : state);
+      ui2.set((state2) => state2.details ? { ...state2, details: null, view: "details", renaming: false, tab: null } : state2);
     },
     setFlags: (id, flags) => after(call2("set-flags", { id, ...flags })),
     deleteRoom: (id) => after(call2("delete-room", { id })),
     openMenu: (menu) => {
-      ui2.set((state) => ({ ...state, menu }));
+      ui2.set((state2) => ({ ...state2, menu }));
     },
     closeMenu: () => {
-      ui2.set((state) => state.menu ? { ...state, menu: null } : state);
+      ui2.set((state2) => state2.menu ? { ...state2, menu: null } : state2);
     },
     closeOverlay: () => {
-      ui2.set((state) => ({ ...state, newChat: null, exchange: null, details: state.newChat || state.exchange ? state.details : null }));
+      ui2.set((state2) => ({ ...state2, newChat: null, exchange: null, details: state2.newChat || state2.exchange ? state2.details : null }));
     },
     createBot: (payload) => after(call2("create-bot", payload)),
     createRoom: (members, options = {}) => after(call2("create-room", { members, ...options })),
@@ -2247,49 +2274,49 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     // A failed action away from any form (a menu, the palette) shows as a toast.
     reportError: (error, where = "action") => {
       noteClientError(where, error);
-      ui2.set((state) => ({ ...state, toast: { text: error?.message ?? String(error), token: Date.now() } }));
+      ui2.set((state2) => ({ ...state2, toast: { text: error?.message ?? String(error), token: Date.now() } }));
     },
-    dismissToast: (token) => ui2.set((state) => state.toast && (token === void 0 || state.toast.token === token) ? { ...state, toast: null } : state),
+    dismissToast: (token) => ui2.set((state2) => state2.toast && (token === void 0 || state2.toast.token === token) ? { ...state2, toast: null } : state2),
     noteTurnTime: (sessionId, turn, key, time) => {
       if (sessionId === void 0 || !Number.isFinite(turn) || !Number.isFinite(time)) return;
-      turnClock.set((state) => {
-        const turns = state[sessionId] ?? {};
+      turnClock.set((state2) => {
+        const turns = state2[sessionId] ?? {};
         const entry = turns[turn] ?? {};
         const next = key === "first" && entry.first !== void 0 ? Math.min(entry.first, time) : time;
-        if (entry[key] === next) return state;
-        return { ...state, [sessionId]: { ...turns, [turn]: { ...entry, [key]: next } } };
+        if (entry[key] === next) return state2;
+        return { ...state2, [sessionId]: { ...turns, [turn]: { ...entry, [key]: next } } };
       });
     },
     noteTurnPeer: (sessionId, turn, peerId) => {
       if (sessionId === void 0 || !Number.isFinite(turn)) return;
-      turnClock.set((state) => {
-        const turns = state[sessionId] ?? {};
+      turnClock.set((state2) => {
+        const turns = state2[sessionId] ?? {};
         const entry = turns[turn] ?? {};
-        if (entry.peer === peerId) return state;
-        return { ...state, [sessionId]: { ...turns, [turn]: { ...entry, peer: peerId } } };
+        if (entry.peer === peerId) return state2;
+        return { ...state2, [sessionId]: { ...turns, [turn]: { ...entry, peer: peerId } } };
       });
     },
     noteLive: (sessionId, id, entry) => {
       if (sessionId === void 0) return;
-      live.set((state) => {
-        const own = state[sessionId] ?? {};
+      live.set((state2) => {
+        const own = state2[sessionId] ?? {};
         const prev = own[id];
-        if (entry === null ? prev === void 0 : prev !== void 0 && JSON.stringify({ ...prev, at: 0 }) === JSON.stringify({ ...entry, at: 0 })) return state;
+        if (entry === null ? prev === void 0 : prev !== void 0 && JSON.stringify({ ...prev, at: 0 }) === JSON.stringify({ ...entry, at: 0 })) return state2;
         const next = { ...own };
         if (entry === null) delete next[id];
         else next[id] = { ...entry, at: prev?.at ?? Date.now() };
-        return { ...state, [sessionId]: next };
+        return { ...state2, [sessionId]: next };
       });
     },
     noteCards: (sessionId, callIds, delta) => {
-      if (sessionId !== void 0) cards.set((state) => countCards(state, sessionId, callIds, delta));
+      if (sessionId !== void 0) cards.set((state2) => countCards(state2, sessionId, callIds, delta));
     },
     noteHeldCard: (sessionId, kind, requestId, delta) => {
-      if (sessionId !== void 0) heldCards.set((state) => countCards(state, sessionId, [heldCardKey(kind, requestId)], delta));
+      if (sessionId !== void 0) heldCards.set((state2) => countCards(state2, sessionId, [heldCardKey(kind, requestId)], delta));
     },
-    clearLive: (sessionId) => live.set((state) => {
-      if (!state[sessionId]) return state;
-      const next = { ...state };
+    clearLive: (sessionId) => live.set((state2) => {
+      if (!state2[sessionId]) return state2;
+      const next = { ...state2 };
       delete next[sessionId];
       return next;
     })
@@ -2796,16 +2823,16 @@ function useGlide(key, { axis = "x", selector = CHOSEN, lead = SPRING_LEAD, trai
     container.dataset.glide = "";
   };
   (0, import_react.useLayoutEffect)(() => {
-    const state = own.current;
+    const state2 = own.current;
     const node = box.current;
-    if (node === state.node && key === state.key) return;
-    const fresh = node !== state.node;
-    state.key = key;
+    if (node === state2.node && key === state2.key) return;
+    const fresh = node !== state2.node;
+    state2.key = key;
     if (fresh) {
-      state.observer?.disconnect();
-      state.node = node;
-      state.observer = node && typeof ResizeObserver === "function" ? new ResizeObserver(() => place(true)) : null;
-      state.observer?.observe(node);
+      state2.observer?.disconnect();
+      state2.node = node;
+      state2.observer = node && typeof ResizeObserver === "function" ? new ResizeObserver(() => place(true)) : null;
+      state2.observer?.observe(node);
     }
     place(fresh);
   });
@@ -2850,23 +2877,23 @@ function useMorph(box, key) {
   const last = (0, import_react.useRef)({ key, height: null, node: null, observer: null });
   (0, import_react.useLayoutEffect)(() => {
     const node = box.current;
-    const state = last.current;
-    if (node !== state.node) {
-      state.observer?.disconnect();
-      Object.assign(state, { key, height: null, node, observer: null });
+    const state2 = last.current;
+    if (node !== state2.node) {
+      state2.observer?.disconnect();
+      Object.assign(state2, { key, height: null, node, observer: null });
       if (!node || typeof ResizeObserver !== "function") return;
-      state.observer = new ResizeObserver(([entry]) => {
-        if (node.dataset.morph === void 0) state.height = entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight;
+      state2.observer = new ResizeObserver(([entry]) => {
+        if (node.dataset.morph === void 0) state2.height = entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight;
       });
-      state.observer.observe(node);
+      state2.observer.observe(node);
       return;
     }
-    if (!node || key === state.key) return;
+    if (!node || key === state2.key) return;
     const running = node.getAnimations().filter((animation2) => animation2.id === "bt-morph");
-    const from = running.length ? node.offsetHeight : state.height;
+    const from = running.length ? node.offsetHeight : state2.height;
     for (const animation2 of running) animation2.cancel();
     const to = node.offsetHeight;
-    Object.assign(state, { key, height: to });
+    Object.assign(state2, { key, height: to });
     if (from === null || Math.abs(from - to) < 1 || reducedMotion()) return;
     node.dataset.morph = "";
     const animation = node.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: SPRING_SHAPE.duration, easing: SPRING_SHAPE.easing, id: "bt-morph" });
@@ -3573,6 +3600,10 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-wechat-docs{padding:2px 0 0}
 .bt-wechat-transport{margin-left:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-ink-3);padding:0 6px;border-radius:6px;background:var(--hover)}
 .bt-wechat-login{display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0;min-width:0}
+.bt-wechat-login-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;text-align:center}
+.bt-wechat-beta{flex:none;font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;border:.5px solid var(--bt-line-2);color:var(--bt-ink-3);text-transform:uppercase;letter-spacing:.04em}
+.bt-wechat-consent-points{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;text-align:left}
+.bt-wechat-login-detail{color:var(--bt-ink-3)}
 .bt-wechat-qr{width:168px;height:168px;border-radius:10px;border:.5px solid var(--bt-line-2);background:var(--bt-main);padding:6px;box-sizing:border-box}
 .bt-wechat-inbound{display:flex;flex-direction:column;gap:8px;border:.5px solid var(--bt-line);border-radius:10px;padding:10px 12px;min-width:0}
 .bt-wechat-copy-row{display:flex;align-items:center;gap:8px;min-width:0}
@@ -4363,7 +4394,7 @@ function useGaze(ref, enabled) {
   }, [enabled]);
 }
 var FIDGETS = ["hop", "sway", "stretch", "look"];
-function BotMark({ bot, look: given, size = 36, state = "idle", live = false, gaze = false, pokeable = false, label }) {
+function BotMark({ bot, look: given, size = 36, state: state2 = "idle", live = false, gaze = false, pokeable = false, label }) {
   const look = given ?? lookOf(bot);
   const ref = (0, import_react2.useRef)(null);
   const maskId = (0, import_react2.useRef)("");
@@ -4376,7 +4407,7 @@ function BotMark({ bot, look: given, size = 36, state = "idle", live = false, ga
     ref,
     className: poked ? "bt-mark bt-mark-poke" : "bt-mark",
     "data-shape": image ? "image" : shapeId(look.shape),
-    "data-state": STATES.includes(state) ? state : "idle",
+    "data-state": STATES.includes(state2) ? state2 : "idle",
     "data-live": live ? "" : void 0,
     "data-fidget": live ? FIDGETS[fnv1a(`${bot?.id ?? ""}:fidget`) % FIDGETS.length] : void 0,
     "data-gaze": gaze ? "" : void 0,
@@ -4411,13 +4442,13 @@ function MainStar() {
     (0, import_react2.createElement)("path", { d: "M10 2.4l2.29 5.04 5.51.63-4.09 3.74 1.11 5.42L10 14.5l-4.82 2.73 1.11-5.42L2.2 8.07l5.51-.63z" })
   );
 }
-function useSettled(state) {
-  const prev = (0, import_react2.useRef)(state);
+function useSettled(state2) {
+  const prev = (0, import_react2.useRef)(state2);
   const [settled, setSettled] = (0, import_react2.useState)(false);
   (0, import_react2.useEffect)(() => {
     const was = prev.current;
-    prev.current = state;
-    if (state !== "idle") {
+    prev.current = state2;
+    if (state2 !== "idle") {
       setSettled(false);
       return void 0;
     }
@@ -4425,19 +4456,19 @@ function useSettled(state) {
     setSettled(true);
     const timer = setTimeout(() => setSettled(false), 1800);
     return () => clearTimeout(timer);
-  }, [state]);
+  }, [state2]);
   return settled;
 }
-function BotAvatar({ bot, size, state = "idle", main, admin, badge = true, live = true, gaze = false, pokeable = false }) {
-  const settled = useSettled(state);
+function BotAvatar({ bot, size, state: state2 = "idle", main, admin, badge = true, live = true, gaze = false, pokeable = false }) {
+  const settled = useSettled(state2);
   if (bot === void 0) return (0, import_react2.createElement)(BotMark, { size });
-  const working = state !== "idle" && state !== "waiting";
-  const badgeKind = !badge ? null : state === "alert" ? "alert" : working ? "working" : admin ? "admin" : main ? "main" : null;
+  const working = state2 !== "idle" && state2 !== "waiting";
+  const badgeKind = !badge ? null : state2 === "alert" ? "alert" : working ? "working" : admin ? "admin" : main ? "main" : null;
   const keepsMain = main && working;
   return (0, import_react2.createElement)(
     "span",
     { className: "bt-mark", style: { width: size, height: size, "--bt-size": `${size}px` } },
-    (0, import_react2.createElement)(BotMark, { bot, size, state: settled ? "done" : state, live, gaze, pokeable }),
+    (0, import_react2.createElement)(BotMark, { bot, size, state: settled ? "done" : state2, live, gaze, pokeable }),
     badgeKind === "working" ? (0, import_react2.createElement)("span", { className: `bt-badge bt-badge-working${keepsMain ? " bt-badge-working-kept" : ""}`, "aria-label": t("Working"), role: "img" }) : null,
     badgeKind === "alert" ? (0, import_react2.createElement)("span", { className: "bt-badge bt-badge-alert", "aria-label": t("Waiting for your answer"), role: "img" }, "?") : null,
     badgeKind === "admin" ? (0, import_react2.createElement)("span", { className: "bt-badge bt-badge-admin", "aria-label": t("Admin"), role: "img" }, (0, import_react2.createElement)(StarIcon)) : null,
@@ -4722,8 +4753,8 @@ function QuoteCard({ quote, roster }) {
 }
 function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, actions }) {
   const roster = useRoster((value) => value);
-  const quote = useUi((state) => state.quotes?.[sessionId] ?? null);
-  const draft = useInput === void 0 ? null : useInput((state) => state.draft);
+  const quote = useUi((state2) => state2.quotes?.[sessionId] ?? null);
+  const draft = useInput === void 0 ? null : useInput((state2) => state2.draft);
   const bot = quote === null ? void 0 : quote.botId ? roster.byId[quote.botId] : void 0;
   const bar = (0, import_react4.useRef)(null);
   (0, import_react4.useEffect)(() => {
@@ -4734,10 +4765,10 @@ function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, ac
   (0, import_react4.useEffect)(() => {
     if (quote === null || quote.inserted !== true || inputActions === void 0) return void 0;
     if (rebuilt.current === quote.token) return void 0;
-    const state = actions.quoteDraft(quote.sessionId);
-    if (state === null) return void 0;
-    if ((state.occurrences ?? []).some((row) => row.source === QUOTE_SOURCE)) return void 0;
-    if (!state.draft.includes(quote.clipboardText)) return void 0;
+    const state2 = actions.quoteDraft(quote.sessionId);
+    if (state2 === null) return void 0;
+    if ((state2.occurrences ?? []).some((row) => row.source === QUOTE_SOURCE)) return void 0;
+    if (!state2.draft.includes(quote.clipboardText)) return void 0;
     const timer = setTimeout(() => {
       rebuilt.current = quote.token;
       const rest = actions.quoteTakeText(quote.sessionId, quote.clipboardText);
@@ -5096,8 +5127,8 @@ function PendingQuestion({ sessionId, question, actions, inline }) {
 }
 function QuestionDock({ sessionId, useRoster, useCards, useHeldCards, actions }) {
   const question = useRoster((value) => value.questions?.[sessionId]);
-  const drawn = useCards?.((state) => state[sessionId]?.[question?.callId] > 0) === true;
-  const held = useHeldCards?.((state) => state[sessionId]?.[heldCardKey("question", question?.id)] > 0) === true;
+  const drawn = useCards?.((state2) => state2[sessionId]?.[question?.callId] > 0) === true;
+  const held = useHeldCards?.((state2) => state2[sessionId]?.[heldCardKey("question", question?.id)] > 0) === true;
   if (question === void 0 || question.callId && drawn && !held) return null;
   return (0, import_react6.createElement)(PendingQuestion, { key: JSON.stringify([sessionId, question.id]), sessionId, question, actions, inline: false });
 }
@@ -5671,8 +5702,8 @@ function WidgetCell({ sessionId, callId, args, done, isError, roster, actions, h
 }
 function WidgetDock({ sessionId, useRoster, useCards, useHeldCards, actions }) {
   const view = useRoster((value) => value.views?.[sessionId]);
-  const drawn = useCards?.((state) => state[sessionId]?.[view?.callId] > 0) === true;
-  const held = useHeldCards?.((state) => state[sessionId]?.[heldCardKey("view", view?.id)] > 0) === true;
+  const drawn = useCards?.((state2) => state2[sessionId]?.[view?.callId] > 0) === true;
+  const held = useHeldCards?.((state2) => state2[sessionId]?.[heldCardKey("view", view?.id)] > 0) === true;
   if (view === void 0 || view.callId && drawn && !held) return null;
   return (0, import_react7.createElement)(PendingView, { sessionId, view, actions, inline: false });
 }
@@ -5931,8 +5962,8 @@ function SecretToolCell({ sessionId, callId, name, done, content, roster, action
 }
 function SecretDock({ sessionId, useRoster, useCards, useHeldCards, actions }) {
   const roster = useRoster((value) => value);
-  const shown = useCards?.((state) => state[sessionId]) ?? NONE;
-  const held = useHeldCards?.((state) => state[sessionId]) ?? NONE;
+  const shown = useCards?.((state2) => state2[sessionId]) ?? NONE;
+  const held = useHeldCards?.((state2) => state2[sessionId]) ?? NONE;
   const bot = roster.byId[sessionId];
   if (!bot || currentPart(bot) !== sessionId) return null;
   const drawn = (entry) => entry.callId && entry.sessionId === sessionId && shown[entry.callId] > 0 && !(held[heldCardKey("secret", entry.id)] > 0);
@@ -6251,7 +6282,7 @@ function Bubbles({ texts: texts2, roster, selfId, actions, streaming, sessionId,
     event.stopPropagation();
     actions.openSession(target);
   };
-  const reactions = useUi ? useUi((state) => msgKey ? state.reactions?.[msgKey] ?? null : null) : null;
+  const reactions = useUi ? useUi((state2) => msgKey ? state2.reactions?.[msgKey] ?? null : null) : null;
   return (0, import_react10.createElement)(
     "div",
     { className: "bt-astack", "data-lead": lead ? "" : void 0, onClickCapture: onClick },
@@ -6721,15 +6752,15 @@ function TriggerCell({ node, sessionId, useRoster, useSessions, useTurnClock, us
     const outline = list.projectionsBySession?.[sessionId]?.values?.turnOutline ?? list.byId[sessionId]?.projectionValues?.turnOutline;
     return Array.isArray(outline) ? outline.map((entry) => entry.turn).join(",") : "";
   });
-  const peers = useTurnClock((state) => {
+  const peers = useTurnClock((state2) => {
     if (!relayed) return "";
-    const turns = state[sessionId] ?? {};
+    const turns = state2[sessionId] ?? {};
     return Object.keys(turns).filter((key) => turns[key].peer !== void 0).map((key) => `${key}:${turns[key].peer}`).join(",");
   });
-  const visit = useUi((state) => state.visits?.[sessionId]);
+  const visit = useUi((state2) => state2.visits?.[sessionId]);
   const hiddenTurns = roster.exchangeTurns[sessionId];
-  const unreadOpening = useTurnClock((state) => {
-    const first = openingTurn(state[sessionId], order, hiddenTurns);
+  const unreadOpening = useTurnClock((state2) => {
+    const first = openingTurn(state2[sessionId], order, hiddenTurns);
     return first?.turn === turn && unseenSince(visit, first.start) ? clockLabel(first.start) : "";
   });
   const body = triggerBody();
@@ -6809,9 +6840,9 @@ function TurnProcessCell({ node, sessionId, turnProcess, useRoster, useUi, useTu
   (0, import_react10.useEffect)(() => {
     actions.noteTurnTime(sessionId, turn, "first", start);
   }, [sessionId, turn, start]);
-  const visit = useUi((state) => state.visits?.[sessionId]);
-  const fresh = useTurnClock((state) => {
-    const own = state[sessionId]?.[turn];
+  const visit = useUi((state2) => state2.visits?.[sessionId]);
+  const fresh = useTurnClock((state2) => {
+    const own = state2[sessionId]?.[turn];
     return !hidden && typeof visit?.seen === "number" && own?.first !== void 0 && own.first <= visit.seen && own.end !== void 0 && own.end > visit.seen && own.end <= visit.entered;
   });
   return fresh ? (0, import_react10.createElement)(NewDivider) : null;
@@ -6844,14 +6875,14 @@ function TurnTailCell({ turn: location2, sessionId, useTurnClock, useUi, actions
   (0, import_react10.useEffect)(() => {
     actions.noteTurnTime(sessionId, turn, "end", time);
   }, [sessionId, turn, time]);
-  const label = useTurnClock((state) => {
-    const start = nextTurnStart(state[sessionId] ?? {}, turn);
+  const label = useTurnClock((state2) => {
+    const start = nextTurnStart(state2[sessionId] ?? {}, turn);
     return start !== void 0 && start - time >= SEPARATOR_GAP_MS ? clockLabel(start) : "";
   });
-  const visit = useUi((state) => state.visits?.[sessionId]);
-  const fresh = useTurnClock((state) => {
+  const visit = useUi((state2) => state2.visits?.[sessionId]);
+  const fresh = useTurnClock((state2) => {
     if (typeof visit?.seen !== "number" || time > visit.seen) return false;
-    const start = nextTurnStart(state[sessionId] ?? {}, turn);
+    const start = nextTurnStart(state2[sessionId] ?? {}, turn);
     return start !== void 0 && start > visit.seen && start <= visit.entered;
   });
   if (!label && !fresh) return null;
@@ -7165,7 +7196,7 @@ function renderCall(call2, { sessionId, roster, actions, useUi, useWork, findBot
 }
 function ToolCell({ node, sessionId, useRoster, useUi, useWork, useHeldCards, actions }) {
   const roster = useRoster((value) => value);
-  const heldCards = useHeldCards?.((state) => state[sessionId]);
+  const heldCards = useHeldCards?.((state2) => state2[sessionId]);
   const root = node.data.root;
   const turn = node.location?.turn?.turn ?? root.turn;
   const hidden = isHiddenTurn(roster, sessionId, turn);
@@ -7265,7 +7296,7 @@ function ActivityIndicator({ sessionId, useRoster, useSessionStatus, useLive, us
   const runAt = (0, import_react11.useRef)(0);
   if (!running) runAt.current = 0;
   else if (runAt.current === 0) runAt.current = Date.now();
-  const liveKey = useLive((state) => JSON.stringify(state[sessionId] ?? {}));
+  const liveKey = useLive((state2) => JSON.stringify(state2[sessionId] ?? {}));
   const pendingInput = useSession((snapshot) => Math.max(0, ...(snapshot?.pendingSubmissions ?? []).filter((sub) => sub.placement !== "queued").map((sub) => sub.time)));
   const bot = roster.byId[sessionId];
   const room2 = roster.roomsById[sessionId];
@@ -7402,11 +7433,11 @@ function dockModel(sessionId, roster, work) {
     doing: `${t("in {name}", { name: first.room.name })} · ${workPhrase(first.doing)}…${groups.length > 1 ? ` +${groups.length - 1}` : ""}`
   };
 }
-function Face({ bot, ask, state }) {
+function Face({ bot, ask, state: state2 }) {
   return (0, import_react12.createElement)(
     "span",
     { className: "bt-mw-face", "data-ask": ask || void 0 },
-    (0, import_react12.createElement)(BotMark, { bot, size: 20, state: ask ? "alert" : state })
+    (0, import_react12.createElement)(BotMark, { bot, size: 20, state: ask ? "alert" : state2 })
   );
 }
 function useFitWidth(inner, key) {
@@ -7575,16 +7606,16 @@ var import_react13 = require("react");
 var HOLD_MS = 500;
 var SLOP = 10;
 function useRowMenu(open) {
-  const state = (0, import_react13.useRef)(null);
+  const state2 = (0, import_react13.useRef)(null);
   const timer = (0, import_react13.useRef)(void 0);
   (0, import_react13.useEffect)(() => () => clearTimeout(timer.current), []);
   const cancel = () => {
     clearTimeout(timer.current);
     timer.current = void 0;
-    state.current = null;
+    state2.current = null;
   };
   const swallow = (event) => {
-    if (state.current?.fired !== true) return false;
+    if (state2.current?.fired !== true) return false;
     event.preventDefault();
     event.stopPropagation();
     return true;
@@ -7594,46 +7625,46 @@ function useRowMenu(open) {
       if (event.pointerType === "mouse" || event.button !== 0) return;
       cancel();
       const point = { x: event.clientX, y: event.clientY };
-      state.current = { point, fired: false };
+      state2.current = { point, fired: false };
       timer.current = setTimeout(() => {
         timer.current = void 0;
-        if (state.current === null) return;
-        state.current = { point, fired: true };
+        if (state2.current === null) return;
+        state2.current = { point, fired: true };
         navigator.vibrate?.(8);
         open(point);
       }, HOLD_MS);
     },
     onPointerMove: (event) => {
-      const current = state.current;
+      const current = state2.current;
       if (current === null || current.fired) return;
       if (Math.abs(event.clientX - current.point.x) > SLOP || Math.abs(event.clientY - current.point.y) > SLOP) cancel();
     },
     onPointerUp: () => {
-      if (state.current?.fired !== true) {
+      if (state2.current?.fired !== true) {
         cancel();
         return;
       }
       setTimeout(() => {
-        if (state.current?.fired === true) state.current = null;
+        if (state2.current?.fired === true) state2.current = null;
       }, 350);
     },
     onPointerCancel: cancel,
     onPointerLeave: () => {
-      if (state.current?.fired !== true) cancel();
+      if (state2.current?.fired !== true) cancel();
     },
     onContextMenu: (event) => {
-      const duplicate = state.current?.fired === true || event.sourceCapabilities?.firesTouchEvents === true;
+      const duplicate = state2.current?.fired === true || event.sourceCapabilities?.firesTouchEvents === true;
       event.preventDefault();
       event.stopPropagation();
       if (duplicate) {
-        state.current = null;
+        state2.current = null;
         return;
       }
       open({ x: event.clientX, y: event.clientY });
     },
     onClickCapture: (event) => {
       if (!swallow(event)) return;
-      state.current = null;
+      state2.current = null;
     }
   };
 }
@@ -7941,7 +7972,7 @@ function setupChoices(actions) {
   ].filter(Boolean);
 }
 function DeepSeekSignIn({ useUi, actions }) {
-  const open = useUi((state) => state.signIn);
+  const open = useUi((state2) => state2.signIn);
   const entry = open ? actions.signInEntry?.() : null;
   if (!entry) return null;
   return (0, import_react14.createElement)(SignInHost, { key: open, entry, actions });
@@ -10395,7 +10426,7 @@ function DecisionForm({ card, decision, readOnly, onSaved }) {
 }
 function QueueList({ entries: entries2, roster, onOpen }) {
   return entries2.length ? (0, import_react24.createElement)("ol", { className: "bt-board-queue" }, entries2.map((entry) => {
-    const state = entry.blockedBy === "project" ? t("Waiting for requirement #{number}", { number: entry.waitingNumber }) : entry.blockedBy === "bot" ? t("Waiting for this Bot") : entry.blockedBy === "chat" ? t("Waiting for the current conversation") : t({ pending: "Queued", held: "Paused", sending: "Dispatching", sent: "Waiting for the Bot", running: entry.recovery ? "Checking saved progress" : "Working", settling: "Working", stopping: "Stopping…", recovering: "Checking saved progress" }[entry.state] ?? "Queued");
+    const state2 = entry.blockedBy === "project" ? t("Waiting for requirement #{number}", { number: entry.waitingNumber }) : entry.blockedBy === "bot" ? t("Waiting for this Bot") : entry.blockedBy === "chat" ? t("Waiting for the current conversation") : t({ pending: "Queued", held: "Paused", sending: "Dispatching", sent: "Waiting for the Bot", running: entry.recovery ? "Checking saved progress" : "Working", settling: "Working", stopping: "Stopping…", recovering: "Checking saved progress" }[entry.state] ?? "Queued");
     return (0, import_react24.createElement)(
       "li",
       { key: entry.id },
@@ -10404,7 +10435,7 @@ function QueueList({ entries: entries2, roster, onOpen }) {
         { className: "bt-board-queue-top" },
         (0, import_react24.createElement)(BotAvatar, { bot: roster.byId[entry.botId], size: 24, live: false }),
         (0, import_react24.createElement)("strong", null, roster.byId[entry.botId]?.name ?? t("Unavailable Bot")),
-        (0, import_react24.createElement)("span", { className: "bt-board-muted" }, state)
+        (0, import_react24.createElement)("span", { className: "bt-board-muted" }, state2)
       ),
       onOpen ? (0, import_react24.createElement)("button", { className: "bt-board-queue-link", onClick: () => onOpen(entry) }, "#" + entry.number + " · " + entry.title) : null,
       (0, import_react24.createElement)("p", null, entry.step),
@@ -10927,11 +10958,11 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   const groups = workKeys(useGroupWork(useWork, (rooms) => Object.entries(rooms).flatMap(([roomId, entries2]) => entries2.filter((entry) => entry.botId === id).map((entry) => ({ id: roomId, ...doingOf(entry) })))));
   const away = !running && groups.length > 0;
   const own = workKeys(useWork ? useWork((work) => JSON.stringify(work.bots?.[id] ?? null)) : "null");
-  const state = botState(running || away, doing, alert);
+  const state2 = botState(running || away, doing, alert);
   const busy = running && own !== null && own.roomId === void 0 ? { doing: own, where: "" } : away ? { doing: groups[0], where: `· ${roster.roomsById[groups[0].id]?.name ?? t("a group chat")}` } : null;
   const busyLine = busy ? workStateLine({ ...busy, className: "bt-member-state bt-row-state" }) : null;
   const waits = workKeys(useWork ? useWork((work) => JSON.stringify(work.waiting?.[id] ?? null)) : "null");
-  const waitsFor = state === "waiting" ? waitingFor(roster, waits) : "";
+  const waitsFor = state2 === "waiting" ? waitingFor(roster, waits) : "";
   if (bot.hidden && !active && !main) return null;
   const menu = useRowMenu((point) => actions.openMenu({ kind: "bot", id, x: point.x, y: point.y }));
   const pinned = bot.pinned === true && !tile;
@@ -10949,7 +10980,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
         onClick: () => actions.openSession(id),
         ...menu
       },
-      (0, import_react26.createElement)(BotAvatar, { bot, size: 60, state, main: true }),
+      (0, import_react26.createElement)(BotAvatar, { bot, size: 60, state: state2, main: true }),
       (0, import_react26.createElement)("span", { className: "bt-tile-name" }, bot.name),
       bot.role ? (0, import_react26.createElement)("span", { className: "bt-chip" }, bot.role) : null,
       unread && !active ? (0, import_react26.createElement)("span", { className: "bt-unread", "aria-hidden": true }) : null
@@ -10967,7 +10998,7 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
       onClick: () => actions.openSession(id),
       ...menu
     },
-    (0, import_react26.createElement)(BotAvatar, { bot, size: 36, state, main }),
+    (0, import_react26.createElement)(BotAvatar, { bot, size: 36, state: state2, main }),
     pinned && !wide ? (0, import_react26.createElement)(PinMark) : null,
     wide ? (0, import_react26.createElement)(
       "span",
@@ -11949,7 +11980,7 @@ function MemoryNotice({ shown }) {
 }
 function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSession, useActivity, useMemoryNews, useTurnClock, useUi, useLive, useWork, useStore, useConversationViews, selectView, useMobileNav, useNavLevel, actions }) {
   const roster = useRoster((value) => value);
-  const selectedView = useStore?.((state) => state.view);
+  const selectedView = useStore?.((state2) => state2.view);
   const away = useConversationViews?.((views) => views.some((view) => view.id === selectedView && view.id !== "chat")) === true && typeof selectView === "function";
   const title = useSessions((list) => list.byId[sessionId]?.displayTitle ?? list.byId[sessionId]?.title ?? "");
   const firstTurns = useSessions((list) => {
@@ -11957,9 +11988,9 @@ function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSe
     return Array.isArray(outline) ? outline.slice(0, 8).map((entry) => entry.turn).join(",") : "";
   });
   const hiddenTurns = roster.exchangeTurns?.[sessionId];
-  const visit = useUi((state) => state.visits?.[sessionId]);
-  const opening = useTurnClock((state) => {
-    const first = openingTurn(state[sessionId], firstTurns, hiddenTurns);
+  const visit = useUi((state2) => state2.visits?.[sessionId]);
+  const opening = useTurnClock((state2) => {
+    const first = openingTurn(state2[sessionId], firstTurns, hiddenTurns);
     return first && !unseenSince(visit, first.start) ? clockLabel(first.start) : "";
   });
   (0, import_react27.useEffect)(() => {
@@ -11972,7 +12003,7 @@ function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSe
   const doing = useActivity((map) => map[owner]);
   const bot = roster.byId[sessionId];
   const room2 = roster.roomsById[sessionId];
-  const detailsOpen = useUi((state) => state.details === sessionId);
+  const detailsOpen = useUi((state2) => state2.details === sessionId);
   const name = bot?.name ?? room2?.name ?? "";
   const useNews = useMemoryNews ?? noNews;
   const memoryIds = bot ? [bot.id] : room2 ? [room2.id, ...room2.members] : [];
@@ -12023,7 +12054,7 @@ function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSe
 }
 function PlainBack({ useMobileNav, useSurface, useNavLevel, actions }) {
   const onPhone = useMobileNav((value) => value);
-  const plain = useSurface((state) => state.plain && state.mode === "bot");
+  const plain = useSurface((state2) => state2.plain && state2.mode === "bot");
   const atChat = useNavLevel((value) => value === "chat");
   if (!(onPhone && plain && atChat)) return null;
   return (0, import_react27.createElement)("button", {
@@ -12091,11 +12122,11 @@ function NewMessagePills({ sessionId, useSessions, useUi, useTurnClock }) {
     const outline = list.projectionsBySession?.[sessionId]?.values?.turnOutline ?? list.byId[sessionId]?.projectionValues?.turnOutline;
     return Array.isArray(outline) ? outline.reduce((count, entry) => count + (entry.response ? 1 : 0), 0) : 0;
   });
-  const visit = useUi((state) => state.visits?.[sessionId]);
-  const unread = useTurnClock((state) => {
+  const visit = useUi((state2) => state2.visits?.[sessionId]);
+  const unread = useTurnClock((state2) => {
     if (typeof visit?.seen !== "number") return 0;
     let count = 0;
-    for (const entry of Object.values(state[sessionId] ?? {})) {
+    for (const entry of Object.values(state2[sessionId] ?? {})) {
       if (entry.first !== void 0 && entry.first > visit.seen && entry.first <= visit.entered) count += 1;
     }
     return count;
@@ -12108,7 +12139,7 @@ function NewMessagePills({ sessionId, useSessions, useUi, useTurnClock }) {
     setRelease({ base: unpinned ? replies : null, dismissed: false });
   }, [unpinned]);
   (0, import_react27.useEffect)(() => {
-    if (view?.divider === "in-view") setAbove((state) => state.seen ? state : { ...state, seen: true });
+    if (view?.divider === "in-view") setAbove((state2) => state2.seen ? state2 : { ...state2, seen: true });
   }, [view?.divider]);
   const fresh = release.base === null ? 0 : replies - release.base;
   const showDown = unpinned && fresh > 0 && !release.dismissed;
@@ -12151,8 +12182,8 @@ function NewMessagePills({ sessionId, useSessions, useUi, useTurnClock }) {
     (0, import_react27.createElement)(
       import_react27.Fragment,
       null,
-      showUp ? pill("up", unread, { left: view.center, top: view.top }, toDivider, () => setAbove((state) => ({ ...state, dismissed: true }))) : null,
-      showDown ? pill("down", fresh, { left: view.center, bottom: view.bottom }, toLatest, () => setRelease((state) => ({ ...state, dismissed: true }))) : null
+      showUp ? pill("up", unread, { left: view.center, top: view.top }, toDivider, () => setAbove((state2) => ({ ...state2, dismissed: true }))) : null,
+      showDown ? pill("down", fresh, { left: view.center, bottom: view.bottom }, toLatest, () => setRelease((state2) => ({ ...state2, dismissed: true }))) : null
     ),
     document.body
   );
@@ -13623,15 +13654,15 @@ function VoiceMode({ sessionId, roster, actions, useSessions, useSessionStatus }
         const level2 = capture.level();
         smooth = smooth * 0.8 + level2 * 0.2;
         setServiceLevel(Math.round(smooth * 100) / 100);
-        const state = detect(level2, now);
-        if (state === "done" || state === "speech" && now - began >= limit) {
+        const state2 = detect(level2, now);
+        if (state2 === "done" || state2 === "speech" && now - began >= limit) {
           const current = capture;
           capture = null;
           setServiceLevel(0);
           void finish(current);
           return;
         }
-        if (state === "waiting" && now - began >= limit) {
+        if (state2 === "waiting" && now - began >= limit) {
           setCycle((value) => value + 1);
           return;
         }
@@ -15086,7 +15117,7 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
   if (kind === "secret") {
     const editing = secret !== null && secret.editing === true;
     const cleared = secret !== null && secret.cleared === true;
-    const state = cleared ? t("Will be removed") : field.saved === true ? t("Saved") : t("Not set");
+    const state2 = cleared ? t("Will be removed") : field.saved === true ? t("Saved") : t("Not set");
     let control;
     if (editing) {
       control = (0, import_react37.createElement)(
@@ -15103,14 +15134,14 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
       control = (0, import_react37.createElement)(
         "div",
         { className: "bt-connector-field-control" },
-        (0, import_react37.createElement)("span", { className: "bt-connector-field-state" }, state),
+        (0, import_react37.createElement)("span", { className: "bt-connector-field-state" }, state2),
         (0, import_react37.createElement)("button", { type: "button", className: "bt-connector-link bt-connector-link-btn", disabled, onClick: secret.onUndo }, t("Undo"))
       );
     } else {
       control = (0, import_react37.createElement)(
         "div",
         { className: "bt-connector-field-control" },
-        (0, import_react37.createElement)("span", { className: "bt-connector-field-state" }, state),
+        (0, import_react37.createElement)("span", { className: "bt-connector-field-state" }, state2),
         (0, import_react37.createElement)("button", {
           type: "button",
           className: "bt-connector-link bt-connector-link-btn",
@@ -15200,6 +15231,91 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
   );
 }
 
+// src/client/wechat-login.js
+var LOGIN_STATES = ["logged-out", "qr", "verified-needed", "blocked", "expired", "cancelled", "confirm-failed", "protocol-error", "logged-in", "login-expired"];
+var KNOWN = new Set(LOGIN_STATES);
+var POLL_INTERVAL_MS = 2e3;
+var POLL_LIMIT_MS = 5 * 60 * 1e3;
+var loginOf = (row) => row?.login !== null && typeof row?.login === "object" && typeof row.login.state === "string" ? row.login : null;
+var loginStateOf = (login) => {
+  if (login === null) return null;
+  return KNOWN.has(login.state) ? login.state : "protocol-error";
+};
+var qrSourceOf = (login) => {
+  if (login === null || loginStateOf(login) !== "qr") return null;
+  const qr = login.qr;
+  if (typeof qr !== "string") return null;
+  if (qr.startsWith("data:image/png;base64,")) return qr;
+  if (/^https:\/\/\S+$/i.test(qr)) return qr;
+  return null;
+};
+var state = (login) => loginStateOf(login);
+var loginText = (login) => {
+  switch (state(login)) {
+    case "logged-out":
+      return t("Not logged in — this channel cannot send or receive yet.");
+    case "qr":
+      return login.scanned === true ? t("Scanned — confirm on your phone.") : t("Scan the QR code with WeChat to link this channel.");
+    case "verified-needed":
+      return t("Enter the code shown in WeChat.");
+    case "blocked":
+      return t("Too many wrong codes; refresh the QR code.");
+    case "expired":
+      return t("QR code expired; refresh to try again.");
+    case "cancelled":
+      return t("Login cancelled.");
+    case "confirm-failed":
+      return t("WeChat did not confirm the login.");
+    case "protocol-error":
+      return t("WeChat login service is unavailable.");
+    case "logged-in":
+      return typeof login.account === "string" && login.account !== "" ? t("Logged in as {account}", { account: login.account }) : t("Logged in");
+    case "login-expired":
+      return t("Login expired; scan again.");
+    default:
+      return null;
+  }
+};
+var loginDetail = (login) => {
+  if (state(login) === "protocol-error") return typeof login.error === "string" && login.error !== "" ? login.error : t("Try again in a moment.");
+  if (state(login) === "login-expired" || state(login) === "blocked") return typeof login.error === "string" && login.error !== "" ? login.error : null;
+  if (state(login) === "qr" && qrSourceOf(login) === null) return t("QR code unavailable. Refresh to try again.");
+  return null;
+};
+var loginActions = (login) => {
+  const action = (id, label, command, args) => ({ id, label, command, args });
+  switch (state(login)) {
+    case "logged-out":
+      return [action("start", t("Start login"), "login-start")];
+    case "qr":
+      return [action("refresh", t("Refresh"), "login-refresh"), action("cancel", t("Cancel"), "login-cancel")];
+    case "verified-needed":
+      return [action("refresh", t("Refresh"), "login-refresh"), action("cancel", t("Cancel"), "login-cancel")];
+    case "blocked":
+      return [action("refresh", t("Refresh"), "login-refresh"), action("cancel", t("Cancel"), "login-cancel")];
+    case "expired":
+      return [action("refresh", t("Refresh"), "login-refresh"), action("cancel", t("Cancel"), "login-cancel")];
+    case "cancelled":
+      return [action("start", t("Start login"), "login-start")];
+    case "confirm-failed":
+      return [action("start", t("Start login"), "login-start"), action("retry", t("Retry"), "login-poll")];
+    case "protocol-error":
+      return [action("retry", t("Retry"), "login-poll")];
+    case "login-expired":
+      return [action("start", t("Start login"), "login-start")];
+    default:
+      return [];
+  }
+};
+var consentGate = (login, acknowledged) => state(login) === "logged-out" && login?.consentRequired === true && acknowledged !== true;
+var shouldPoll = (login) => state(login) === "qr" || state(login) === "verified-needed";
+var connectBlocked = (transport, login) => transport === "clawbot" && state(login) !== "logged-in";
+var CONSENT_POINTS = [
+  "Your WeChat account is a personal account and may be limited by WeChat.",
+  "The protocol follows public official documentation and has no third-party support commitment.",
+  "Scanning login is beta and has not been tested on a real device."
+];
+
 // src/client/wechat-card.js
 var import_react38 = require("react");
 var WeChatMark = () => (0, import_react38.createElement)(
@@ -15241,12 +15357,6 @@ var channelStatus = (row) => {
   if (row.state === "ready") return row.account ? t("Connected as {account}", { account: row.account }) : t("Connected");
   return t("Not connected");
 };
-var loginText = (login) => {
-  if (login.state === "qr") return t("Scan the QR code with WeChat to link this channel.");
-  if (login.state === "logged-in") return login.account ? t("Logged in as {account}", { account: login.account }) : t("Credentials saved");
-  if (login.state === "expired") return t("This QR code expired. Refresh it to try again.");
-  return t("Not logged in yet.");
-};
 function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = false, onToggle, lastOne = false }) {
   const [busy, setBusy] = (0, import_react38.useState)(false);
   const [error, setError] = (0, import_react38.useState)(null);
@@ -15256,6 +15366,8 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
   const [removeAsk, setRemoveAsk] = (0, import_react38.useState)(false);
   const [confirmTransport, setConfirmTransport] = (0, import_react38.useState)(false);
   const [copied, setCopied] = (0, import_react38.useState)(null);
+  const [consentAcknowledged, setConsentAcknowledged] = (0, import_react38.useState)(false);
+  const [consentDismissed, setConsentDismissed] = (0, import_react38.useState)(false);
   const fields = declaredSettingsOf(row);
   const savedTransport = transportOf(row);
   const settingValue = (field) => {
@@ -15281,7 +15393,8 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     const note = typeof levelNotes[id] === "string" && levelNotes[id] !== "" ? levelNotes[id] : null;
     return note ?? fallbackNote;
   };
-  const connectNote = levelBlocked(currentLevel);
+  const clawbotConnectNote = connectBlocked(transportOf(row), loginOf(row)) ? t("Log in to link this channel first.") : null;
+  const connectNote = clawbotConnectNote ?? levelBlocked(currentLevel);
   const run = (task, after) => {
     setBusy(true);
     setError(null);
@@ -15343,9 +15456,9 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     if (busy || lastOne) return;
     void run(() => actions.connectorDeleteInstance(row.id), () => setRemoveAsk(false));
   };
-  const command = (action) => {
+  const command = (action, args) => {
     if (busy) return;
-    void run(() => actions.connectorCommand(row.id, action));
+    void run(() => actions.connectorCommand(row.id, action, args));
   };
   const copy2 = async (key, text) => {
     if (typeof text !== "string" || text === "") return;
@@ -15467,18 +15580,91 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     ),
     (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, t("Copy these into the WeChat push settings."))
   ) : null;
-  const login = transportOf(row) === "clawbot" && row.login !== null && typeof row.login === "object" && typeof row.login.state === "string" ? row.login : null;
-  const qr = login !== null && login.state === "qr" && typeof login.qr === "string" && login.qr.startsWith("data:image/png;base64,") ? login.qr : null;
-  const loginActions = login === null ? null : login.state === "qr" ? [
-    (0, import_react38.createElement)("button", { key: "refresh", type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => command("login-refresh") }, t("Refresh QR")),
-    (0, import_react38.createElement)("button", { key: "cancel", type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => command("login-cancel") }, t("Cancel"))
-  ] : login.state === "logged-in" || login.state === "expired" ? [(0, import_react38.createElement)("button", { key: "refresh", type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => command("login-refresh") }, t("Re-scan"))] : [(0, import_react38.createElement)("button", { key: "start", type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => command("login-start") }, t("Log in"))];
-  const loginBlock = login !== null ? (0, import_react38.createElement)(
+  const login = transportOf(row) === "clawbot" ? loginOf(row) : null;
+  const loginState = loginStateOf(login);
+  const qr = qrSourceOf(login);
+  const polling = transportOf(row) === "clawbot" && shouldPoll(login);
+  const pollingRef = (0, import_react38.useRef)(polling);
+  pollingRef.current = polling;
+  (0, import_react38.useEffect)(() => {
+    if (!polling) return void 0;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (Date.now() - startedAt >= POLL_LIMIT_MS) {
+        clearInterval(timer);
+        return;
+      }
+      actions.connectorCommand(row.id, "login-poll").catch(() => {
+      });
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [polling, row.id]);
+  (0, import_react38.useEffect)(() => () => {
+    if (pollingRef.current) actions.connectorCommand(row.id, "login-cancel").catch(() => {
+    });
+  }, [row.id]);
+  const showConsent = transportOf(row) === "clawbot" && consentGate(login, consentAcknowledged) && !consentDismissed;
+  const startLogin = () => {
+    if (transportOf(row) === "clawbot" && loginState === "logged-out" && login !== null && login.consentRequired === true && consentAcknowledged !== true) {
+      setConsentDismissed(false);
+      return;
+    }
+    command("login-start");
+  };
+  const consentBlock = showConsent ? (0, import_react38.createElement)(
     "div",
-    { className: "bt-connector-setting bt-wechat-login", "data-login-state": login.state },
-    qr !== null ? (0, import_react38.createElement)("img", { className: "bt-wechat-qr", src: qr, alt: t("QR code") }) : null,
-    (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, loginText(login)),
-    loginActions !== null ? (0, import_react38.createElement)("div", { className: "bt-connector-form-row" }, loginActions) : null
+    { className: "bt-connector-setting bt-wechat-consent", "data-login-consent": "" },
+    (0, import_react38.createElement)("div", { className: "bt-connector-action-title" }, t("Sign-in risks")),
+    (0, import_react38.createElement)("ul", { className: "bt-wechat-consent-points" }, CONSENT_POINTS.map((point) => (0, import_react38.createElement)("li", { key: point, className: "bt-connector-hint" }, t(point)))),
+    (0, import_react38.createElement)(
+      "div",
+      { className: "bt-connector-form-row" },
+      (0, import_react38.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: () => setConsentDismissed(true) }, t("Cancel")),
+      (0, import_react38.createElement)("button", {
+        type: "button",
+        className: "bt-soft bt-soft-sm",
+        disabled: busy,
+        onClick: () => {
+          setConsentAcknowledged(true);
+          command("login-start", { consent: true });
+        }
+      }, busy ? t("Starting…") : t("I understand, continue"))
+    )
+  ) : null;
+  const loginActionsNow = login === null || loginState === "logged-in" || showConsent ? [] : loginActions(login);
+  const loginButtons = loginActionsNow.map((item) => (0, import_react38.createElement)("button", {
+    key: item.id,
+    type: "button",
+    className: "bt-soft bt-soft-sm",
+    disabled: busy,
+    onClick: () => {
+      if (item.id === "start") {
+        startLogin();
+        return;
+      }
+      command(item.command, item.args);
+    }
+  }, busy ? t("Working…") : item.label));
+  const loginDetailText = login === null ? null : loginDetail(login);
+  const shownDetail = loginDetailText !== null && loginDetailText !== row.error ? loginDetailText : null;
+  const loginBlock = transportOf(row) === "clawbot" ? (0, import_react38.createElement)(
+    "div",
+    { className: "bt-connector-setting bt-wechat-login", "data-login-state": loginState ?? "logged-out" },
+    (0, import_react38.createElement)(
+      "div",
+      { className: "bt-wechat-login-head" },
+      (0, import_react38.createElement)("span", { className: "bt-wechat-beta" }, t("Beta")),
+      (0, import_react38.createElement)("span", { className: "bt-connector-hint" }, t("Scanning login is beta and has not been tested on a real device. A failure does not affect the Webhook channel."))
+    ),
+    showConsent ? consentBlock : (0, import_react38.createElement)(
+      "div",
+      null,
+      qr !== null ? (0, import_react38.createElement)("img", { className: "bt-wechat-qr", src: qr, alt: t("QR code") }) : null,
+      loginText(login) !== null ? (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, loginText(login)) : null,
+      shownDetail !== null ? (0, import_react38.createElement)("div", { className: "bt-connector-hint bt-wechat-login-detail" }, shownDetail) : null,
+      (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, t("Incoming messages from this channel only answer you.")),
+      loginButtons.length > 0 ? (0, import_react38.createElement)("div", { className: "bt-connector-form-row" }, loginButtons) : null
+    )
   ) : null;
   const headActions = [];
   if (transportOf(row) === "webhook" && row.canTest === true && row.state === "ready") {
@@ -16991,7 +17177,7 @@ function FeedbackPage({ actions, run, Section, Row: Row3 }) {
 }
 var TOAST_MS = 6e3;
 function ErrorToast({ useUi, actions }) {
-  const toast = useUi((state) => state.toast);
+  const toast = useUi((state2) => state2.toast);
   const [leaving, setLeaving] = (0, import_react40.useState)(false);
   (0, import_react40.useEffect)(() => {
     if (!toast) return void 0;
@@ -17231,7 +17417,7 @@ function ProviderRow({ provider, apply: apply2, actions, open, onToggle }) {
   (0, import_react42.useEffect)(() => {
     if (!open) setConfirm(false);
   }, [open]);
-  const state = keyState(provider.key);
+  const state2 = keyState(provider.key);
   const shown = provider.models.slice(0, SHOWN_MODELS);
   const hint = provider.error ?? (provider.models.length === 0 ? t("No models") : t("{count} models", { count: provider.models.length }));
   return (0, import_react42.createElement)(
@@ -17246,7 +17432,7 @@ function ProviderRow({ provider, apply: apply2, actions, open, onToggle }) {
         (0, import_react42.createElement)("span", { className: "bt-secret-title" }, provider.name, provider.name !== provider.id ? (0, import_react42.createElement)("span", { className: "bt-provider-id" }, provider.id) : null),
         (0, import_react42.createElement)("span", { className: "bt-set-hint", "data-error": provider.error ? "" : void 0 }, hint)
       ),
-      state ? (0, import_react42.createElement)("span", { className: "bt-set-control" }, (0, import_react42.createElement)("span", { className: "bt-provider-state", "data-state": state[0] }, state[1])) : null
+      state2 ? (0, import_react42.createElement)("span", { className: "bt-set-control" }, (0, import_react42.createElement)("span", { className: "bt-provider-state", "data-state": state2[0] }, state2[1])) : null
     ),
     open ? (0, import_react42.createElement)(
       "div",
@@ -18002,7 +18188,7 @@ function RunStats({ bot, part, running, actions }) {
   );
 }
 function BrowserCards({ bot, sessionId, roster, actions, useBrowserTabs, useBrowserPages }) {
-  const state = useBrowserTabs((map) => map[bot.id] ?? EMPTY_TABS);
+  const state2 = useBrowserTabs((map) => map[bot.id] ?? EMPTY_TABS);
   const pages = useBrowserPages((map) => map);
   (0, import_react45.useEffect)(() => {
     actions.browserEnsure?.(bot.id);
@@ -18010,7 +18196,7 @@ function BrowserCards({ bot, sessionId, roster, actions, useBrowserTabs, useBrow
   if (roster.browser !== true || !actions.browserShow) {
     return (0, import_react45.createElement)("div", { className: "bt-muted" }, t("The browser is in the DSH Desktop app."));
   }
-  if (state.ids.length === 0) {
+  if (state2.ids.length === 0) {
     return (0, import_react45.createElement)(
       "div",
       { className: "bt-browser-empty-mark" },
@@ -18023,12 +18209,12 @@ function BrowserCards({ bot, sessionId, roster, actions, useBrowserTabs, useBrow
   return (0, import_react45.createElement)(
     "div",
     { className: "bt-bcards" },
-    state.ids.map((tabId, index) => {
+    state2.ids.map((tabId, index) => {
       const page = pages[tabId] ?? {};
       const label = page.title || shortUrl(page.url) || t("New tab");
       return (0, import_react45.createElement)(
         "div",
-        { key: tabId, className: "bt-bcard", "data-active": state.active === tabId || void 0, style: { animationDelay: `${index * 30}ms` } },
+        { key: tabId, className: "bt-bcard", "data-active": state2.active === tabId || void 0, style: { animationDelay: `${index * 30}ms` } },
         (0, import_react45.createElement)(
           "button",
           { type: "button", className: "bt-bcard-shot", "aria-label": t("Open {title}", { title: label }), title: page.url, onClick: () => actions.browserPick(sessionId, tabId) },
@@ -18057,7 +18243,7 @@ function BrowserCards({ bot, sessionId, roster, actions, useBrowserTabs, useBrow
         )
       );
     }),
-    (0, import_react45.createElement)("button", { type: "button", className: "bt-bcard-new", style: { animationDelay: `${state.ids.length * 30}ms` }, onClick: () => actions.browserNewTab(sessionId) }, (0, import_react45.createElement)(PlusIcon), t("New tab"))
+    (0, import_react45.createElement)("button", { type: "button", className: "bt-bcard-new", style: { animationDelay: `${state2.ids.length * 30}ms` }, onClick: () => actions.browserNewTab(sessionId) }, (0, import_react45.createElement)(PlusIcon), t("New tab"))
   );
 }
 function About({ text, title = "About" }) {
@@ -19471,19 +19657,19 @@ function createBotBrowsers({ bridge, createSource: createSource2, storage = glob
   let disposed = false;
   let serial = 0;
   const savedTab = (botId, tabId) => saved[botId]?.tabs?.find((entry) => entry.id === tabId);
-  const publish2 = (tabId, patch) => pages.set((state) => {
+  const publish2 = (tabId, patch) => pages.set((state2) => {
     const botId = owner.get(tabId);
-    return { ...state, [tabId]: { ...EMPTY, ...savedTab(botId, tabId), ...state[tabId], ...patch } };
+    return { ...state2, [tabId]: { ...EMPTY, ...savedTab(botId, tabId), ...state2[tabId], ...patch } };
   });
   const save = (botId, entry) => {
     saved = store.update((stored) => setEntry(stored, botId, entry), saved);
   };
   const persist = (botId) => {
-    const state = tabs.getSnapshot()[botId];
+    const state2 = tabs.getSnapshot()[botId];
     const snapshot = pages.getSnapshot();
-    save(botId, state && {
-      tabs: state.ids.map((id) => ({ id, url: snapshot[id]?.url ?? "", title: snapshot[id]?.title ?? "" })),
-      active: state.active
+    save(botId, state2 && {
+      tabs: state2.ids.map((id) => ({ id, url: snapshot[id]?.url ?? "", title: snapshot[id]?.title ?? "" })),
+      active: state2.active
     });
   };
   const ensureTabs = (botId) => {
@@ -19492,7 +19678,7 @@ function createBotBrowsers({ bridge, createSource: createSource2, storage = glob
     const ids = entries2.map((entry) => entry.id);
     const active = ids.includes(saved[botId]?.active) ? saved[botId].active : ids.at(-1) ?? null;
     for (const entry of entries2) owner.set(entry.id, botId);
-    tabs.set((state) => ({ ...state, [botId]: { ids, active } }));
+    tabs.set((state2) => ({ ...state2, [botId]: { ids, active } }));
     for (const entry of entries2) publish2(entry.id, { url: entry.url ?? "", title: entry.title ?? "", live: false });
   };
   const ensureLayer = () => {
@@ -19642,9 +19828,9 @@ function createBotBrowsers({ bridge, createSource: createSource2, storage = glob
     ensureTabs(botId);
     const tabId = `t${Date.now().toString(36)}-${++serial}`;
     owner.set(tabId, botId);
-    tabs.set((state) => {
-      const own = state[botId] ?? { ids: [], active: null };
-      return { ...state, [botId]: { ids: [...own.ids, tabId], active: tabId } };
+    tabs.set((state2) => {
+      const own = state2[botId] ?? { ids: [], active: null };
+      return { ...state2, [botId]: { ids: [...own.ids, tabId], active: tabId } };
     });
     publish2(tabId, { url: "", title: "", live: false });
     if (typeof url === "string" && url !== "") void navigate(tabId, url);
@@ -19652,8 +19838,8 @@ function createBotBrowsers({ bridge, createSource: createSource2, storage = glob
     return tabId;
   }
   async function closeTab(botId, tabId) {
-    const state = tabs.getSnapshot()[botId];
-    if (state === void 0 || !state.ids.includes(tabId)) return;
+    const state2 = tabs.getSnapshot()[botId];
+    if (state2 === void 0 || !state2.ids.includes(tabId)) return;
     await opening.get(tabId)?.catch(() => {
     });
     if (shown === tabId) await show(null);
@@ -19679,9 +19865,9 @@ function createBotBrowsers({ bridge, createSource: createSource2, storage = glob
   }
   function activate(botId, tabId) {
     ensureTabs(botId);
-    const state = tabs.getSnapshot()[botId];
-    if (state === void 0 || !state.ids.includes(tabId) || state.active === tabId) return;
-    tabs.set((snapshot) => ({ ...snapshot, [botId]: { ...state, active: tabId } }));
+    const state2 = tabs.getSnapshot()[botId];
+    if (state2 === void 0 || !state2.ids.includes(tabId) || state2.active === tabId) return;
+    tabs.set((snapshot) => ({ ...snapshot, [botId]: { ...state2, active: tabId } }));
     persist(botId);
   }
   const activeTab = (botId) => tabs.getSnapshot()[botId]?.active ?? null;
@@ -19768,8 +19954,8 @@ function createBotBrowsers({ bridge, createSource: createSource2, storage = glob
     openPages() {
       const open2 = {};
       const snapshot = pages.getSnapshot();
-      for (const [botId, state] of Object.entries(tabs.getSnapshot())) {
-        const tabId = state.active;
+      for (const [botId, state2] of Object.entries(tabs.getSnapshot())) {
+        const tabId = state2.active;
         const entry = tabId ? views.get(tabId) : void 0;
         const page = tabId ? snapshot[tabId] : void 0;
         if (entry?.ready && page?.url) open2[botId] = { url: page.url, title: page.title };
@@ -20082,8 +20268,8 @@ function apply(ctx) {
     return items.find((item) => item.sessionIds?.includes(sessionId))?.workspaceId;
   };
   let expected = null;
-  const setPlain = (plain) => surface.set((state) => state.plain === plain ? state : { ...state, plain });
-  const dropPanels = () => ui2.set((state) => state.details || state.renaming ? { ...state, details: null, view: "details", renaming: false, tab: null } : state);
+  const setPlain = (plain) => surface.set((state2) => state2.plain === plain ? state2 : { ...state2, plain });
+  const dropPanels = () => ui2.set((state2) => state2.details || state2.renaming ? { ...state2, details: null, view: "details", renaming: false, tab: null } : state2);
   const seenKey = (id) => roster.getSnapshot().byId?.[id]?.id ?? id;
   const leaveVisits = (ids) => {
     seenAt = seenStore.update((seen) => noteLeft(seen, ids.map(seenKey), Date.now()), seenAt);
@@ -20096,8 +20282,8 @@ function apply(ctx) {
   ctx.effect(() => {
     const onStorage = (event) => {
       if (event.storageArea !== localStorage) return;
-      if (event.key === null || event.key === unreadStore.key) ui2.set((state) => ({ ...state, unread: unreadStore.read(state.unread) }));
-      if (event.key === null || event.key === reactionStore.key) ui2.set((state) => ({ ...state, reactions: reactionStore.read(state.reactions) }));
+      if (event.key === null || event.key === unreadStore.key) ui2.set((state2) => ({ ...state2, unread: unreadStore.read(state2.unread) }));
+      if (event.key === null || event.key === reactionStore.key) ui2.set((state2) => ({ ...state2, reactions: reactionStore.read(state2.reactions) }));
       if (event.key === null || event.key === seenStore.key) seenAt = seenStore.read(seenAt);
     };
     window.addEventListener("storage", onStorage);
@@ -20118,9 +20304,9 @@ function apply(ctx) {
     if (key === memoryNewsKey) return;
     const opening = memoryNewsKey === void 0;
     memoryNewsKey = key;
-    memoryNews.set((state) => Object.fromEntries(Object.entries(next).map(([id, entry]) => [
+    memoryNews.set((state2) => Object.fromEntries(Object.entries(next).map(([id, entry]) => [
       id,
-      state[id]?.at === entry.at ? state[id] : { ...entry, seen: opening ? 0 : Date.now() }
+      state2[id]?.at === entry.at ? state2[id] : { ...entry, seen: opening ? 0 : Date.now() }
     ])));
   };
   const PREFS_KEY = STORAGE.prefs;
@@ -20132,7 +20318,7 @@ function apply(ctx) {
   }
   const writeUnread = (id, value) => {
     const unread = unreadStore.update((marks) => setUnread(marks, id, value), ui2.getSnapshot().unread);
-    ui2.set((state) => JSON.stringify(state.unread) === JSON.stringify(unread) ? state : { ...state, unread });
+    ui2.set((state2) => JSON.stringify(state2.unread) === JSON.stringify(unread) ? state2 : { ...state2, unread });
   };
   const refreshed = /* @__PURE__ */ new Set();
   const pull = queueRosterPull(async () => {
@@ -20260,7 +20446,7 @@ function apply(ctx) {
           stopReads = null;
         }
         void browsers.retain(snapshot.bots.map((bot) => bot.id));
-        ui2.set((state) => state.details && state.view === "browser" && (!on || !snapshot.byId[state.details]) ? { ...state, view: "details" } : state);
+        ui2.set((state2) => state2.details && state2.view === "browser" && (!on || !snapshot.byId[state2.details]) ? { ...state2, view: "details" } : state2);
       };
       sync();
       const offRoster = roster.subscribe(sync);
@@ -20425,8 +20611,8 @@ function apply(ctx) {
   ctx.effect(() => () => navHistory.dispose(), "ds-bot: the phone levels in history");
   const actions = {
     ...teamActions({ call, after, partFor, roster, ui: ui2, live, cards, heldCards, turnClock }),
-    openBoard: () => ui2.set((state) => ({ ...state, board: true, settings: null, details: null, newChat: null, palette: null, menu: null })),
-    closeBoard: () => ui2.set((state) => ({ ...state, board: false })),
+    openBoard: () => ui2.set((state2) => ({ ...state2, board: true, settings: null, details: null, newChat: null, palette: null, menu: null })),
+    closeBoard: () => ui2.set((state2) => ({ ...state2, board: false })),
     // The full-pane overlays sit above the conversation, so opening one must dismiss them
     // or the click appears to do nothing.
     isAgentSession: (id) => isAgentSessionId(id),
@@ -20440,7 +20626,7 @@ function apply(ctx) {
         navHistory.entered();
       }
       navLevel.set("chat");
-      ui2.set((state) => state.newChat || state.exchange || state.menu || state.palette ? { ...state, newChat: null, exchange: null, menu: null, palette: null } : state);
+      ui2.set((state2) => state2.newChat || state2.exchange || state2.menu || state2.palette ? { ...state2, newChat: null, exchange: null, menu: null, palette: null } : state2);
       setPlain(false);
       const target = partFor(id);
       show(target);
@@ -20456,7 +20642,7 @@ function apply(ctx) {
         navHistory.entered();
       }
       navLevel.set("chat");
-      ui2.set((state) => ({ ...state, newChat: null, exchange: null, menu: null, palette: null, details: null, view: "details", renaming: false, tab: null }));
+      ui2.set((state2) => ({ ...state2, newChat: null, exchange: null, menu: null, palette: null, details: null, view: "details", renaming: false, tab: null }));
       setPlain(true);
       show(sessionId);
     },
@@ -20496,8 +20682,8 @@ function apply(ctx) {
       else if (roster.getSnapshot().mainBotId) actions.openSession(roster.getSnapshot().mainBotId);
     },
     renameAgentSession: (agentId, sessionId, title) => after(call("agent-rename", { agentId, sessionId, title })),
-    beginAgentRename: (sessionId) => ui2.set((state) => ({ ...state, renameAgent: sessionId })),
-    endAgentRename: () => ui2.set((state) => state.renameAgent ? { ...state, renameAgent: null } : state),
+    beginAgentRename: (sessionId) => ui2.set((state2) => ({ ...state2, renameAgent: sessionId })),
+    endAgentRename: () => ui2.set((state2) => state2.renameAgent ? { ...state2, renameAgent: null } : state2),
     // Removing the Agent archives every Session it owns; one of them may fill the
     // main view, and it must not stay there wearing the Bot surface afterwards.
     removeAgent: async (agentId) => {
@@ -20547,7 +20733,7 @@ function apply(ctx) {
     // the way it arrived — it goes out to the right while the page it came from comes back.
     goBack: () => {
       if (navLevel.getSnapshot() !== "chat") return;
-      ui2.set((state) => state.details ? { ...state, details: null, view: "details" } : state);
+      ui2.set((state2) => state2.details ? { ...state2, details: null, view: "details" } : state2);
       if (!mobileNav.getSnapshot()) {
         navLevel.set("list");
         return;
@@ -20577,10 +20763,10 @@ function apply(ctx) {
       if (mode !== "bot" && mode !== "agent") return;
       if (surface.getSnapshot().mode === mode) return;
       if (mode === "agent") {
-        ui2.set((state) => ({ ...state, details: null, view: "details", settings: null, palette: null, newChat: null, menu: null, voice: null, exchange: null, memory: null, toast: null }));
+        ui2.set((state2) => ({ ...state2, details: null, view: "details", settings: null, palette: null, newChat: null, menu: null, voice: null, exchange: null, memory: null, toast: null }));
       }
       writeMode(mode);
-      surface.set((state) => ({ ...state, mode }));
+      surface.set((state2) => ({ ...state2, mode }));
       if (mode !== "bot") return;
       const home = () => {
         const snapshot = roster.getSnapshot();
@@ -20604,20 +20790,20 @@ function apply(ctx) {
     beginVisit: (id) => {
       const made = roster.getSnapshot().byId[id] ?? roster.getSnapshot().roomsById[id];
       const seen = seenAt[seenKey(id)] ?? (made?.createdBy && Number.isFinite(made.createdAt) ? made.createdAt : null);
-      ui2.set((state) => ({ ...state, visits: { ...state.visits, [id]: { seen, entered: Date.now() } } }));
+      ui2.set((state2) => ({ ...state2, visits: { ...state2.visits, [id]: { seen, entered: Date.now() } } }));
     },
     endVisit: (id) => {
       leaveVisits([id]);
-      ui2.set((state) => {
-        if (!(id in (state.visits ?? {}))) return state;
-        const visits = { ...state.visits };
+      ui2.set((state2) => {
+        if (!(id in (state2.visits ?? {}))) return state2;
+        const visits = { ...state2.visits };
         delete visits[id];
-        return { ...state, visits };
+        return { ...state2, visits };
       });
     },
     toggleReaction: (key, index, emoji) => {
       const reactions = reactionStore.update((saved) => toggleReaction(saved, key, index, emoji), ui2.getSnapshot().reactions);
-      ui2.set((state) => ({ ...state, reactions }));
+      ui2.set((state2) => ({ ...state2, reactions }));
     },
     clearUnread: (id) => writeUnread(id, false),
     // DSH's right sidebar (files, terminals), which a plugin may load after this one.
@@ -20640,7 +20826,7 @@ function apply(ctx) {
         if (!bot) return;
         browsers.ensureTabs(bot.id);
         if (browsers.tabs.getSnapshot()[bot.id]?.active == null) browsers.openTab(bot.id);
-        ui2.set((state) => ({ ...state, details: id, view: "browser", renaming: false, tab: null }));
+        ui2.set((state2) => ({ ...state2, details: id, view: "browser", renaming: false, tab: null }));
       },
       // '+' on the strip or the drawer's new-tab card: a blank tab in the browser view.
       browserNewTab: (id) => {
@@ -20648,7 +20834,7 @@ function apply(ctx) {
         if (!bot) return null;
         browsers.ensureTabs(bot.id);
         const tabId = browsers.openTab(bot.id);
-        ui2.set((state) => ({ ...state, details: id, view: "browser", renaming: false, tab: null }));
+        ui2.set((state2) => ({ ...state2, details: id, view: "browser", renaming: false, tab: null }));
         return tabId;
       },
       // A drawer card: its tab active, the panel on the browser view.
@@ -20656,7 +20842,7 @@ function apply(ctx) {
         const bot = roster.getSnapshot().byId[id];
         if (!bot) return;
         browsers.activate(bot.id, tabId);
-        ui2.set((state) => ({ ...state, details: id, view: "browser" }));
+        ui2.set((state2) => ({ ...state2, details: id, view: "browser" }));
       },
       browserEnsure: (botId) => browsers.ensureTabs(botId),
       browserCloseTab: (botId, tabId) => browsers.closeTab(botId, tabId),
@@ -20669,13 +20855,13 @@ function apply(ctx) {
   }
   actions.signInEntry = () => ctx.slots.entries?.("settings.models.sign-in")?.[0] ?? null;
   actions.canSignIn = () => Boolean(actions.signInEntry());
-  actions.signIn = () => ui2.set((state) => ({ ...state, signIn: (state.signIn ?? 0) + 1 }));
-  actions.closeSignIn = () => ui2.set((state) => ({ ...state, signIn: null }));
+  actions.signIn = () => ui2.set((state2) => ({ ...state2, signIn: (state2.signIn ?? 0) + 1 }));
+  actions.closeSignIn = () => ui2.set((state2) => ({ ...state2, signIn: null }));
   actions.accountT = () => ctx.get("locale").bind("settings.account");
   actions.speech = () => ctx.get("remote.speech") ?? void 0;
   const showHint = (text, anchor) => {
     const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : null;
-    ui2.set((state) => ({ ...state, hint: {
+    ui2.set((state2) => ({ ...state2, hint: {
       text,
       token: Date.now(),
       // The rect is captured now: the hint stays where the entry was, even when the menu it
@@ -20683,7 +20869,7 @@ function apply(ctx) {
       rect: rect === null ? { left: window.innerWidth / 2, top: 0, bottom: 0, width: 0 } : { left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width }
     } }));
   };
-  actions.dismissHint = (token) => ui2.set((state) => state.hint && (token === void 0 || state.hint.token === token) ? { ...state, hint: null } : state);
+  actions.dismissHint = (token) => ui2.set((state2) => state2.hint && (token === void 0 || state2.hint.token === token) ? { ...state2, hint: null } : state2);
   actions.openHarnessSettings = (anchor) => {
     if (mobileNav.getSnapshot()) {
       showHint(t("Open this setting on a desktop."), anchor);
@@ -20697,7 +20883,7 @@ function apply(ctx) {
     const navigation = ctx.get("pluginNavigation");
     return navigation ? () => navigation.openBundle(VOICE_BUNDLE) : null;
   };
-  actions.seatAccount = (on) => ui2.set((state) => state.accountSeated === on ? state : { ...state, accountSeated: on });
+  actions.seatAccount = (on) => ui2.set((state2) => state2.accountSeated === on ? state2 : { ...state2, accountSeated: on });
   actions.installUpdate = async () => {
     const value = await call("update-install");
     update.set((previous) => ({ ...previous, ...value }));
@@ -20878,16 +21064,16 @@ function apply(ctx) {
     }
   };
   const quoteOf = (token) => Object.values(ui2.getSnapshot().quotes ?? {}).find((entry) => entry.token === token);
-  const setQuote = (token, patch) => ui2.set((state) => {
-    const entry = Object.values(state.quotes ?? {}).find((row) => row.token === token);
-    if (entry === void 0) return state;
+  const setQuote = (token, patch) => ui2.set((state2) => {
+    const entry = Object.values(state2.quotes ?? {}).find((row) => row.token === token);
+    if (entry === void 0) return state2;
     const next = patch(entry);
     if (next === null) {
-      const quotes = { ...state.quotes };
+      const quotes = { ...state2.quotes };
       delete quotes[entry.sessionId];
-      return { ...state, quotes };
+      return { ...state2, quotes };
     }
-    return { ...state, quotes: { ...state.quotes, [entry.sessionId]: next } };
+    return { ...state2, quotes: { ...state2.quotes, [entry.sessionId]: next } };
   });
   actions.quote = (sessionId, text, bot, target) => {
     const facade = quoteFacade(sessionId);
@@ -20897,7 +21083,7 @@ function apply(ctx) {
     }
     const { ref, clipboardText, label, excerpt } = quoteRef(bot, text);
     const quote = { sessionId, botId: bot?.id ?? null, botName: bot?.name ?? null, excerpt, ref, clipboardText, label, target: target instanceof Element ? target : null, token: Date.now(), inserted: false };
-    ui2.set((state) => ({ ...state, quotes: { ...state.quotes, [sessionId]: quote } }));
+    ui2.set((state2) => ({ ...state2, quotes: { ...state2.quotes, [sessionId]: quote } }));
   };
   actions.quoteInsert = (token, span, quiet = false) => {
     const quote = quoteOf(token);
@@ -20937,8 +21123,8 @@ function apply(ctx) {
   actions.quoteDraft = (sessionId) => {
     const facade = quoteFacade(sessionId);
     if (facade === void 0) return null;
-    const state = facade.state.getSnapshot();
-    return { draft: state.draft, occurrences: state.occurrences ?? [] };
+    const state2 = facade.state.getSnapshot();
+    return { draft: state2.draft, occurrences: state2.occurrences ?? [] };
   };
   actions.quoteTakeText = (sessionId, clipboardText) => {
     const facade = quoteFacade(sessionId);

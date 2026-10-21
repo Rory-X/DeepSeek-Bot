@@ -80,12 +80,16 @@ class InboundHub {
     this.saveTimers = new Map()
     this.waits = new Map()
     this.toolState = new Map()
-    this.lastMount = new Map()
+    // A mount that never finishes starting is the only thing the watchdog watches: a
+    // listener that attached fine must never be detached by age, or a healthy channel would
+    // lose its address a few seconds after it connected.
+    this.pendingMounts = new Map()
     this.watchdog = setInterval(() => {
       const now = Date.now()
-      for (const id of this.routes.keys()) {
-        const seen = this.lastMount.get(id) ?? 0
-        if (now - seen > 5_000) void this.detach(id)
+      for (const [id, startedAt] of this.pendingMounts) {
+        if (now - startedAt <= 5_000) continue
+        this.pendingMounts.delete(id)
+        if (this.routes.has(id)) void this.detach(id)
       }
     }, 1_000)
     this.watchdog.unref?.()
@@ -184,15 +188,19 @@ class InboundHub {
       error: undefined,
     }
     this.routes.set(id, route)
-    this.lastMount.set(id, Date.now())
+    this.pendingMounts.set(id, Date.now())
     await this.ensureToken(route, secretName)
     try {
       await this.ensureStarted()
     } catch (error) {
       // The mount contract lets a module fail here: the host puts the message on the row.
       this.routes.delete(id)
+      this.pendingMounts.delete(id)
       throw error
     }
+    // The listener is up: this mount is no longer pending, and the route stays until its
+    // channel is unmounted.
+    this.pendingMounts.delete(id)
     return route
   }
 
@@ -201,7 +209,7 @@ class InboundHub {
     const route = this.routes.get(id)
     if (route === undefined) return
     this.routes.delete(id)
-    this.lastMount.delete(id)
+    this.pendingMounts.delete(id)
     this.flush(id)
     if (this.routes.size > 0) return
     // The last channel leaves: close soon, not instantly, so a new channel mounted in the
