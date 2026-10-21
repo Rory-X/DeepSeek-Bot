@@ -7,12 +7,18 @@ import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
 import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
 
-// Two chat bubbles of our own drawing: the back one outlined with its tail, the front one
-// solid with two eyes punched out. No brand artwork is copied into the bundle.
-export const WeChatMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-  h('path', { d: 'M6.9 3.2c-2.5 0-4.5 1.7-4.5 3.8 0 1.1.6 2.1 1.5 2.8l-.5 1.7 1.9-.8c.5.1 1 .2 1.6.2 2.5 0 4.5-1.7 4.5-3.9S9.4 3.2 6.9 3.2Z' }),
-  h('path', { fill: 'currentColor', fillRule: 'evenodd', stroke: 'none', d: 'M13.2 8.6c-2.6 0-4.8 1.8-4.8 4.1s2.2 4.1 4.8 4.1c.5 0 1-.1 1.5-.2l1.9.8-.5-1.6c.8-.7 1.3-1.6 1.3-2.6 0-2.3-2.2-4.1-4.8-4.1Zm-1.8 3.1a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4Zm3.6 0a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4Z' }),
-  h('path', { d: 'M16.4 16.1l1.1 2.2-2.5-.7z', fill: 'currentColor', stroke: 'none' }))
+// Two chat bubbles of our own drawing, one weight throughout: a larger one at the upper
+// left and a smaller one at the lower right, each with two eyes and a short tail. No brand
+// artwork is copied into the bundle.
+export const WeChatMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+  h('ellipse', { cx: 7.2, cy: 6.9, rx: 4.9, ry: 4 }),
+  h('path', { d: 'M5.36 10.61 L3.31 11.99 L3.92 9.87' }),
+  h('circle', { cx: 5.6, cy: 6.4, r: 0.55, fill: 'currentColor', stroke: 'none' }),
+  h('circle', { cx: 8.3, cy: 6.4, r: 0.55, fill: 'currentColor', stroke: 'none' }),
+  h('ellipse', { cx: 13, cy: 13, rx: 4.2, ry: 3.5 }),
+  h('path', { d: 'M15.81 15.6 L16.23 17.3 L14.57 16.25' }),
+  h('circle', { cx: 11.7, cy: 12.5, r: 0.5, fill: 'currentColor', stroke: 'none' }),
+  h('circle', { cx: 14, cy: 12.5, r: 0.5, fill: 'currentColor', stroke: 'none' }))
 
 const aboutOf = (row) => {
   const about = row?.card?.about
