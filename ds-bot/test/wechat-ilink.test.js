@@ -76,6 +76,15 @@ test('the bot API carries the cursor in the body and sends the documented messag
     ['bot-1', 'user-1', 'c-1', 2, 2, 'ctx-1'],
   )
   assert.deepEqual(message.item_list, [{ type: 1, text_item: { text: 'hello' } }])
+  assert.equal(typeof message.client_id, 'string')
+  assert.ok(message.client_id.length > 0)
+})
+
+test('a -14 business answer rejects even with HTTP 200', async (t) => {
+  const mock = await serve(() => ({ status: 200, json: { ret: 0, errcode: -14 } }))
+  t.after(() => mock.close())
+  const client = createIlinkClient({ base: mock.base })
+  await assert.rejects(client.getUpdates({ token: 'tok' }), /paused this login/)
 })
 
 test('a -14 answer pauses the client for the configured time', async (t) => {

@@ -127,7 +127,7 @@ const inboundUrl = async (ctx, id = 'wechat') => {
   const inbound = await until(async () => (await rowOf(ctx, id))?.inbound, `the inbound address of ${id}`)
   return inbound.url
 }
-const answerCard = (ctx, questionId, selected) => call(ctx, 'answer-question', { sessionId: 'm1', questionId, answer: { selected } })
+
 
 // Connect a webhook channel bound to b1; the callback receiver is the fake.
 async function connectChannel(ctx, receiver, { id = 'wechat', settings = {} } = {}) {

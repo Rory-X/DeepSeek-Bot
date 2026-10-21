@@ -267,7 +267,7 @@ function notifyToolClawbot({ channel, token, account, client, rt }) {
       additionalProperties: false,
     },
     output: textOutput,
-    async execute(args, exec) {
+    async execute(args) {
       const text = trim(args?.text)
       if (text === '') throw new Error('Write the message to send first.')
       if (text.length > 4_096) throw new Error('WeChat messages are limited to 4096 characters.')
@@ -299,7 +299,7 @@ function notifyTool({ channel, settings, secretOf, rt }) {
       additionalProperties: false,
     },
     output: textOutput,
-    async execute(args, exec) {
+    async execute(args) {
       const text = trim(args?.text)
       if (text === '') throw new Error('Write the notice to send first.')
       const limit = textLimit(settings.webhookFormat)
@@ -487,7 +487,7 @@ export default {
       : (typeof secretValue === 'function' ? secretValue(SECRET_NAME) : undefined)
     await postNotice({ address, format: values.webhookFormat, text: TEST_TEXT, secret })
   },
-  async mount({ rt, settings, instance, level, approve, secrets, token, secretName }) {
+  async mount({ rt, settings, instance, level, secrets, token, secretName }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
     const id = instance?.id ?? 'wechat'
     const botId = trim(values.botId)
@@ -504,6 +504,7 @@ export default {
       // The inbound half is a 35s long poll; the cursor lives in the channel state so a
       // restart continues where it stopped. There is no webhook URL or HMAC secret here.
       const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
+      const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
       const ilink = channel.ilink ?? {}
       const controller = new AbortController()
       const tools = []
@@ -520,7 +521,6 @@ export default {
           }),
         }))
       }
-      const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
       if (typeof token === 'string' && token !== '') {
         const client = createIlinkClient({
           base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
