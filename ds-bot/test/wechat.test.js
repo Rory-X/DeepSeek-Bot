@@ -162,7 +162,7 @@ test('P1-03 readiness names the missing field and a deleted Bot is a mount error
   assert.match(failed.error, /no longer exists/)
 })
 
-// ---- P1-05: the notify tool and its approval ----
+// ---- P1-04: connect; P1-05: the notify tool and its approval ----
 test('P1-04 connect turns the channel ready and P1 has no inbound field', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
