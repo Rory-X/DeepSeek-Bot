@@ -256,6 +256,25 @@ test('P1-05 wechat_notify sends directly, exactly once per call', async (t) => {
   assert.equal(receiver.requests.length, 2)
 })
 
+test('P1-05b a channel stops after twenty sends a minute and audits each send without the body', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, rt } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const audited = []
+  rt.diagnostics.record = entry => audited.push(entry)
+  await connectChannel(ctx, receiver)
+  for (let index = 1; index <= 20; index += 1) {
+    assert.equal(await notifyToolOf(ctx).execute({ text: `note ${index}` }, { agent: { id: 'm1' } }), 'Sent.')
+  }
+  await assert.rejects(notifyToolOf(ctx).execute({ text: 'the 21st' }, { agent: { id: 'm1' } }), /sent 20 messages in the last minute/)
+  assert.equal(receiver.requests.length, 20)
+  assert.equal(audited.filter(entry => entry.source === 'wechat-notify').length, 20)
+  const text = JSON.stringify(audited)
+  assert.equal(text.includes('note 1'), false)
+  assert.equal(text.includes('the 21st'), false)
+})
+
 // ---- P1-06: outbound errors and text limits ----
 test('P1-06 outbound errors map to the fixed sentences and over-long text fails first', async (t) => {
   const receiver = await startWebhookReceiver({ reply: () => ({ status: 401, body: '{}' }) })

@@ -20,16 +20,18 @@ const FORMATS = ['generic', 'wecom']
 
 const trim = value => (typeof value === 'string' ? value.trim() : '')
 const SENT_PER_MINUTE = 20
-const sentAt = new Map()
+const sentAt = new WeakMap()
 const takeSend = (rt, channel) => {
+  let byChannel = sentAt.get(rt)
+  if (byChannel === undefined) { byChannel = new Map(); sentAt.set(rt, byChannel) }
   const now = Date.now()
-  const list = (sentAt.get(channel) ?? []).filter(at => now - at < 60_000)
+  const list = (byChannel.get(channel) ?? []).filter(at => now - at < 60_000)
   if (list.length >= SENT_PER_MINUTE) {
-    sentAt.set(channel, list)
+    byChannel.set(channel, list)
     throw new Error(`This WeChat channel has sent ${SENT_PER_MINUTE} messages in the last minute; wait a moment and try again.`)
   }
   list.push(now)
-  sentAt.set(channel, list)
+  byChannel.set(channel, list)
 }
 const auditSend = (rt, channel, length, result) => {
   rt.diagnostics?.record?.({ source: 'wechat-notify', text: `${channel} sent ${length} chars, result ${result}` })
@@ -259,7 +261,7 @@ function notifyToolClawbot({ channel, token, account, client, rt }) {
   const toolName = channel === 'wechat' ? 'wechat_notify' : `${channel.replaceAll('-', '_')}_notify`
   return {
     name: toolName,
-    description: 'Send a message to this WeChat channel\'s owner. Every call asks the user first.',
+    description: 'Send a message the user asked for to this WeChat channel\'s owner. Do not use it to send unprompted chatter.',
     parameters: {
       type: 'object',
       properties: { text: { type: 'string', description: 'The message to send.' } },
@@ -282,6 +284,7 @@ function notifyToolClawbot({ channel, token, account, client, rt }) {
         if (status === 429) throw new Error('WeChat is rate-limited; try again in a moment.')
         throw new Error('Could not reach WeChat.')
       }
+      auditSend(rt, channel, text.length, 'ok')
       return 'Sent.'
     },
   }
@@ -464,7 +467,9 @@ export default {
     const webhook = trim(values.transport) !== 'clawbot'
     return {
       transport: webhook ? 'webhook' : 'clawbot',
-      canTest: webhook && webhookUrlOf(values, secrets) !== '',
+      canTest: webhook
+        ? webhookUrlOf(values, secrets) !== ''
+        : loginViewOf(rt, id, secrets).state === 'logged-in' || (typeof secrets?.[ILINK_TOKEN] === 'string' && secrets[ILINK_TOKEN] !== ''),
       levels: [
         { id: 'write', title: 'Full access', description: 'Send notices for you; every notice asks for your approval first.' },
       ],
@@ -478,8 +483,20 @@ export default {
   },
   // One test notice through the same path a real notice takes. A failure stays on the card
   // without turning the channel off.
-  async test({ settings, secrets, secretValue }) {
+  async test({ id, rt, settings, secrets, secretValue }) {
     const values = { ...(settings !== null && typeof settings === 'object' ? settings : {}), webhookUrl: webhookUrlOf(settings, secrets) }
+    if (trim(values.transport) === 'clawbot') {
+      const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
+      const ilink = rt.state?.channels?.[id]?.ilink ?? {}
+      if (typeof token !== 'string' || token === '' || typeof ilink.ilinkUserId !== 'string') {
+        throw new Error('Scan the QR code to connect this ClawBot channel first.')
+      }
+      const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
+      const client = createIlinkClient({ base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase) })
+      auditSend(rt, id, TEST_TEXT.length, 'ok')
+      await client.sendMessage({ token, toUserId: ilink.ilinkUserId, text: TEST_TEXT })
+      return
+    }
     const address = webhookOf(values)
     if (address === undefined) throw new Error('Add the push webhook URL for this channel.')
     const secret = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
