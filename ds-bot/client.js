@@ -15646,6 +15646,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     }
   }, busy ? t("Working…") : item.label));
   const loginDetailText = login === null ? null : loginDetail(login);
+  const shownDetail = loginDetailText !== null && loginDetailText !== row.error ? loginDetailText : null;
   const loginBlock = transportOf(row) === "clawbot" ? (0, import_react38.createElement)(
     "div",
     { className: "bt-connector-setting bt-wechat-login", "data-login-state": loginState ?? "logged-out" },
@@ -15660,7 +15661,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
       null,
       qr !== null ? (0, import_react38.createElement)("img", { className: "bt-wechat-qr", src: qr, alt: t("QR code") }) : null,
       loginText(login) !== null ? (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, loginText(login)) : null,
-      loginDetailText !== null ? (0, import_react38.createElement)("div", { className: "bt-connector-hint bt-wechat-login-detail" }, loginDetailText) : null,
+      shownDetail !== null ? (0, import_react38.createElement)("div", { className: "bt-connector-hint bt-wechat-login-detail" }, shownDetail) : null,
       (0, import_react38.createElement)("div", { className: "bt-connector-hint" }, t("Incoming messages from this channel only answer you.")),
       loginButtons.length > 0 ? (0, import_react38.createElement)("div", { className: "bt-connector-form-row" }, loginButtons) : null
     )

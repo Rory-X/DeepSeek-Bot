@@ -289,6 +289,9 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
     },
   }, busy ? t('Working…') : item.label))
   const loginDetailText = login === null ? null : loginDetail(login)
+  // The channel header already shows the host's error for login-expired; the block adds it
+  // only when it says something else.
+  const shownDetail = loginDetailText !== null && loginDetailText !== row.error ? loginDetailText : null
   const loginBlock = transportOf(row) === 'clawbot'
     ? h('div', { className: 'bt-connector-setting bt-wechat-login', 'data-login-state': loginState ?? 'logged-out' },
       h('div', { className: 'bt-wechat-login-head' },
@@ -299,7 +302,7 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
         : h('div', null,
           qr !== null ? h('img', { className: 'bt-wechat-qr', src: qr, alt: t('QR code') }) : null,
           loginText(login) !== null ? h('div', { className: 'bt-connector-hint' }, loginText(login)) : null,
-          loginDetailText !== null ? h('div', { className: 'bt-connector-hint bt-wechat-login-detail' }, loginDetailText) : null,
+          shownDetail !== null ? h('div', { className: 'bt-connector-hint bt-wechat-login-detail' }, shownDetail) : null,
           h('div', { className: 'bt-connector-hint' }, t('Incoming messages from this channel only answer you.')),
           loginButtons.length > 0 ? h('div', { className: 'bt-connector-form-row' }, loginButtons) : null))
     : null
