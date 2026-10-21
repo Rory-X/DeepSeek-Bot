@@ -15668,7 +15668,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
       loginButtons.length > 0 ? (0, import_react38.createElement)("div", { className: "bt-connector-form-row" }, loginButtons) : null
     )
   ) : null;
-  const canTestNow = transportOf(row) === "webhook" ? row.state === "ready" && row.canTest === true : loginState === "logged-in" && row.canTest === true;
+  const canTestNow = transportOf(row) === "webhook" ? row.state === "ready" && row.canTest === true : row.canTest === true;
   const headActions = [];
   if (canTestNow) {
     headActions.push((0, import_react38.createElement)("button", { key: "test", type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {

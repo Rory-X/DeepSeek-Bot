@@ -134,6 +134,11 @@ test('a signed-in ClawBot channel offers one test message, and no earlier', () =
 
   const quiet = render({ state: 'logged-in', account: 'ilxk…9f' }, { canTest: false })
   assert.equal(buttons(quiet).includes('Test message'), false)
+
+  // A stored login outlives the screen: the host says it can send even though this view has
+  // no live sign-in state yet, and the button follows the host.
+  const restored = render({ state: 'logged-out', consentRequired: false }, { canTest: true })
+  assert.ok(buttons(restored).includes('Test message'), buttons(restored).join(','))
 })
 
 test('a failed test shows the host words on the card', () => {
