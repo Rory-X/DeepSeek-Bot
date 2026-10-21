@@ -4,6 +4,7 @@
 - 对应设计：`docs/plans/2026-10-21-wechat-connector.md`
 - 用例骨架：`ds-bot/test/wechat.test.js`（`test.todo` 占位）+ 测试替身 `ds-bot/test/wechat-fakes.js`（loopback webhook 接收器、双向签名、`until`）
 - 范围：P1 纯出站；P2 通用 JSON 入站 + HMAC。企业微信应用 callback 不做（设计 §3.3）；clawbot 只有可行性 spike，不在本清单。
+- 框架侧（F2a）覆盖：`ds-bot/test/channels.test.js` 的 13 条断言覆盖 P2-20/22a/22b/24 的**宿主面**（Session 归属/可见性/记忆/parts/工具白名单/untrusted 头）；模块侧 P2 用例仍由 `wechat.test.js` 的 todo 承接。
 
 ## P1 用例（纯出站 + 卡片 + 设置）
 
