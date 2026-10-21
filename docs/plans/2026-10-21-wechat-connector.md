@@ -371,6 +371,13 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 | `scaned_but_redirect` | 二维码保留 | 用响应 `redirect_host` 换个 baseurl 继续 |
 | `binded_redirect` | 视为已绑定/已登录或提示 | 停止轮询 |
 
+**发布约束（Chief 四条，ClawBot v1 必须满足）**
+
+1. **beta 标注**：`card.about` 与 `releases.md` 都写「扫码登录为 beta、未做真机验证，失败不影响 Webhook 通道」；不得让用户当成稳定功能。
+2. **扫码前风险确认**：`logged-out` 且未确认时，`view.login` 给 `consentRequired: true`，卡片先显示说明（个人微信号有风控风险 / 协议为官方公开文档但无第三方支持承诺 / 尚未实测）；用户确认后才允许出码。契约：`connector-command {action:'login-start', args:{consent:true}}`（`login-start` 声明 `args:['consent']`）；未带 `consent` 拒绝为 `bot/invalid`，确认结果持久化在 `state.channels[instance].ilink.consent`，之后 `consentRequired:false`。**不能一进来就给码。**
+3. **非 owner 入站复用 P2 丢弃路径**：不建会话、不写 state、不落正文日志，沿用 P2 的 hash/长度规则；clawbot 不另写一套。
+4. **失败降级干净**：登录失效/协议变更 → 该通道 `error`；Webhook 通道完全不受影响；不自动重登、不无限重试（退避封顶后停止，等用户手动 `login-refresh`）。
+
 **`view.login` 形状**：`{ state:'logged-out'|'qr'|'logged-in'|'expired', qr?, expiresAt?, account? }`；`qr` 支持 `http(s)://` 图片 URL 与 `data:` URL 两种；内容是普通串时 v1 报错/提示（不引入 QR 库）。命令：`login-start`/`login-refresh`/`login-cancel`（`connector-command`，仅 clawbot transport）。
 
 **协议头区分**：取二维码 POST = JSON + `AuthorizationType` + `X-WECHAT-UIN`（无 `Authorization`/`base_info`）；状态轮询 GET = `iLink-App-Id`/`iLink-App-ClientVersion`（+可选 `SKRouteTag`），无授权头；Bot API（getupdates/sendmessage）= Bearer + `base_info{channel_version,bot_agent}`，`iLink-App-ClientVersion` 用 `0x00MMNNPP`。
