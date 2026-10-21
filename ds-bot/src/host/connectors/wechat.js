@@ -176,7 +176,7 @@ export default {
   },
   card: {
     glyph: 'wechat',
-    about: 'A WeChat channel bound to one Bot: it can post notices, and in P2 it receives messages. This release supports Webhook; ClawBot comes in the next batch.',
+    about: 'A WeChat channel bound to one Bot: it can post notices, and incoming messages arrive in a later update. This release supports Webhook; ClawBot comes in the next batch.',
     docsUrl: 'https://github.com/Tencent/openclaw-weixin',
   },
   // What the card draws besides the settings: the level descriptions, whether Test can run,
