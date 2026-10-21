@@ -1079,6 +1079,54 @@ test('P2-24b a tools switch change narrows in place, widens by a fresh Session, 
   assert.equal(archived.length, 1, 'narrowing in place archives nothing')
 })
 
+// Main path: agent/created alone restricts a conversation that survived a restart.
+test('P2-24c a restart opens the old conversation already restricted by agent/created', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const turn = (sessionId, agent, number, emitSession) => {
+    const message = agent.calls.at(-1)
+    emitSession(sessionId, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+    emitSession(sessionId, 'turn/start', { turn: number })
+    emitSession(sessionId, 'assistant/message', { message: { content: [{ type: 'text', text: 'ok' }] } })
+    emitSession(sessionId, 'turn/end', { turn: number, reason: { kind: 'completed' } })
+  }
+  const first = setup({ session: true })
+  t.after(() => rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }))
+  await connectChannel(first.ctx, receiver)
+  const firstUrl = await inboundUrl(first.ctx)
+  await postInbound({ url: firstUrl, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'one' })
+  const firstAgent = await until(() => [...first.sessionAgents.values()].find(entry => entry.calls.length === 1), 'the first Session')
+  turn(firstAgent.session.id, firstAgent, 1, first.emitSession)
+  await first.ctx.dispose()
+
+  // New host, same home; the per-turn safety net is off so only agent/created can restrict.
+  const second = setup({ session: true, home: first.home, config: { wechat: { listenPort: 0, turnToolsRestrict: false } } })
+  t.after(async () => { await second.ctx.dispose() })
+  await second.rt.load()
+  await call(second.ctx, 'connector-retry', { id: 'wechat' })
+  await until(async () => ((await rowOf(second.ctx))?.state === 'ready' ? true : undefined), 'the restarted channel')
+  const url = await inboundUrl(second.ctx)
+  await postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', text: 'two' })
+  const agent = await until(() => [...second.sessionAgents.values()].find(entry => entry.calls.length === 1), 'the restarted conversation')
+  assert.deepEqual(agent.restricted.at(-1), { allow: [] })
+})
+
+// Safety net: with the agent/created listener removed, runOne still restricts the turn.
+test('P2-24d the per-turn safety net restricts even without the agent/created hook', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home, sessionAgents } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  // Only the hub's own listener matters here: drop the hook before the first message.
+  ctx.listeners.set('agent/created', [])
+  const url = await inboundUrl(ctx)
+  await postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'one' })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the safety-net turn')
+  assert.deepEqual(agent.restricted.at(-1), { allow: [] })
+  // Completing the turn is not needed for this assertion.
+})
+
 test('P2-24 a channel Session gets no tools by default and only web_search when read tools are on', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())

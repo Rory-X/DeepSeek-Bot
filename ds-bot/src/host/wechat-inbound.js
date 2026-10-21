@@ -83,10 +83,32 @@ class InboundHub {
     this.idleTimer = undefined
     this.stopped = false
     const ctx = rt.ctx
+    // DSH resolves an agent per turn, including for a conversation that survived a restart or
+    // a remount. Restrict it here, once for the whole plugin, from the owner map F2a keeps:
+    // the allow-list follows the channel's latest settings without any per-turn bookkeeping.
+    if (typeof ctx?.on === 'function') {
+      this.offAgentCreated = ctx.on('agent/created', ({ agent }) => {
+        void Promise.resolve().then(() => {
+          const sessionId = agent?.session?.id
+          const owner = sessionId === undefined ? undefined : this.rt.channelOwners?.get(sessionId)
+          if (owner === undefined) return
+          const route = this.routes.get(owner.instance)
+          if (route === undefined) return
+          const wanted = route.settings?.allowReadTools === true ? ['web_search'] : []
+          const served = typeof ctx.tools?.schemas === 'function' ? (ctx.tools.schemas(agent) ?? []).map(schema => schema.name) : []
+          const allow = wanted.filter(name => served.includes(name))
+          const restrict = agent?.ctx?.tools?.restrict
+          if (typeof restrict === 'function') restrict.call(agent.ctx.tools, { allow })
+        }).catch(error => this.rt.warn?.('ds-bot: channel tools restrict on agent/created failed: %s', error?.message ?? error))
+      })
+    }
     // While the channels are mounted a listener may idle for a moment between a remove and
     // an add; when the plugin itself goes away the port must close with it.
     if (typeof ctx?.effect === 'function') {
       ctx.effect(() => () => { void this.dispose() }, 'ds-bot: WeChat inbound listener')
+    }
+    if (typeof ctx?.effect === 'function') {
+      ctx.effect(() => () => { this.offAgentCreated?.() }, 'ds-bot: WeChat channel tools restrict')
     }
     if (typeof ctx?.on === 'function') {
       ctx.on('approval/request', (request, next) => {
@@ -358,6 +380,8 @@ class InboundHub {
   // Only web_search is ever offered; the restriction is applied again for every delivery
   // because the agent this turn runs may be a fresh one.
   async applyTurnTools(route, sessionId) {
+    // A test can switch this safety net off to prove the agent/created path alone restricts.
+    if (this.config().turnToolsRestrict === false) return
     const wanted = route.settings?.allowReadTools === true ? ['web_search'] : []
     route.lastAllow = wanted
     if (typeof this.rt.resolveAgent !== 'function') return
@@ -399,7 +423,11 @@ class InboundHub {
       if (wanted === false && await this.narrowTools(route)) {
         this.toolState.set(route.id, false)
       } else {
-        if (typeof this.rt.rebindChannel === 'function') await this.rt.rebindChannel(route.id, { reason: 'tools-changed' }).catch(() => {})
+        if (typeof this.rt.rebindChannel === 'function') {
+          const priorSession = Object.values(this.rt.state?.channels?.[route.id]?.conversations ?? {}).map(entry => entry?.sessionId).find(value => typeof value === 'string')
+          const failure = await this.rt.rebindChannel(route.id, { reason: 'tools-changed' }).then(() => undefined).catch(error => error)
+          if (failure !== undefined) this.rt.warn?.('ds-bot: channel %s could not rebind after a tools change (session %s): %s', route.id, priorSession ?? 'unknown', failure?.message ?? failure)
+        }
         this.toolState.set(route.id, wanted)
       }
     } else if (applied === undefined) {
