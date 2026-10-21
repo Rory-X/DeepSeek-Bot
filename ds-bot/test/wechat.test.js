@@ -1059,12 +1059,22 @@ test('G-1 an older plain webhook URL moves into the credential store', async (t)
   assert.equal(JSON.stringify(rt.state.connectors.wechat.settings).includes(receiver.url), false)
 })
 
-test('G-6 readiness stays quiet while the credential store is unknown and mount names a missing URL', async (t) => {
+test('G-6 readiness uses the framework naming helper, stays quiet while unknown and mount names a missing URL', async (t) => {
   const bot = () => ({ name: 'Chief' })
+  // The framework names the credential; readiness must ask for exactly those names.
+  const names = []
+  const helper = (suffix) => ({
+    secretName: base => `${base}${suffix}`,
+    secretValue: name => { names.push(name); return undefined },
+  })
+  const base = { settings: { transport: 'webhook', botId: 'b1' }, rt: { botOf: bot }, instance: { base: 'wechat', id: 'wechat' } }
+  assert.equal(wechatReadiness({ ...base, ...helper('') }), undefined)
+  assert.equal(wechatReadiness({ ...base, ...helper('_2'), instance: { base: 'wechat', id: 'wechat-2' } }), undefined)
+  assert.deepEqual(names, ['WECHAT_WEBHOOK_URL', 'WECHAT_WEBHOOK_URL_2'])
   // Unknown (not loaded) is not the same as empty: no note, the row stays clickable.
-  assert.equal(wechatReadiness({ settings: { transport: 'webhook', botId: 'b1' }, rt: { botOf: bot, secretValue: () => undefined }, instance: { base: 'wechat', id: 'wechat' } }), undefined)
+  assert.equal(wechatReadiness({ ...base, secretName: base => `${base}`, secretValue: () => undefined }), undefined)
   // Explicitly empty is missing.
-  assert.match(wechatReadiness({ settings: { transport: 'webhook', botId: 'b1' }, rt: { botOf: bot, secretValue: () => '' }, instance: { base: 'wechat', id: 'wechat' } }), /Add the push webhook URL/)
+  assert.match(wechatReadiness({ ...base, secretName: base => `${base}`, secretValue: () => '' }), /Add the push webhook URL/)
   // The mount names the same sentence when Connect really has no URL.
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })

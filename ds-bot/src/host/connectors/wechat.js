@@ -30,16 +30,6 @@ export const WECHAT_SETTINGS = [
   { name: 'webhookSecret', label: 'Webhook secret', kind: 'secret', secret: SECRET_NAME },
 ]
 
-// Mirrors the framework's F2b per-instance naming (base for the first instance, `_2` for
-// `wechat-2`). It is used only to ask the credential store whether this instance already has
-// a URL: the framework remains the only writer and the value is never read out here.
-const secretNameFor = (instanceId, base) => {
-  const id = trim(instanceId)
-  if (id === '' || id === 'wechat') return base
-  const match = /^wechat-([1-9][0-9]*)$/.exec(id)
-  return match === null ? base : `${base}_${match[1]}`
-}
-
 const webhookOf = (settings) => {
   const raw = trim(settings?.webhookUrl)
   if (raw === '') return undefined
@@ -55,18 +45,18 @@ const webhookOf = (settings) => {
 
 // A channel is ready once it knows which Bot it speaks for and where to post. P1 keeps the
 // secret optional: a receiver that cannot verify a signature still gets its notice.
-export function wechatReadiness({ settings, rt, instance } = {}) {
+export function wechatReadiness({ settings, rt, secretName, secretValue } = {}) {
   const values = settings !== null && typeof settings === 'object' ? settings : {}
   if (trim(values.transport) === 'clawbot') return 'ClawBot is not available in this release. Use the Webhook transport.'
   const botId = trim(values.botId)
   if (botId === '') return 'Choose a Bot for this channel.'
   if (typeof rt?.botOf === 'function' && rt.botOf(botId) === undefined) return 'The Bot this channel is bound to no longer exists. Choose another Bot.'
-  // Readiness runs often and may run before the credential store has loaded: a value that is
-  // merely unknown (undefined) is not an answer, so only an explicitly empty store counts as
-  // missing. A real "no URL" is refused by the mount, which runs after the store loaded.
-  const stored = typeof rt?.secretValue === 'function'
-    ? rt.secretValue(secretNameFor(instance?.id, URL_SECRET))
-    : undefined
+  // The framework's own per-instance helper names the credential (F11); a value that is
+  // merely unknown (undefined) is not an answer, so readiness stays lenient and only an
+  // explicitly empty store counts as missing. The mount, which runs after the store loaded,
+  // refuses a real "no URL" with the same sentence.
+  const name = typeof secretName === 'function' ? secretName(URL_SECRET) : undefined
+  const stored = name !== undefined && typeof secretValue === 'function' ? secretValue(name) : undefined
   if (trim(values.webhookUrl) === '' && stored === '') return 'Add the push webhook URL for this channel.'
   return undefined
 }
