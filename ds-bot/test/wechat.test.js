@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
 import { test } from 'node:test'
 import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
@@ -502,6 +503,92 @@ test('P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting 
   assert.equal((await names()).includes('WECHAT_WEBHOOK_SECRET_2'), false)
   assert.ok((await names()).includes('WECHAT_WEBHOOK_SECRET'))
   assert.equal(ctx.registeredTools.has('wechat_2_notify'), false)
+})
+
+// ---- ClawBot login against a mock iLink server ----
+const startIlinkMock = async ({ statuses = ['wait'], qrcode = 'qr-1', image = 'https://cdn.test/qr.png', token = 'ilink-token', userId = 'ilink_user_123456' } = {}) => {
+  const calls = []
+  let index = 0
+  const server = createHttpServer((request, response) => {
+    const chunks = []
+    request.on('data', chunk => chunks.push(chunk))
+    request.on('end', () => {
+      calls.push({ method: request.method, url: request.url, headers: request.headers, body: Buffer.concat(chunks).toString('utf8') })
+      const json = (value, status = 200) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(JSON.stringify(value)) }
+      if (request.url.startsWith('/ilink/bot/get_bot_qrcode')) return json({ qrcode, qrcode_img_content: image })
+      if (request.url.startsWith('/ilink/bot/get_qrcode_status')) {
+        const status = statuses[Math.min(index, statuses.length - 1)]
+        index += 1
+        if (status === 'auth-fail') return json({ error: 'unauthorized' }, 401)
+        return json({ status, ...(status === 'confirmed' || status === 'binded_redirect' ? { bot_token: token, ilink_bot_id: 'bot-1', baseurl: 'https://base.test', ...(userId === undefined ? {} : { ilink_user_id: userId }) } : {}) })
+      }
+      return json({ ret: 0 })
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  return { base: `http://127.0.0.1:${server.address().port}`, calls, close: () => new Promise(resolve => server.close(resolve)) }
+}
+
+const connectClawbot = async (ctx, mock) => {
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'clawbot', botId: 'b1' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  const connected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+}
+
+test('CB-03i binded_redirect logs in and stores the token', async (t) => {
+  const mock = await startIlinkMock({ statuses: ['binded_redirect'] })
+  t.after(() => mock.close())
+  const { ctx, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(ctx, mock)
+  const started = await call(ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
+  assert.equal(started.ok, true, JSON.stringify(started))
+  assert.equal((await rowOf(ctx)).login.state, 'qr')
+  await call(ctx, 'connector-command', { id: 'wechat', action: 'login-poll' })
+  const row = await rowOf(ctx)
+  assert.equal(row.login.state, 'logged-in')
+  const secrets = (await call(ctx, 'state', {})).value.secrets.map(secret => secret.name)
+  assert.ok(secrets.includes('WECHAT_ILINK_TOKEN'))
+})
+
+test('a confirmed answer without a token is confirm-failed, and a 401 poll is login-expired', async (t) => {
+  const failed = await startIlinkMock({ statuses: ['confirmed'], token: '', userId: undefined })
+  t.after(() => failed.close())
+  const first = setup({ config: { wechat: { listenPort: 0, ilinkBase: failed.base } } })
+  t.after(async () => { await first.ctx.dispose(); rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(first.ctx, failed)
+  await call(first.ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
+  await call(first.ctx, 'connector-command', { id: 'wechat', action: 'login-poll' })
+  assert.equal((await rowOf(first.ctx)).login.state, 'confirm-failed')
+
+  const expired = await startIlinkMock({ statuses: ['auth-fail'] })
+  t.after(() => expired.close())
+  const second = setup({ config: { wechat: { listenPort: 0, ilinkBase: expired.base } } })
+  t.after(async () => { await second.ctx.dispose(); rmSync(second.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(second.ctx, expired)
+  await call(second.ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
+  await call(second.ctx, 'connector-command', { id: 'wechat', action: 'login-poll' })
+  const row = await rowOf(second.ctx)
+  assert.equal(row.login.state, 'login-expired')
+  assert.match(row.login.error, /Webhook channels are not affected/)
+})
+
+test('CG-02 a rebuilt channel drops the in-memory login and asks for consent again', async (t) => {
+  const mock = await startIlinkMock({ statuses: ['wait'] })
+  t.after(() => mock.close())
+  const { ctx, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(ctx, mock)
+  await call(ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
+  assert.equal((await rowOf(ctx)).login.state, 'qr')
+  assert.equal((await call(ctx, 'connector-disconnect', { id: 'wechat' })).ok, true)
+  await connectClawbot(ctx, mock)
+  const row = await rowOf(ctx)
+  assert.equal(row.login.state, 'logged-out')
+  // Consent was given on this channel before; a deleted-and-rebuilt channel clears the
+  // state key, so the same field would be missing there and ask again.
+  assert.equal(row.login.consentRequired, false)
 })
 
 // ---- P2: inbound listener and its gate ----
