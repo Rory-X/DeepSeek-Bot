@@ -41,7 +41,7 @@ const rememberConsent = (rt, id) => {
   channel.ilink = { ...(channel.ilink ?? {}), consent: { at: Date.now(), version: CONSENT_VERSION } }
   void rt.save().catch(() => {})
 }
-const loginViewOf = (rt, id, secrets, secretValue) => {
+const loginViewOf = (rt, id, secrets) => {
   const login = loginOf(rt, id)
   const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
   const stored = typeof token === 'string' && token !== '' ? token : undefined

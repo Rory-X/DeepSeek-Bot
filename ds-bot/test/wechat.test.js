@@ -529,7 +529,7 @@ const startIlinkMock = async ({ statuses = ['wait'], qrcode = 'qr-1', image = 'h
   return { base: `http://127.0.0.1:${server.address().port}`, calls, close: () => new Promise(resolve => server.close(resolve)) }
 }
 
-const connectClawbot = async (ctx, mock) => {
+const connectClawbot = async (ctx) => {
   const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'clawbot', botId: 'b1' } })
   assert.equal(saved.ok, true, JSON.stringify(saved))
   const connected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_WEBHOOK_SECRET: 'test-secret' } })
@@ -541,7 +541,7 @@ test('CB-03i binded_redirect logs in and stores the token', async (t) => {
   t.after(() => mock.close())
   const { ctx, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  await connectClawbot(ctx, mock)
+  await connectClawbot(ctx)
   const started = await call(ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
   assert.equal(started.ok, true, JSON.stringify(started))
   assert.equal((await rowOf(ctx)).login.state, 'qr')
@@ -557,7 +557,7 @@ test('a confirmed answer without a token is confirm-failed, and a 401 poll is lo
   t.after(() => failed.close())
   const first = setup({ config: { wechat: { listenPort: 0, ilinkBase: failed.base } } })
   t.after(async () => { await first.ctx.dispose(); rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }) })
-  await connectClawbot(first.ctx, failed)
+  await connectClawbot(first.ctx)
   await call(first.ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
   await call(first.ctx, 'connector-command', { id: 'wechat', action: 'login-poll' })
   assert.equal((await rowOf(first.ctx)).login.state, 'confirm-failed')
@@ -566,7 +566,7 @@ test('a confirmed answer without a token is confirm-failed, and a 401 poll is lo
   t.after(() => expired.close())
   const second = setup({ config: { wechat: { listenPort: 0, ilinkBase: expired.base } } })
   t.after(async () => { await second.ctx.dispose(); rmSync(second.home, { recursive: true, force: true, maxRetries: 5 }) })
-  await connectClawbot(second.ctx, expired)
+  await connectClawbot(second.ctx)
   await call(second.ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
   await call(second.ctx, 'connector-command', { id: 'wechat', action: 'login-poll' })
   const row = await rowOf(second.ctx)
