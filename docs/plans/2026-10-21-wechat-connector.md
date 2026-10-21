@@ -320,6 +320,8 @@ DSH web 监听 `127.0.0.1:19387` 且有 401 会话鉴权，默认**外部回调�
 
 Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbot-wechatfwwt`，基线 `6255c87`），F1/F2b 先交；F2a 明天交。没有 F1 之前实例机制用不了，**不做「不合主线」的单实例骨架**。
 
+**后续（非本批，统一处理）**：通用连接器卡的 `levelNote`（当前级别的单条原因）与 `levelNotes[级别]`（每级原因）会渲染同一句——`src/client/connectors.js` 两个字段都画，Neon 等缺 projectId 时同样如此，属既有行为，不是微信卡独有；微信卡已在 `a8a6541` 按 Pixel 建议在客户端把自己那边去重。通用修复留后续统一处理，本批不改。
+
 ### 12.1 iLink 客户端附录（P3 可行性）
 
 - **规范与基线**：以 §4 的官方协议文档为准——[`docs/protocol_zh_CN.md`](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)，基线 npm `@tencent-weixin/openclaw-weixin@2.4.10`、仓库 commit `874637a0`、文档 sha256 `774ecb258ec9147d833335711cbb0d51fb40de3cb26113394b2427c191a735a0`；风险按 §4 合规门槛执行（MIT 只覆盖代码复用，官方支持范围是 OpenClaw 插件，后端接口对第三方无 SLA）。
