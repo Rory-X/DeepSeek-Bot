@@ -14551,9 +14551,10 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
 var import_react37 = require("react");
 var WeChatMark = () => (0, import_react37.createElement)(
   "svg",
-  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
-  (0, import_react37.createElement)("path", { d: "M3 6.2c0-1.6 1.6-2.9 3.7-2.9s3.7 1.3 3.7 2.9-1.6 2.9-3.7 2.9c-.4 0-.9-.1-1.3-.2L3.6 10l.5-1.6C3.4 7.9 3 7.1 3 6.2z" }),
-  (0, import_react37.createElement)("path", { d: "M9.6 12.8c0-1.6 1.6-2.9 3.7-2.9s3.7 1.3 3.7 2.9-1.6 2.9-3.7 2.9c-.4 0-.9-.1-1.3-.2L10.2 16.6l.5-1.6c-.7-.5-1.1-1.3-1.1-2.2z" })
+  { width: 20, height: 20, viewBox: "0 0 20 20", fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+  (0, import_react37.createElement)("path", { d: "M6.9 3.2c-2.5 0-4.5 1.7-4.5 3.8 0 1.1.6 2.1 1.5 2.8l-.5 1.7 1.9-.8c.5.1 1 .2 1.6.2 2.5 0 4.5-1.7 4.5-3.9S9.4 3.2 6.9 3.2Z" }),
+  (0, import_react37.createElement)("path", { fill: "currentColor", fillRule: "evenodd", stroke: "none", d: "M13.2 8.6c-2.6 0-4.8 1.8-4.8 4.1s2.2 4.1 4.8 4.1c.5 0 1-.1 1.5-.2l1.9.8-.5-1.6c.8-.7 1.3-1.6 1.3-2.6 0-2.3-2.2-4.1-4.8-4.1Zm-1.8 3.1a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4Zm3.6 0a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4Z" }),
+  (0, import_react37.createElement)("path", { d: "M16.4 16.1l1.1 2.2-2.5-.7z", fill: "currentColor", stroke: "none" })
 );
 var aboutOf = (row) => {
   const about = row?.card?.about;
