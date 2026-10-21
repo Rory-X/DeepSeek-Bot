@@ -3546,6 +3546,14 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-wechat-copy-row code{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow-wrap:anywhere}
 .bt-wechat-copy-row .bt-soft{flex:none}
 @media (max-width:640px){.bt-wechat-qr{width:180px;height:180px}}
+/* A phone cannot fit a channel name, its state and two buttons on one line: the row wraps,
+   buttons get a line of their own, and the name/state no longer end in an ellipsis. */
+@media (max-width:640px){
+[data-wechat-channel] .bt-connector-project-head{flex-wrap:wrap;row-gap:8px}
+[data-wechat-channel] .bt-connector-project-main{flex:1 1 100%}
+[data-wechat-channel] .bt-connector-project-name,[data-wechat-channel] .bt-connector-project-status{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+[data-wechat-channel] .bt-connector-project-head>.bt-connector-actions{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap}
+}
 /* A wide settings panel lays the instance fields out two by two; a phone keeps one column. */
 @media (min-width:900px){
 .bt-connector-instance-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
