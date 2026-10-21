@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
 import { test } from 'node:test'
-import { apply } from '../index.js'
+import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
 import { normalizeWechatSettings } from '../src/host/connectors/wechat.js'
 import { postInbound, startWebhookReceiver, wechatHeaders } from './wechat-fakes.js'
@@ -88,13 +88,13 @@ function setup({ config = {}, home = teamHome(), session = false } = {}) {
   ctx.connection.fetch.register = (handled) => { ctx.route = handled; return route(handled) }
   // Every test host gets an ephemeral inbound port: two hosts must never race for a fixed
   // one, and a developer machine may already serve the production port.
-  apply(ctx, { home, wechat: { listenPort: 0 }, ...config })
+  const rt = createRuntime(ctx, { home, wechat: { listenPort: 0 }, ...config })
   registered.length = 0
   disposed.length = 0
   const emitSession = (sessionId, type, data) => {
     for (const listener of ctx.listeners.get('session/event') ?? []) listener({ id: sessionId }, { type, data })
   }
-  return { ctx, home, registered, disposed, created, archived, sessionAgents, emitSession }
+  return { ctx, rt, home, registered, disposed, created, archived, sessionAgents, emitSession }
 }
 
 async function call(ctx, endpoint, payload) {
@@ -831,7 +831,35 @@ test('P2-13a a synchronous wait over its limit answers 504 timeout without wedgi
   const answered = await nextPost
   assert.deepEqual([answered.status, answered.json.reply], [200, 'ok'])
 })
-test.todo('P2-11 a deleted or failing Bot answers 502 bot-unavailable with the fallback sentence and no retry loop')
+test('P2-11 a Bot that disappears mid-channel answers 502 or the bot-unavailable callback', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const callback = await startWebhookReceiver({ secret: 'test-secret' })
+  t.after(() => callback.close())
+  const { ctx, rt, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  // A first message holds the serial queue, so the Bot can vanish before the next delivery.
+  const holding = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hold', wait: 5_000 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the holding turn')
+  const queued = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', callbackUrl: callback.url })
+  assert.equal((await queued).status, 202)
+  delete rt.state.bots.b1
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: agent.calls[0].source.exchangeId } })
+  emitSession(agent.session.id, 'turn/start', { turn: 1 })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  assert.equal((await holding).status, 200)
+  // The queued async message cannot reach the Bot any more: a signed failure callback.
+  const failed = await until(() => callback.requests[0], 'the bot-unavailable callback')
+  assert.deepEqual([failed.json.ok, failed.json.code], [false, 'bot-unavailable'])
+  // A failure callback is delivered once, not retried like a network flake.
+  await new Promise(resolve => setTimeout(resolve, 80))
+  assert.equal(callback.requests.length, 1)
+  // The synchronous path answers the same reason as a 502.
+  const sync = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', text: 'now', wait: 5_000 })
+  assert.deepEqual([sync.status, sync.json.code], [502, 'bot-unavailable'])
+})
 test('P2-13b an async turn that misses its deadline sends a signed failure callback', async (t) => {
   const receiver = await startWebhookReceiver({ secret: 'test-secret' })
   t.after(() => receiver.close())
@@ -954,7 +982,35 @@ test('P2-23 v1 keeps exactly one conversation session and pre-creates no group s
   reply(agent, 2)
   await second
 })
-test.todo('P2-11 a deleted or failing Bot answers 502 bot-unavailable with the fallback sentence and no retry loop')
+test('P2-11 a Bot that disappears mid-channel answers 502 or the bot-unavailable callback', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const callback = await startWebhookReceiver({ secret: 'test-secret' })
+  t.after(() => callback.close())
+  const { ctx, rt, home, sessionAgents, emitSession } = setup({ session: true })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  const url = await inboundUrl(ctx)
+  // A first message holds the serial queue, so the Bot can vanish before the next delivery.
+  const holding = postInbound({ url, secret: 'test-secret', msgId: 'm-1', sender: 'creator', text: 'hold', wait: 5_000 })
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the holding turn')
+  const queued = postInbound({ url, secret: 'test-secret', msgId: 'm-2', sender: 'creator', callbackUrl: callback.url })
+  assert.equal((await queued).status, 202)
+  delete rt.state.bots.b1
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: agent.calls[0].source.exchangeId } })
+  emitSession(agent.session.id, 'turn/start', { turn: 1 })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  assert.equal((await holding).status, 200)
+  // The queued async message cannot reach the Bot any more: a signed failure callback.
+  const failed = await until(() => callback.requests[0], 'the bot-unavailable callback')
+  assert.deepEqual([failed.json.ok, failed.json.code], [false, 'bot-unavailable'])
+  // A failure callback is delivered once, not retried like a network flake.
+  await new Promise(resolve => setTimeout(resolve, 80))
+  assert.equal(callback.requests.length, 1)
+  // The synchronous path answers the same reason as a 502.
+  const sync = await postInbound({ url, secret: 'test-secret', msgId: 'm-3', sender: 'creator', text: 'now', wait: 5_000 })
+  assert.deepEqual([sync.status, sync.json.code], [502, 'bot-unavailable'])
+})
 test.todo('P2-24 the tool denylist holds and untrusted travels in the headerFor message header')
 test.todo('P2-25 is covered by P2-13a + P2-13b (async 202 plus callback, wait cap, 504)')
 test.todo('P3: open the ClawBot option and its token field')
