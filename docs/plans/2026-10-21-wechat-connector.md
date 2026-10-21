@@ -356,6 +356,27 @@ Forge 已开分支 `fix/connector-instances-custom` @ `357c1fa`（worktree `dsbo
 - **门槛与风险**：灰度门槛①已满足、②合规/封号风险未解决；P3 只做 mock/CLI 原型，不碰真实账号。真实账号测试仅在书面同意后按 **§4.1** 执行（小号、≤24h、token 用后即删、失败即停、不自动重登）。
 
 
+### 12.2 ClawBot 卡片契约（P3，仅 mock，不碰真机）
+
+**登录状态机（8 状态，官方 `get_qrcode_status` 全量）**
+
+| 状态 | 卡片表现 | 下一步 |
+|---|---|---|
+| `wait` | `login.state:'qr'` + 二维码 | 1s 轮询；请求失败也按 wait 处理 |
+| `scaned` | 二维码保留，提示「已扫码，请在手机确认」 | 继续轮询 |
+| `confirmed` | `login.state:'logged-in'` + `account`（`ilink_user_id` 脱敏） | 凭据入库，停止轮询 |
+| `expired` | `login.state:'expired'` | Refresh 重出码 / Cancel 回 logged-out |
+| `need_verifycode` | 提示「请在手机输入验证码」；v1 只提示，不做输入框 | 有 `verify_code` 时追加参数再轮询 |
+| `verify_code_blocked` | 停止轮询，提示刷新 | Refresh / Cancel |
+| `scaned_but_redirect` | 二维码保留 | 用响应 `redirect_host` 换个 baseurl 继续 |
+| `binded_redirect` | 视为已绑定/已登录或提示 | 停止轮询 |
+
+**`view.login` 形状**：`{ state:'logged-out'|'qr'|'logged-in'|'expired', qr?, expiresAt?, account? }`；`qr` 支持 `http(s)://` 图片 URL 与 `data:` URL 两种；内容是普通串时 v1 报错/提示（不引入 QR 库）。命令：`login-start`/`login-refresh`/`login-cancel`（`connector-command`，仅 clawbot transport）。
+
+**协议头区分**：取二维码 POST = JSON + `AuthorizationType` + `X-WECHAT-UIN`（无 `Authorization`/`base_info`）；状态轮询 GET = `iLink-App-Id`/`iLink-App-ClientVersion`（+可选 `SKRouteTag`），无授权头；Bot API（getupdates/sendmessage）= Bearer + `base_info{channel_version,bot_agent}`，`iLink-App-ClientVersion` 用 `0x00MMNNPP`。
+
+**存储**：凭据库 `WECHAT_ILINK_TOKEN`（F2b：`wechat-2`→`_2`）；`ilink_bot_id`/`baseurl` 非机密进 settings/state（不进日志）；`ilink_user_id` 脱敏后进 view。`confirmed` 不返回 refresh token，失效只能重扫码。入站 owner-only（非 owner 403，零会话/零 state），媒体/语音/文件不进 v1。
+
 ## 13. 分阶段计划与工作量
 
 | 阶段 | 内容 | 工作量（人日） | 产出 |
