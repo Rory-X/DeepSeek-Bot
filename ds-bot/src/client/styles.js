@@ -687,6 +687,18 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-project .bt-connector-error{padding-left:0}
 .bt-connector-add-form{display:flex;flex-direction:column;gap:8px;padding:10px;border:.5px dashed var(--bt-line-2);border-radius:10px;min-width:0}
 .bt-connector-add-form .bt-connector-form-row{justify-content:flex-end}
+/* The WeChat card: a transport badge on each channel, the login step and the inbound
+   address inside the row, and the QR image only when the host sends one as a data URL. */
+.bt-wechat-error{padding:0 12px 10px;font-size:12px;line-height:16px;color:var(--bt-danger);overflow-wrap:anywhere}
+.bt-wechat-transport{margin-left:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-ink-3);padding:0 6px;border-radius:6px;background:var(--hover)}
+.bt-wechat-login{display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0;min-width:0}
+.bt-wechat-qr{width:168px;height:168px;border-radius:10px;border:.5px solid var(--bt-line-2);background:var(--bt-main);padding:6px;box-sizing:border-box}
+.bt-wechat-inbound{display:flex;flex-direction:column;gap:8px;border:.5px solid var(--bt-line);border-radius:10px;padding:10px 12px;min-width:0}
+.bt-wechat-copy-row{display:flex;align-items:center;gap:8px;min-width:0}
+.bt-wechat-copy-key{flex:none;width:42px;font-size:11px;line-height:16px;color:var(--bt-ink-3)}
+.bt-wechat-copy-row code{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow-wrap:anywhere}
+.bt-wechat-copy-row .bt-soft{flex:none}
+@media (max-width:640px){.bt-wechat-qr{width:180px;height:180px}}
 /* A wide settings panel lays the instance fields out two by two; a phone keeps one column. */
 @media (min-width:900px){
 .bt-connector-instance-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}

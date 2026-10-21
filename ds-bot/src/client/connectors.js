@@ -3,6 +3,8 @@ import { useMorph } from './motion.js'
 import { MaskedInput } from './secret-card.js'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
+import { SettingField, declaredSettingsOf, instanceOf, levelsOfConnector, settingKindOf } from './connector-shared.js'
+import { WeChatCard } from './wechat-card.js'
 
 export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true },
   h('path', { d: 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z' }))
@@ -92,21 +94,6 @@ const TOKEN_CREATE = {
 const tokenLabel = id => (TOKEN_LABELS[id] ?? (() => t('Token')))()
 const tokenCreate = id => (TOKEN_CREATE[id] ?? (() => t('Create a token')))()
 
-// A module may keep several connections — Neon keeps one per project — and then its view
-// sends one row per instance, each naming the module it belongs to. A row without
-// `instance` stays the single card every connector drew before.
-const instanceOf = (connector) => {
-  const value = connector?.instance
-  if (value === null || typeof value !== 'object') return null
-  if (typeof value.base !== 'string' || value.base === '') return null
-  if (typeof value.id !== 'string' || value.id === '') return null
-  return {
-    base: value.base,
-    id: value.id,
-    label: typeof value.label === 'string' ? value.label : '',
-    max: Number.isInteger(value.max) && value.max > 0 ? value.max : null,
-  }
-}
 // The soft cap is the host's, and only a guess when it names none.
 const INSTANCE_SOFT_MAX = 8
 const instanceMax = instance => (instance.max === null ? (instance.base === 'neon' ? INSTANCE_SOFT_MAX : null) : instance.max)
@@ -188,88 +175,6 @@ function groupStatusText(base, count) {
   return count === 1
     ? t('Connected · 1 project authorization')
     : t('Connected · {count} project authorizations', { count })
-}
-
-// A row declares its settings as `settings` (the cards before the WeChat connector) or as
-// `fields` (the object-shaped contract with kinds); both name the same fields.
-const declaredSettingsOf = (connector) => {
-  const list = Array.isArray(connector.fields) ? connector.fields : connector.settings
-  return Array.isArray(list) ? list.filter(field => field !== null && typeof field?.name === 'string' && field.name !== '') : []
-}
-
-const levelsOfConnector = (connector) => (Array.isArray(connector.levels) ? connector.levels.filter(entry => entry !== null) : [])
-
-// How a declared setting is edited. A host that names no kind keeps the plain text field
-// every card had; `secret`, `bot` and `segmented` are the shapes a channel needs, and the
-// client never guesses a kind from a field name.
-const settingKindOf = (field) => (field?.kind === 'secret' || field?.kind === 'bot' || field?.kind === 'segmented' ? field.kind : 'text')
-const settingOptionsOf = (field) => (Array.isArray(field?.options)
-  ? field.options.filter(option => option !== null && typeof option === 'object' && typeof option.value === 'string' && option.value !== '')
-  : [])
-const settingLabelOf = (field) => (typeof field.label === 'string' && field.label !== '' ? field.label : field.name)
-
-// One field of a settings form. `secret` never carries a value: it says whether the host has
-// one saved and only draws a masked input while the reader is replacing it.
-function SettingField({ field, value, bots = [], disabled = false, onChange, onEnter, secret = null }) {
-  const kind = settingKindOf(field)
-  const label = settingLabelOf(field)
-  if (kind === 'secret') {
-    const editing = secret !== null && secret.editing === true
-    const cleared = secret !== null && secret.cleared === true
-    const state = cleared ? t('Will be removed') : field.saved === true ? t('Saved') : t('Not set')
-    let control
-    if (editing) {
-      control = h('div', { className: 'bt-connector-field-control' },
-        h('div', { className: 'bt-q-field bt-secret-field' },
-          h(MaskedInput, { value: secret.value ?? '', onChange: secret.onChange, onEnter, label })),
-        h('button', { type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled, onClick: secret.onCancel }, t('Cancel')))
-    } else if (cleared) {
-      control = h('div', { className: 'bt-connector-field-control' },
-        h('span', { className: 'bt-connector-field-state' }, state),
-        h('button', { type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled, onClick: secret.onUndo }, t('Undo')))
-    } else {
-      control = h('div', { className: 'bt-connector-field-control' },
-        h('span', { className: 'bt-connector-field-state' }, state),
-        h('button', {
-          type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled,
-          onClick: secret === null ? undefined : secret.onReplace,
-        }, field.saved === true ? t('Replace') : t('Set secret')),
-        field.saved === true
-          ? h('button', { type: 'button', className: 'bt-connector-link bt-connector-link-btn', disabled, onClick: secret.onClear }, t('Remove'))
-          : null)
-    }
-    return h('div', { className: 'bt-connector-field' },
-      h('span', { className: 'bt-connector-field-name' }, label),
-      control)
-  }
-  if (kind === 'bot') {
-    return h('label', { className: 'bt-connector-field' },
-      h('span', { className: 'bt-connector-field-name' }, label),
-      h('select', {
-        className: 'bt-select', value: typeof value === 'string' ? value : '', disabled, 'aria-label': label,
-        onChange: (event) => onChange(event.target.value),
-      },
-      h('option', { value: '' }, t('Choose a Bot')),
-      bots.map(bot => h('option', { key: bot.id, value: bot.id }, bot.name))))
-  }
-  if (kind === 'segmented') {
-    return h('div', { className: 'bt-connector-field' },
-      h('span', { className: 'bt-connector-field-name' }, label),
-      h('div', { className: 'bt-connector-levels', role: 'radiogroup', 'aria-label': label },
-        settingOptionsOf(field).map(option => h('button', {
-          key: option.value, type: 'button', role: 'radio', 'aria-checked': value === option.value,
-          className: 'bt-connector-level', 'data-current': value === option.value || undefined, disabled,
-          onClick: () => { if (!disabled && value !== option.value) onChange(option.value) },
-        }, h('span', { className: 'bt-connector-level-title' }, typeof option.label === 'string' && option.label !== '' ? option.label : option.value)))))
-  }
-  return h('label', { className: 'bt-connector-field' },
-    h('span', { className: 'bt-connector-field-name' }, label),
-    h('div', { className: 'bt-q-field' }, h('input', {
-      className: 'bt-connector-input', value: typeof value === 'string' ? value : '', placeholder: field.placeholder ?? label, 'aria-label': label,
-      autoComplete: 'off', spellCheck: false, disabled,
-      onChange: (event) => onChange(event.target.value),
-      onKeyDown: (event) => { if (event.key === 'Enter') onEnter?.() },
-    })))
 }
 
 function ConnectorRow({ connector, actions, readOnly = null }) {
@@ -1035,6 +940,12 @@ export function ConnectorsPage({ roster, actions }) {
     if (group.base === null) {
       const connector = group.rows[0]
       rows.push(h(ConnectorRow, { key: connector.id, connector, actions, readOnly }))
+      continue
+    }
+    // WeChat keeps one module card with a row per channel; every other grouped module (Neon)
+    // keeps the base connection with its project authorizations inside.
+    if (group.base === 'wechat') {
+      rows.push(h(WeChatCard, { key: 'wechat-card', rows: group.rows, actions, readOnly, bots }))
       continue
     }
     rows.push(h(GroupCard, { key: `${group.base}-group`, rows: group.rows, actions, readOnly, bots }))
