@@ -233,8 +233,33 @@ test('P1-06 outbound errors map to the fixed sentences and over-long text fails 
 
 // ---- P1 remaining ----
 test.todo('P1-07 transport change while ready: needs a host settings-change hook (open gap with Forge, P2 blocker)')
-test.todo('P1-10 deleting an instance stops its mount and leaves the other channel ready')
-test.todo('P1-11 profile wechat:false hides the rows and opens nothing')
+test('P1-10 deleting one channel unmounts only it; the other stays ready', async (t) => {
+  const receiver = await startWebhookReceiver()
+  t.after(() => receiver.close())
+  const { ctx, home } = setup()
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectChannel(ctx, receiver)
+  assert.equal((await call(ctx, 'connector-create-instance', { base: 'wechat' })).ok, true)
+  await call(ctx, 'connector-set-settings', { id: 'wechat-2', values: { transport: 'webhook', botId: 'b2', webhookUrl: receiver.url, webhookFormat: 'generic' } })
+  assert.equal((await call(ctx, 'connector-connect', { id: 'wechat-2', values: { WECHAT_WEBHOOK_SECRET: 'second-secret' } })).ok, true)
+  await until(async () => ((await rowOf(ctx, 'wechat-2'))?.state === 'ready' ? true : undefined), 'wechat-2 ready')
+  await toWrite(ctx, 'wechat')
+  await toWrite(ctx, 'wechat-2')
+  assert.ok(ctx.registeredTools.has('wechat_notify') && ctx.registeredTools.has('wechat_2_notify'))
+  assert.equal((await call(ctx, 'connector-delete-instance', { id: 'wechat-2' })).ok, true)
+  assert.deepEqual((await rowsOf(ctx)).map(row => row.id), ['wechat'])
+  assert.equal(ctx.registeredTools.has('wechat_2_notify'), false)
+  assert.equal(ctx.registeredTools.has('wechat_notify'), true)
+  assert.equal((await rowOf(ctx)).state, 'ready')
+})
+
+test('P1-11 the connector turned off in the profile has no row and registers nothing', async (t) => {
+  const { ctx, home } = setup({ config: { wechat: false } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  assert.deepEqual(await rowsOf(ctx), [])
+  assert.equal(ctx.registeredTools.has('wechat_notify'), false)
+  assert.equal((await call(ctx, 'connector-connect', { id: 'wechat', values: {} })).ok, false)
+})
 test('P1-12 an empty text field clears its stored value', async (t) => {
   const receiver = await startWebhookReceiver()
   t.after(() => receiver.close())
