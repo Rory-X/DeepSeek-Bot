@@ -2,6 +2,8 @@
 // documented contract (docs/protocol_zh_CN.md) with fetch and node:crypto: no new dependency,
 // no real account in tests. The QR login is beta: the mock server is the only verification
 // until a real account is explicitly allowed.
+import { randomUUID } from 'node:crypto'
+
 const DEFAULT_BASE = 'https://ilinkai.weixin.qq.com'
 const DEFAULT_PAUSE_MS = 3_600_000
 const DEFAULT_BACKOFF_MAX_MS = 60_000
@@ -62,6 +64,11 @@ export function createIlinkClient({
     let body
     try { body = await response.json() } catch { body = undefined }
     if (!response.ok) throw Object.assign(new Error(`iLink answered ${response.status}`), { status: response.status, body })
+    if (body !== null && typeof body === 'object') {
+      if (Number(body.errcode) === -14) throw Object.assign(new Error('WeChat paused this login for a while; try again later.'), { body })
+      if (body.ret !== undefined && Number(body.ret) !== 0) throw Object.assign(new Error(`iLink answered ret ${body.ret}`), { body })
+      if (body.errcode !== undefined && Number(body.errcode) !== 0) throw Object.assign(new Error(`iLink answered errcode ${body.errcode}`), { body })
+    }
     return body
   }
 
@@ -116,7 +123,7 @@ export function createIlinkClient({
       return await answer(response)
     },
 
-    async sendMessage({ token, fromUserId, toUserId, clientId, contextToken, text, signal }) {
+    async sendMessage({ token, fromUserId, toUserId, clientId = randomUUID(), contextToken, text, signal }) {
       const response = await request(`${baseUrl}/ilink/bot/sendmessage`, {
         method: 'POST',
         headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
