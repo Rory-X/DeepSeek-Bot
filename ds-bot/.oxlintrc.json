@@ -1,7 +1,19 @@
 {
-  "env": { "browser": true, "node": true, "es2024": true },
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2024": true
+  },
   "rules": {
     "no-undef": "error",
-    "no-unused-vars": ["error", { "ignoreRestSiblings": true }]
-  }
+    "no-unused-vars": [
+      "error",
+      {
+        "ignoreRestSiblings": true
+      }
+    ]
+  },
+  "ignorePatterns": [
+    "src/host/vendor/**"
+  ]
 }

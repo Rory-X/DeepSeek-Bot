@@ -536,6 +536,37 @@ const connectClawbot = async (ctx) => {
   assert.equal(connected.ok, true, JSON.stringify(connected))
 }
 
+test('CB-04 a QR page URL becomes a PNG data URL, a PNG passes through and junk is refused', async (t) => {
+  const page = await startIlinkMock({ image: 'https://liteapp.weixin.qq.com/q/abc?qrcode=qr-1&bot_type=3' })
+  t.after(() => page.close())
+  const first = setup({ config: { wechat: { listenPort: 0, ilinkBase: page.base } } })
+  t.after(async () => { await first.ctx.dispose(); rmSync(first.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(first.ctx)
+  await call(first.ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
+  const encoded = (await rowOf(first.ctx)).login.qr
+  assert.match(encoded, /^data:image\/png;base64,/)
+  assert.equal(Buffer.from(encoded.split(',')[1], 'base64').subarray(0, 4).toString('hex'), '89504e47')
+
+  const png = 'data:image/png;base64,iVBORw0KGgo='
+  const direct = await startIlinkMock({ image: png })
+  t.after(() => direct.close())
+  const second = setup({ config: { wechat: { listenPort: 0, ilinkBase: direct.base } } })
+  t.after(async () => { await second.ctx.dispose(); rmSync(second.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(second.ctx)
+  await call(second.ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
+  assert.equal((await rowOf(second.ctx)).login.qr, png)
+
+  const junk = await startIlinkMock({ image: 'plain-login-token' })
+  t.after(() => junk.close())
+  const third = setup({ config: { wechat: { listenPort: 0, ilinkBase: junk.base } } })
+  t.after(async () => { await third.ctx.dispose(); rmSync(third.home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(third.ctx)
+  await call(third.ctx, 'connector-command', { id: 'wechat', action: 'login-start', args: { consent: true } })
+  const row = await rowOf(third.ctx)
+  assert.equal(row.login.qr, null)
+  assert.match(row.login.error, /unsupported form/)
+})
+
 test('CB-03i binded_redirect logs in and stores the token', async (t) => {
   const mock = await startIlinkMock({ statuses: ['binded_redirect'] })
   t.after(() => mock.close())
