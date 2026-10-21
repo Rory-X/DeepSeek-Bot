@@ -416,7 +416,35 @@ export default {
       channel.ilink = { ...(channel.ilink ?? {}), epoch: (channel.ilink?.epoch ?? 0) + 1 }
       ilinkLogins.get(rt)?.delete(id)
       void rt.save().catch(() => {})
-      return { tools: [], close: () => { ilinkLogins.get(rt)?.delete(id) } }
+      // The inbound half is a 35s long poll; the cursor lives in the channel state so a
+      // restart continues where it stopped. There is no webhook URL or HMAC secret here.
+      const token = secrets !== null && typeof secrets === 'object' ? secrets[ILINK_TOKEN] : undefined
+      const controller = new AbortController()
+      const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
+      if (typeof token === 'string' && token !== '') {
+        const client = createIlinkClient({
+          base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+          pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
+          backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
+        })
+        void (async () => {
+          while (!controller.signal.aborted) {
+            try {
+              const answer = await client.getUpdates({ token, cursor: channel.ilink?.cursor, signal: controller.signal })
+              if (controller.signal.aborted) return
+              if (typeof answer?.get_updates_buf === 'string') {
+                channel.ilink.cursor = answer.get_updates_buf
+                void rt.save().catch(() => {})
+              }
+            } catch (error) {
+              if (controller.signal.aborted) return
+              const paused = client.noteError(error?.body?.errcode ?? error?.errcode)
+              await new Promise(resolve => setTimeout(resolve, paused.paused ? Math.min(paused.pauseMs, 1_000) : client.backoffMs()))
+            }
+          }
+        })()
+      }
+      return { tools: [], close: () => { controller.abort(); ilinkLogins.get(rt)?.delete(id) } }
     }
     // Older state keeps the URL as a plain setting; move it into the credential store before
     // this mount reads anything, keeping the plain value if the write fails.
