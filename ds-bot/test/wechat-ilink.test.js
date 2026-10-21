@@ -66,25 +66,34 @@ test('the bot API carries the cursor in the body and sends the documented messag
   t.after(() => mock.close())
   const client = createIlinkClient({ base: mock.base })
   await client.getUpdates({ token: 'tok', cursor: 'cursor-1' })
-  await client.sendMessage({ token: 'tok', fromUserId: 'bot-1', toUserId: 'user-1', clientId: 'c-1', contextToken: 'ctx-1', text: 'hello' })
+  await client.sendMessage({ token: 'tok', toUserId: 'user-1', clientId: 'c-1', contextToken: 'ctx-1', text: 'hello' })
   const updateBody = JSON.parse(seen[0].body)
   assert.equal(updateBody.get_updates_buf, 'cursor-1')
   assert.equal(seen[0].url.includes('get_updates_buf'), false)
   const message = JSON.parse(seen[1].body).msg
+  // The bot's identity is the bearer token: the request leaves `from_user_id` empty, and the
+  // scanned account is the target.
   assert.deepEqual(
     [message.from_user_id, message.to_user_id, message.client_id, message.message_type, message.message_state, message.context_token],
-    ['bot-1', 'user-1', 'c-1', 2, 2, 'ctx-1'],
+    ['', 'user-1', 'c-1', 2, 2, 'ctx-1'],
   )
   assert.deepEqual(message.item_list, [{ type: 1, text_item: { text: 'hello' } }])
   assert.equal(typeof message.client_id, 'string')
   assert.ok(message.client_id.length > 0)
 })
 
-test('a -14 business answer rejects even with HTTP 200', async (t) => {
-  const mock = await serve(() => ({ status: 200, json: { ret: 0, errcode: -14 } }))
+test('a -14 business answer rejects even with HTTP 200 and carries the pause marker', async (t) => {
+  const mock = await serve(() => ({ status: 200, json: { ret: 0, errcode: -14, errmsg: 'session timeout' } }))
   t.after(() => mock.close())
   const client = createIlinkClient({ base: mock.base })
-  await assert.rejects(client.getUpdates({ token: 'tok' }), /paused this login/)
+  await assert.rejects(client.getUpdates({ token: 'tok' }), error => error.paused === true && /paused this login/.test(error.message))
+})
+
+test('a -14 in `ret` is the same answer as in `errcode`, for a send too', async (t) => {
+  const mock = await serve(() => ({ status: 200, json: { ret: -14, errmsg: 'session timeout' } }))
+  t.after(() => mock.close())
+  const client = createIlinkClient({ base: mock.base })
+  await assert.rejects(client.sendMessage({ token: 'tok', toUserId: 'user-1', text: 'hello' }), error => error.paused === true)
 })
 
 test('a -14 answer pauses the client for the configured time', async (t) => {

@@ -36,6 +36,16 @@ const takeSend = (rt, channel) => {
 const auditSend = (rt, channel, length, result) => {
   rt.diagnostics?.record?.({ source: 'wechat-notify', text: `${channel} sent ${length} chars, result ${result}` })
 }
+// The audit line names a result code, never a message and never a body.
+const resultCodeOf = (error) => {
+  const status = Number(error?.status)
+  if (Number.isInteger(status) && status >= 100) return String(status)
+  const errcode = Number(error?.body?.errcode)
+  if (Number.isFinite(errcode) && errcode !== 0) return String(errcode)
+  const ret = Number(error?.body?.ret)
+  if (Number.isFinite(ret) && ret !== 0) return String(ret)
+  return 'error'
+}
 
 const ILINK_TOKEN = 'WECHAT_ILINK_TOKEN'
 export const CONSENT_VERSION = 1
@@ -55,6 +65,22 @@ const loginOf = (rt, id) => {
 }
 const consentOf = (rt, id) => rt.state?.channels?.[id]?.ilink?.consent
 const consentCurrent = (rt, id) => consentOf(rt, id)?.version === CONSENT_VERSION
+// After a login, `-14` is WeChat's "session timeout": the stored token is dead. Colour the
+// channel's row and wait for a new scan; never re-login on the user's behalf. During the QR
+// phase the same answer stays retryable (see `command`).
+const LOGIN_EXPIRED = 'The WeChat login expired. Webhook channels are not affected; scan the QR code again.'
+const expireLogin = (rt, id) => {
+  Object.assign(loginOf(rt, id), { state: 'login-expired', qr: null, scanned: false, qrcode: null, error: LOGIN_EXPIRED })
+}
+const ilinkFailure = (rt, id, error) => {
+  const status = Number(error?.status)
+  if (error?.paused === true || status === 401 || status === 403) {
+    expireLogin(rt, id)
+    return new Error(LOGIN_EXPIRED)
+  }
+  if (status === 429) return new Error('WeChat is rate-limited; try again in a moment.')
+  return new Error('Could not reach WeChat.')
+}
 const rememberConsent = (rt, id) => {
   const channels = rt.state.channels ?? (rt.state.channels = {})
   const channel = channels[id] ?? (channels[id] = {})
@@ -229,15 +255,17 @@ const signatureHeaders = (secret, body) => {
   }
 }
 
+// The status rides on the error so the audit line can name it as a code.
 function outboundError(status, body) {
-  if (status === 401 || status === 403) return new Error('The webhook refused the credential.')
-  if (status === 404) return new Error('The webhook URL was not found.')
+  const failed = (message) => Object.assign(new Error(message), { status })
+  if (status === 401 || status === 403) return failed('The webhook refused the credential.')
+  if (status === 404) return failed('The webhook URL was not found.')
   if (status === 429) {
     let retry = undefined
     try { retry = JSON.parse(body)?.retry_after } catch { retry = undefined }
-    return new Error(`The webhook is rate-limited${Number.isFinite(retry) ? `; try again in ${retry}s` : ''}.`)
+    return failed(`The webhook is rate-limited${Number.isFinite(retry) ? `; try again in ${retry}s` : ''}.`)
   }
-  return new Error(`The webhook answered ${status}.`)
+  return failed(`The webhook answered ${status}.`)
 }
 
 async function postNotice({ address, format, text, secret, fetch: request = fetch }) {
@@ -277,12 +305,8 @@ function notifyToolClawbot({ channel, token, account, client, rt }) {
       try {
         await client.sendMessage({ token, toUserId: account, contextToken: undefined, text })
       } catch (error) {
-        auditSend(rt, channel, text.length, error?.message ?? 'error')
-        const status = Number(error?.status)
-        if (status === 401 || status === 403) throw new Error('The WeChat login expired. Webhook channels are not affected; scan the QR code again.')
-        if (Number(error?.body?.errcode) === -14) throw new Error('WeChat paused this login for a while; try again later.')
-        if (status === 429) throw new Error('WeChat is rate-limited; try again in a moment.')
-        throw new Error('Could not reach WeChat.')
+        auditSend(rt, channel, text.length, resultCodeOf(error))
+        throw ilinkFailure(rt, channel, error)
       }
       auditSend(rt, channel, text.length, 'ok')
       return 'Sent.'
@@ -313,7 +337,7 @@ function notifyTool({ channel, settings, secretOf, rt }) {
       try {
         await postNotice({ address, format: settings.webhookFormat, text, secret: secretOf() })
       } catch (error) {
-        auditSend(rt, channel, text.length, error?.message ?? 'error')
+        auditSend(rt, channel, text.length, resultCodeOf(error))
         throw error
       }
       auditSend(rt, channel, text.length, 'ok')
@@ -342,14 +366,14 @@ export default {
   normalizeSettings: normalizeWechatSettings,
   readiness: wechatReadiness,
   capabilities: [
-    { key: 'notify', title: 'Send notices through the webhook', risk: 'write' },
+    { key: 'notify', title: 'Send messages through this channel', risk: 'write' },
   ],
   permissions: {
-    summary: 'Sends notices through this channel, and every notice asks for your approval first.',
+    summary: 'Sends a message through this channel when a Bot is asked to. Each channel is limited to 20 messages a minute, and every send is audited.',
   },
   card: {
     glyph: 'wechat',
-    about: 'A WeChat channel bound to one Bot: it can post notices, and incoming messages arrive in a later update. This release supports Webhook; ClawBot comes in the next batch.',
+    about: 'A WeChat channel bound to one Bot: it sends messages to the channel owner, and a Webhook channel also takes incoming messages. Both the Webhook and the ClawBot (beta) transport are supported.',
     docsUrl: 'https://github.com/Tencent/openclaw-weixin',
     levelChoice: false,
   },
@@ -374,9 +398,7 @@ export default {
       return hub.statusOf(id).status ?? { inbound: 'needs-secret' }
     }
     const login = loginOf(rt, id)
-    if (login.state === 'login-expired') {
-      return { state: 'error', error: 'The WeChat login expired. Webhook channels are not affected; scan the QR code again.' }
-    }
+    if (login.state === 'login-expired') return { state: 'error', error: LOGIN_EXPIRED }
     return {}
   },
   async command({ id, rt, action, args, secretName }) {
@@ -392,14 +414,9 @@ export default {
       Object.assign(login, { state: 'logged-out', qr: null, scanned: false, account: null, error: null, expiresAt: null, qrcode: null })
       return
     }
-    if (action === 'login-start' || action === 'login-refresh') {
-      if (!consentCurrent(rt, id) && args?.consent !== true) {
-        throw Object.assign(new Error('Confirm the ClawBot login risks first'), { code: 'bot/invalid' })
-      }
-      if (args?.consent === true) rememberConsent(rt, id)
-      if (action === 'login-poll') {
-        // handled below
-      }
+    // Ask for a code. A failure leaves a retryable protocol error and no code: the card's
+    // Retry then asks again instead of polling a QR it never received.
+    const requestQr = async () => {
       try {
         const answer = await client.getQrCode()
         const image = qrForCard(answer?.qrcode_img_content)
@@ -413,12 +430,27 @@ export default {
           expiresAt: typeof answer?.expires_at === 'string' ? answer.expires_at : null,
         })
       } catch (error) {
-        Object.assign(login, { state: 'protocol-error', qr: null, scanned: false, error: String(error?.message ?? error) })
+        Object.assign(login, { state: 'protocol-error', qrcode: null, qr: null, scanned: false, error: String(error?.message ?? error) })
       }
+    }
+    if (action === 'login-start' || action === 'login-refresh') {
+      if (!consentCurrent(rt, id) && args?.consent !== true) {
+        throw Object.assign(new Error('Confirm the ClawBot login risks first'), { code: 'bot/invalid' })
+      }
+      if (args?.consent === true) rememberConsent(rt, id)
+      await requestQr()
       return
     }
     if (action === 'login-poll') {
-      if (login.qrcode === null) return
+      // Retry of a protocol error (or of a phone that did not confirm) has no code to poll:
+      // ask for a fresh one. With a code, the answer decides the next state, and a `wait`
+      // after a pause must put the card back into the QR state rather than leave it stuck.
+      if (login.qrcode === null) {
+        if (login.state !== 'protocol-error' && login.state !== 'confirm-failed') return
+        if (!consentCurrent(rt, id)) return
+        await requestQr()
+        return
+      }
       try {
         const answer = await client.pollQrStatus(login.qrcode)
         const mapped = qrStateOf(answer?.status)
@@ -443,8 +475,10 @@ export default {
             ...(typeof answer?.ilink_bot_id === 'string' ? { ilinkBotId: answer.ilink_bot_id } : {}),
           }
           void rt.save().catch(() => {})
+        } else if (mapped === 'wait') {
+          Object.assign(login, { state: 'qr', scanned: false, error: null })
         } else if (mapped === 'scanned') {
-          Object.assign(login, { state: 'qr', scanned: true })
+          Object.assign(login, { state: 'qr', scanned: true, error: null })
         } else if (mapped === 'verified-needed') {
           Object.assign(login, { state: 'verified-needed' })
         } else if (mapped === 'blocked') {
@@ -453,9 +487,11 @@ export default {
           Object.assign(login, { state: 'expired', qr: null, scanned: false, qrcode: null })
         }
       } catch (error) {
+        // A code that expired or a login that already existed: only 401/403 means expired.
+        // While signing in, `-14` stays a retryable protocol error.
         const auth = Number(error?.status) === 401 || Number(error?.status) === 403
         Object.assign(login, auth
-          ? { state: 'login-expired', qr: null, scanned: false, qrcode: null, error: 'The WeChat login expired. Webhook channels are not affected; scan the QR code again.' }
+          ? { state: 'login-expired', qr: null, scanned: false, qrcode: null, error: LOGIN_EXPIRED }
           : { state: 'protocol-error', error: String(error?.message ?? error) })
       }
     }
@@ -471,7 +507,7 @@ export default {
         ? webhookUrlOf(values, secrets) !== ''
         : loginViewOf(rt, id, secrets).state === 'logged-in' || (typeof secrets?.[ILINK_TOKEN] === 'string' && secrets[ILINK_TOKEN] !== ''),
       levels: [
-        { id: 'write', title: 'Full access', description: 'Send notices for you; every notice asks for your approval first.' },
+        { id: 'write', title: 'Full access', description: 'Send messages for you; a Bot only sends when it is asked to.' },
       ],
       // An outbound-only channel says why it has no address yet: the inbound half needs the
       // HMAC secret, and the card should not look broken while it is missing.
@@ -482,7 +518,7 @@ export default {
     }
   },
   // One test notice through the same path a real notice takes. A failure stays on the card
-  // without turning the channel off.
+  // without turning the channel off, and the audit line records what actually happened.
   async test({ id, rt, settings, secrets, secretValue }) {
     const values = { ...(settings !== null && typeof settings === 'object' ? settings : {}), webhookUrl: webhookUrlOf(settings, secrets) }
     if (trim(values.transport) === 'clawbot') {
@@ -493,8 +529,13 @@ export default {
       }
       const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
       const client = createIlinkClient({ base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase) })
+      try {
+        await client.sendMessage({ token, toUserId: ilink.ilinkUserId, text: TEST_TEXT })
+      } catch (error) {
+        auditSend(rt, id, TEST_TEXT.length, resultCodeOf(error))
+        throw ilinkFailure(rt, id, error)
+      }
       auditSend(rt, id, TEST_TEXT.length, 'ok')
-      await client.sendMessage({ token, toUserId: ilink.ilinkUserId, text: TEST_TEXT })
       return
     }
     const address = webhookOf(values)
@@ -502,7 +543,13 @@ export default {
     const secret = (typeof secrets?.[SECRET_NAME] === 'string' && secrets[SECRET_NAME] !== '')
       ? secrets[SECRET_NAME]
       : (typeof secretValue === 'function' ? secretValue(SECRET_NAME) : undefined)
-    await postNotice({ address, format: values.webhookFormat, text: TEST_TEXT, secret })
+    try {
+      await postNotice({ address, format: values.webhookFormat, text: TEST_TEXT, secret })
+    } catch (error) {
+      auditSend(rt, id, TEST_TEXT.length, resultCodeOf(error))
+      throw error
+    }
+    auditSend(rt, id, TEST_TEXT.length, 'ok')
   },
   async mount({ rt, settings, instance, level, secrets, token, secretName }) {
     const values = settings !== null && typeof settings === 'object' ? settings : {}
@@ -544,19 +591,25 @@ export default {
           pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
           backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
         })
+        // Keep the session alive: WeChat drops a login whose getUpdates loop stops, so a
+        // mounted channel with a token always polls. The cursor only advances on a non-empty
+        // one, and a `-14` ("session timeout") ends the loop with an expired login.
         void (async () => {
           while (!controller.signal.aborted) {
             try {
               const answer = await client.getUpdates({ token, cursor: channel.ilink?.cursor, signal: controller.signal })
               if (controller.signal.aborted) return
-              if (typeof answer?.get_updates_buf === 'string') {
+              if (typeof answer?.get_updates_buf === 'string' && answer.get_updates_buf !== '' && answer.get_updates_buf !== channel.ilink.cursor) {
                 channel.ilink.cursor = answer.get_updates_buf
                 void rt.save().catch(() => {})
               }
             } catch (error) {
               if (controller.signal.aborted) return
-              const paused = client.noteError(error?.body?.errcode ?? error?.errcode)
-              await new Promise(resolve => setTimeout(resolve, paused.paused ? Math.min(paused.pauseMs, 1_000) : client.backoffMs()))
+              if (error?.paused === true || Number(error?.status) === 401 || Number(error?.status) === 403) {
+                ilinkFailure(rt, id, error)
+                return
+              }
+              await new Promise(resolve => setTimeout(resolve, client.backoffMs()))
             }
           }
         })()
