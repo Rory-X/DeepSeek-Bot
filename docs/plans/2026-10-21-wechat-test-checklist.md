@@ -123,8 +123,8 @@
 | P1-12 | P1-12 an empty text field clears its stored value | 238 | pass | 文本空串清空 |
 | P1-08 | P1-08 connector-test posts the fixed notice and a failure stays on the row | 250 | pass | test 钩子成功/失败/清 error |
 | P1-09 | P1-09 a secret saved on the card shows saved, never a value, and clearSecrets removes it | 273 | pass | secret saved / 不下发值 / clearSecrets |
-| P1-14 | P1-14 F2b naming invariants: bare first, _2 second, coexist, delete only its own | 291 | pass | F2b 命名不变量四条 |
-| P1-15 | P1-15 the F5 card shape: field kinds, level descriptions, canTest and instance.max | 314 | pass | F5 卡片 shape（fields kind/levels/canTest/instance.max） |
+| P1-14 | P1-14 F2b naming invariants: bare first, _2 second, coexist, delete only its own | 291 | pass | ①首实例裸名 ②`wechat-2` 派生 `_2` ③两实例 secret 共存互不覆盖 ④删 `wechat-2` 只删自己、首实例仍 ready |
+| P1-15 | P1-15 the F5 card shape: field kinds, level descriptions, canTest and instance.max | 314 | pass | F5 view/status：`fields.kind`（bot/segmented/secret）、`levels[].description`、`canTest:true`、`instance.max=8`、secret 只有 `saved` 无 value |
 | P1-13 | P1-13 two channels keep separate secrets: wechat-2 writes _2 and deleting it touches only its own | 333 | pass | 两通道 secret 共存 + 各自签名 + 删实例只删自己 |
 | P2-01 | P2-01 the listener binds 127.0.0.1 only: address is asserted, and no configuration can make it 0.0.0.0 | 371 | todo | 监听地址 127.0.0.1 |
 | P2-02 | P2-02 a taken port leaves only that channel error with port and fix; the plugin boots and other connectors are ready | 372 | todo | 端口被占降级 |
