@@ -5,7 +5,7 @@ import { createHmac, randomBytes } from 'node:crypto'
 import { inboundFor } from '../wechat-inbound.js'
 import { createRequire } from 'node:module'
 import { qrPngDataUrl } from '../qr-image.js'
-import { createIlinkClient, maskAccount, qrStateOf } from '../wechat-ilink.js'
+import { botBaseOf, createIlinkClient, maskAccount, qrStateOf } from '../wechat-ilink.js'
 
 const TIMEOUT_MS = 10_000
 // v0.2.0 refuses a tool without an output contract; a notice renders as its text.
@@ -81,6 +81,9 @@ const ilinkFailure = (rt, id, error) => {
   if (status === 429) return new Error('WeChat is rate-limited; try again in a moment.')
   return new Error('Could not reach WeChat.')
 }
+// The Bot API host the confirmed login named, kept with the scanned identity. Older state
+// has none: those channels keep the configured base.
+const ilinkBaseurlOf = (rt, id) => botBaseOf(rt.state?.channels?.[id]?.ilink?.baseurl)
 const rememberConsent = (rt, id) => {
   const channels = rt.state.channels ?? (rt.state.channels = {})
   const channel = channels[id] ?? (channels[id] = {})
@@ -447,6 +450,7 @@ export default {
     const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
     const client = createIlinkClient({
       base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+      botBase: ilinkBaseurlOf(rt, id),
       pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
       backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
       timeouts: ilinkTimeoutsOf(config),
@@ -505,13 +509,23 @@ export default {
           }
           // The credential write remounts the channel (a new login epoch), so the scanned
           // identity goes into state first: the remount must already know who the owner is.
+          // The confirmed answer also names the Bot API host this login belongs to; without it
+          // every Bot API call would go to the default host and be answered with -14.
           const channels = rt.state.channels ?? (rt.state.channels = {})
           const channel = channels[id] ?? (channels[id] = {})
-          channel.ilink = {
+          const botBase = botBaseOf(answer?.baseurl)
+          const ilink = {
             ...(channel.ilink ?? {}),
             ...(typeof answer?.ilink_user_id === 'string' ? { ilinkUserId: answer.ilink_user_id } : {}),
             ...(typeof answer?.ilink_bot_id === 'string' ? { ilinkBotId: answer.ilink_bot_id } : {}),
           }
+          if (botBase === undefined) delete ilink.baseurl
+          else ilink.baseurl = botBase
+          channel.ilink = ilink
+          // A login event names the host it will talk to; the token never reaches diagnostics.
+          let host = ''
+          try { host = botBase === undefined ? '' : new URL(botBase).host } catch { host = '' }
+          rt.diagnostics?.record?.({ source: 'wechat-login', text: `${id} signed in${host === '' ? '' : `, bot api ${host}`}` })
           // Keep the identity on disk before the token, in case the process stops in between.
           await rt.save().catch(() => {})
           if (token !== '') {
@@ -603,6 +617,7 @@ export default {
       const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
       const client = createIlinkClient({
         base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+        botBase: ilinkBaseurlOf(rt, id),
         timeouts: ilinkTimeoutsOf(config),
       })
       try {
@@ -656,6 +671,7 @@ export default {
       }
       const client = createIlinkClient({
         base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
+        botBase: ilinkBaseurlOf(rt, id),
         pauseMs: Number.isInteger(config.ilinkPauseMs) ? config.ilinkPauseMs : undefined,
         backoffMaxMs: Number.isInteger(config.ilinkBackoffMaxMs) ? config.ilinkBackoffMaxMs : undefined,
         timeouts: ilinkTimeoutsOf(config),
