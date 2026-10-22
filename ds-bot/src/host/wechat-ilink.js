@@ -48,8 +48,18 @@ const jsonHeaders = (extra = {}) => ({ 'content-type': 'application/json', ...ex
 // call is a 30s long poll on the service side, so its deadline has to be longer than that.
 export const CALL_TIMEOUTS = { qr: 20_000, poll: 40_000, send: 25_000, updates: 60_000 }
 
+// The Bot API base a confirmed login names. A Bot token only ever travels to https, or to
+// loopback for a local bench; anything else falls back to the configured base.
+export const botBaseOf = (value) => {
+  const text = typeof value === 'string' ? value.trim().replace(/\/+$/, '') : ''
+  if (/^https:\/\//i.test(text)) return text
+  if (/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(text)) return text
+  return undefined
+}
+
 export function createIlinkClient({
   base = DEFAULT_BASE,
+  botBase = undefined,
   fetch: request = fetch,
   version = {},
   uin = () => Math.floor(Math.random() * 0xffffffff) >>> 0,
@@ -59,6 +69,9 @@ export function createIlinkClient({
   now = () => Date.now(),
 } = {}) {
   const baseUrl = String(base).replace(/\/+$/, '')
+  // The QR endpoints live on the configured host; every Bot API call belongs to the host the
+  // confirmed login named, so a channel that started elsewhere is not answered with -14.
+  const botUrl = botBaseOf(botBase) ?? baseUrl
   const clientVersion = String(clientVersionOf(version))
   const common = { 'iLink-App-Id': APP_ID, 'iLink-App-ClientVersion': clientVersion }
   const uinHeader = () => ({ 'X-WECHAT-UIN': Buffer.from(String(uin()), 'utf8').toString('base64') })
@@ -99,7 +112,7 @@ export function createIlinkClient({
   // The lifecycle ping only carries base_info: no token state, no message. It tells WeChat the
   // bot is there (or going away); a failure is never allowed to block a mount or a close.
   const notifyLifecycle = async (action, { token, signal } = {}) => {
-    const response = await request(`${baseUrl}/ilink/bot/msg/${action}`, {
+    const response = await request(`${botUrl}/ilink/bot/msg/${action}`, {
       method: 'POST',
       headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
       body: JSON.stringify({ base_info: { channel_version: '1', bot_agent: 'ds-bot' } }),
@@ -110,6 +123,7 @@ export function createIlinkClient({
 
   return {
     baseUrl,
+    botUrl,
     clientVersion,
     paused: () => now() < pausedUntil,
     pauseRemainingMs: () => Math.max(0, pausedUntil - now()),
@@ -139,7 +153,7 @@ export function createIlinkClient({
 
     // Bot API: Bearer plus base_info, and the documented long-poll timeout is 35s.
     async getUpdates({ token, cursor, signal, channelVersion = 1 } = {}) {
-      const response = await request(`${baseUrl}/ilink/bot/getupdates`, {
+      const response = await request(`${botUrl}/ilink/bot/getupdates`, {
         method: 'POST',
         headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
         body: JSON.stringify({
@@ -155,7 +169,7 @@ export function createIlinkClient({
     // client sends an empty `from_user_id`, and it is not a parameter here so no caller can
     // put an id there.
     async sendMessage({ token, toUserId, clientId = randomUUID(), contextToken, text, signal }) {
-      const response = await request(`${baseUrl}/ilink/bot/sendmessage`, {
+      const response = await request(`${botUrl}/ilink/bot/sendmessage`, {
         method: 'POST',
         headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
         body: JSON.stringify({
