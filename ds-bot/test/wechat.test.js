@@ -554,6 +554,13 @@ const startIlinkMock = async ({
         setTimeout(() => json(value, status), delay)
         return undefined
       }
+      // The real Bot API needs the token type header as well as the bearer token: without it
+      // WeChat answers -14 "session timeout" (the live bug). The mock does the same so a
+      // regression fails here instead of on a phone.
+      const botPath = request.url.startsWith('/ilink/bot/getupdates') || request.url.startsWith('/ilink/bot/sendmessage') || request.url.startsWith('/ilink/bot/msg/')
+      if (botPath && request.headers.authorizationtype !== 'ilink_bot_token') {
+        return json({ ret: 0, errcode: -14, errmsg: 'session timeout' })
+      }
       if (request.url.startsWith('/ilink/bot/get_bot_qrcode')) {
         qrCalls += 1
         // The QR request itself can answer `-14` too: the retry must ask again instead of
