@@ -75,6 +75,13 @@ export function createIlinkClient({
   const clientVersion = String(clientVersionOf(version))
   const common = { 'iLink-App-Id': APP_ID, 'iLink-App-ClientVersion': clientVersion }
   const uinHeader = () => ({ 'X-WECHAT-UIN': Buffer.from(String(uin()), 'utf8').toString('base64') })
+  // Bot API requests carry the bearer token and the token type: WeChat answers -14 "session
+  // timeout" when the type header is missing. The QR request sends the type without a token.
+  const botHeaders = (token) => jsonHeaders({
+    ...common,
+    Authorization: `Bearer ${String(token ?? '')}`,
+    AuthorizationType: 'ilink_bot_token',
+  })
   const limits = { ...CALL_TIMEOUTS, ...timeouts }
   // A cancel signal (the mount's) and the deadline both end the call; either one aborts it.
   const signalOf = (ms, cancel) => cancel === undefined
@@ -114,7 +121,7 @@ export function createIlinkClient({
   const notifyLifecycle = async (action, { token, signal } = {}) => {
     const response = await request(`${botUrl}/ilink/bot/msg/${action}`, {
       method: 'POST',
-      headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
+      headers: botHeaders(token),
       body: JSON.stringify({ base_info: { channel_version: '1', bot_agent: 'ds-bot' } }),
       signal: signalOf(limits.send, signal),
     })
@@ -130,11 +137,16 @@ export function createIlinkClient({
     backoffMs,
 
     // The QR request: JSON + AuthorizationType + X-WECHAT-UIN, no Authorization/base_info.
-    async getQrCode() {
+    // `local_token_list` carries this account's stored bot tokens (newest first), which is how
+    // the official client asks WeChat to reuse an existing bot binding instead of making one.
+    async getQrCode({ localTokens = [] } = {}) {
+      const tokens = (Array.isArray(localTokens) ? localTokens : [])
+        .filter(token => typeof token === 'string' && token !== '')
+        .slice(0, 10)
       const response = await request(`${baseUrl}/ilink/bot/get_bot_qrcode?bot_type=3`, {
         method: 'POST',
         headers: jsonHeaders({ ...common, AuthorizationType: 'ilink_bot_token', ...uinHeader() }),
-        body: '{}',
+        body: JSON.stringify({ local_token_list: tokens }),
         signal: signalOf(limits.qr),
       })
       return await answer(response)
@@ -155,7 +167,7 @@ export function createIlinkClient({
     async getUpdates({ token, cursor, signal, channelVersion = 1 } = {}) {
       const response = await request(`${botUrl}/ilink/bot/getupdates`, {
         method: 'POST',
-        headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
+        headers: botHeaders(token),
         body: JSON.stringify({
           base_info: { channel_version: String(channelVersion), bot_agent: 'ds-bot' },
           ...(cursor === undefined ? {} : { get_updates_buf: String(cursor) }),
@@ -171,7 +183,7 @@ export function createIlinkClient({
     async sendMessage({ token, toUserId, clientId = randomUUID(), contextToken, text, signal }) {
       const response = await request(`${botUrl}/ilink/bot/sendmessage`, {
         method: 'POST',
-        headers: jsonHeaders({ ...common, Authorization: `Bearer ${String(token ?? '')}` }),
+        headers: botHeaders(token),
         body: JSON.stringify({
           base_info: { channel_version: '1', bot_agent: 'ds-bot' },
           msg: {

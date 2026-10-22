@@ -59,6 +59,27 @@ test('the QR request carries the documented headers and the poll only the app he
   assert.equal('x-wechat-uin' in pollRequest.headers, false)
 })
 
+test('every Bot API request carries the bearer token and its type header', async (t) => {
+  const seen = []
+  const mock = await serve((request) => {
+    seen.push(request)
+    return { json: { ret: 0 } }
+  })
+  t.after(() => mock.close())
+  const client = createIlinkClient({ base: mock.base })
+  await client.getUpdates({ token: 'tok' })
+  await client.sendMessage({ token: 'tok', toUserId: 'user-1', text: 'hello' })
+  await client.notifyStart({ token: 'tok' })
+  await client.notifyStop({ token: 'tok' })
+  assert.equal(seen.length, 4)
+  for (const request of seen) {
+    // Without the type header WeChat answers -14 "session timeout"; the mock in the host
+    // tests refuses such a call, and this pins the wire shape itself.
+    assert.equal(request.headers.authorizationtype, 'ilink_bot_token')
+    assert.equal(request.headers.authorization, 'Bearer tok')
+  }
+})
+
 test('the bot API carries the cursor in the body and sends the documented message shape', async (t) => {
   const seen = []
   const mock = await serve((request) => {
