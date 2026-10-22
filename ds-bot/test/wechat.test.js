@@ -528,6 +528,7 @@ const startIlinkMock = async ({
   statusDelayMs = 0,
   statusHang = false,
   sendHang = false,
+  baseurl = undefined,
 } = {}) => {
   const calls = []
   let index = 0
@@ -569,7 +570,7 @@ const startIlinkMock = async ({
         if (statusHang) return undefined
         if (status === 'auth-fail') return later({ error: 'unauthorized' }, 401, statusDelayMs)
         if (status === 'paused') return later({ ret: 0, errcode: -14, errmsg: 'session timeout' }, 200, statusDelayMs)
-        return later({ status, ...(status === 'confirmed' || status === 'binded_redirect' ? { bot_token: token, ilink_bot_id: 'bot-1', baseurl: 'https://base.test', ...(userId === undefined ? {} : { ilink_user_id: userId }) } : {}) }, 200, statusDelayMs)
+        return later({ status, ...(status === 'confirmed' || status === 'binded_redirect' ? { bot_token: token, ilink_bot_id: 'bot-1', ...(baseurl === undefined ? {} : { baseurl }), ...(userId === undefined ? {} : { ilink_user_id: userId }) } : {}) }, 200, statusDelayMs)
       }
       if (request.url.startsWith('/ilink/bot/getupdates')) {
         const answer = updates(call) ?? {}
@@ -1101,6 +1102,45 @@ test('CB-17 a remount during the token write still persists the account and fini
   assert.equal(loginViewOfHost(host, { WECHAT_ILINK_TOKEN: 'ilink-token' }).state, 'logged-in')
 })
 
+test('CB-19 the Bot API follows the baseurl from the confirmed login, not the QR host', async (t) => {
+  // Two servers: the QR host confirms the login and names a different Bot API host.
+  const botApi = await startIlinkMock({ statuses: ['wait'] })
+  t.after(() => botApi.close())
+  const qrHost = await startIlinkMock({ statuses: ['confirmed'], baseurl: botApi.base })
+  t.after(() => qrHost.close())
+  const { ctx, rt, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: qrHost.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const audited = []
+  rt.diagnostics.record = entry => audited.push(entry)
+  await connectClawbot(ctx)
+  await loginClawbot(ctx)
+  // The confirmed answer's Bot API host is saved with the scanned identity.
+  assert.equal(rt.state.channels.wechat.ilink.baseurl, botApi.base)
+  const botCalls = host => host.calls.filter(entry => !entry.url.startsWith('/ilink/bot/get_bot_qrcode') && !entry.url.startsWith('/ilink/bot/get_qrcode_status'))
+  await until(() => (botCalls(botApi).some(entry => entry.url.startsWith('/ilink/bot/msg/notifystart')) ? true : undefined), 'notifyStart on the Bot API host')
+  await until(() => (botCalls(botApi).some(entry => entry.url.startsWith('/ilink/bot/getupdates')) ? true : undefined), 'the long poll on the Bot API host')
+  const tested = await call(ctx, 'connector-test', { id: 'wechat' })
+  assert.equal(tested.ok, true, JSON.stringify(tested))
+  await until(() => (botCalls(botApi).some(entry => entry.url.startsWith('/ilink/bot/sendmessage')) ? true : undefined), 'the Test send on the Bot API host')
+  assert.deepEqual(botCalls(qrHost), [], 'no Bot API call may reach the QR host')
+  // The login diagnostic names the host, never the token.
+  const login = audited.filter(entry => entry.source === 'wechat-login').at(-1)
+  assert.match(login.text, /bot api 127\.0\.0\.1:/)
+  assert.equal(JSON.stringify(audited).includes('ilink-token'), false)
+})
+
+test('CB-20 an older login without a baseurl keeps the configured host', async (t) => {
+  const mock = await startIlinkMock({ statuses: ['confirmed'] })
+  t.after(() => mock.close())
+  const { ctx, rt, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(ctx)
+  await loginClawbot(ctx)
+  assert.equal(rt.state.channels.wechat.ilink.baseurl, undefined)
+  await until(() => (mock.calls.some(entry => entry.url.startsWith('/ilink/bot/msg/notifystart')) ? true : undefined), 'notifyStart on the configured host')
+  await until(() => (mock.calls.some(entry => entry.url.startsWith('/ilink/bot/getupdates')) ? true : undefined), 'the long poll on the configured host')
+})
+
 test('CB-18 a failed turn is one send audit plus one turn diagnostic, never a second send', async (t) => {
   const mock = await startIlinkMock({
     statuses: ['confirmed'],
@@ -1141,6 +1181,8 @@ test('CB-18 a failed turn is one send audit plus one turn diagnostic, never a se
   assert.match(turn[0].text, /^wechat turn result bot-unavailable, \d+ chars$/)
   assert.equal(JSON.stringify(audited).includes('fail this turn'), false)
 })
+
+
 
 // ---- P2: inbound listener and its gate ----
 test('P2-01 the inbound listener binds 127.0.0.1 only', async (t) => {
