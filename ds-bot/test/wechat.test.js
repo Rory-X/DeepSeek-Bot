@@ -739,7 +739,7 @@ test('CB-03k a -14 on the QR request leaves Retry able to fetch a fresh code', a
   assert.match(retried.login.qr, /^data:image\/png;base64,/)
 })
 
-test('CB-06 after login a -14 send means the login expired: row error, a code-filled audit and no re-login', async (t) => {
+test('CB-06 after login a -14 send pauses the channel: row text, deadline, audit, no re-login', async (t) => {
   const mock = await startIlinkMock({ statuses: ['confirmed'], send: () => ({ ret: 0, errcode: -14, errmsg: 'session timeout' }) })
   t.after(() => mock.close())
   const { ctx, home, rt } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
@@ -750,11 +750,15 @@ test('CB-06 after login a -14 send means the login expired: row error, a code-fi
   await loginClawbot(ctx)
   const qrCalls = () => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/get_bot_qrcode')).length
   const before = qrCalls()
-  await assert.rejects(notifyToolOf(ctx).execute({ text: 'hello' }, { agent: { id: 'm1' } }), /The WeChat login expired/)
+  await assert.rejects(notifyToolOf(ctx).execute({ text: 'hello' }, { agent: { id: 'm1' } }), /WeChat account session paused; retry after \d{2}:\d{2}/)
   const row = await rowOf(ctx)
   assert.equal(row.state, 'error')
-  assert.match(row.error, /Webhook channels are not affected; scan the QR code again/)
-  assert.equal(row.login.state, 'login-expired')
+  assert.match(row.error, /WeChat account session paused; retry after \d{2}:\d{2}/)
+  // A pause is not a dead login: no rescan, and the deadline is remembered for an hour.
+  assert.notEqual(row.login.state, 'login-expired')
+  const ilink = rt.state.channels.wechat.ilink
+  assert.ok(ilink.pausedUntil > Date.now() + 50 * 60 * 1000 && ilink.pausedUntil <= Date.now() + 61 * 60 * 1000, String(ilink.pausedUntil))
+  assert.equal(ilink.pausedReason, 'session timeout')
   // The bot identity is the bearer token, so `from_user_id` is empty; the scanned account is
   // the target and the send carries a generated client id.
   const sent = mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/sendmessage')).at(-1)
@@ -762,7 +766,7 @@ test('CB-06 after login a -14 send means the login expired: row error, a code-fi
   assert.equal(sent.json.msg.to_user_id, 'ilink_user_123456')
   assert.match(sent.json.msg.client_id, /^[0-9a-f-]{36}$/)
   assert.deepEqual(sent.json.msg.item_list, [{ type: 1, text_item: { text: 'hello' } }])
-  // An expired login waits for the user: no QR is fetched behind their back.
+  // Nothing retries behind the user's back while the window is open.
   assert.equal(qrCalls(), before)
   // The audit line records the code, never the message.
   const line = audited.filter(entry => entry.source === 'wechat-notify').at(-1)
@@ -770,23 +774,24 @@ test('CB-06 after login a -14 send means the login expired: row error, a code-fi
   assert.equal(JSON.stringify(audited).includes('hello'), false)
 })
 
-test('CB-07 a -14 from the inbound poll after login expires the login and stops the poll', async (t) => {
+test('CB-07 a -14 from the inbound poll pauses the account session and stops the poll', async (t) => {
   const mock = await startIlinkMock({ statuses: ['confirmed'], updates: () => ({ ret: 0, errcode: -14, errmsg: 'session timeout' }) })
   t.after(() => mock.close())
-  const { ctx, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  const { ctx, home, rt } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await connectClawbot(ctx)
   await loginClawbot(ctx)
-  const expired = await until(async () => {
+  const paused = await until(async () => {
     const row = await rowOf(ctx)
-    return row.login?.state === 'login-expired' ? row : undefined
-  }, 'the expired login')
-  assert.equal(expired.state, 'error')
-  assert.match(expired.error, /scan the QR code again/)
+    return /WeChat account session paused/.test(row.error ?? '') ? row : undefined
+  }, 'the paused channel')
+  assert.equal(paused.state, 'error')
+  assert.notEqual(paused.login.state, 'login-expired')
+  assert.ok(rt.state.channels.wechat.ilink.pausedUntil > Date.now(), 'the deadline must be remembered')
   const polls = () => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/getupdates')).length
   const settled = polls()
   await new Promise(resolve => setTimeout(resolve, 200))
-  assert.equal(polls(), settled, 'the long poll stops once the session is gone')
+  assert.equal(polls(), settled, 'the long poll stops while the session is paused')
 })
 
 test('CB-08 a logged-in channel keeps its inbound long poll and its cursor, and a remount restarts it', async (t) => {
@@ -832,8 +837,14 @@ test('CB-09 a ClawBot Test sends directly and audits its real result, not a gues
   outcome = { ret: 0, errcode: -14, errmsg: 'session timeout' }
   const failed = await call(ctx, 'connector-test', { id: 'wechat' })
   assert.equal(failed.ok, true, JSON.stringify(failed))
-  assert.match(failed.value.find(item => item.id === 'wechat').error, /The WeChat login expired/)
+  assert.match(failed.value.find(item => item.id === 'wechat').error, /WeChat account session paused/)
   assert.match(audited.filter(entry => entry.source === 'wechat-notify').at(-1).text, /result -14$/)
+  // A paused Test answers without touching WeChat: the pause clock must not restart.
+  const afterFailed = mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/sendmessage')).length
+  const paused = await call(ctx, 'connector-test', { id: 'wechat' })
+  assert.equal(paused.ok, true, JSON.stringify(paused))
+  assert.match(paused.value.find(item => item.id === 'wechat').error, /WeChat account session paused/)
+  assert.equal(mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/sendmessage')).length, afterFailed)
   assert.equal(JSON.stringify(audited).includes('DS Bot: the WeChat channel works.'), false)
 })
 
@@ -1139,6 +1150,54 @@ test('CB-20 an older login without a baseurl keeps the configured host', async (
   assert.equal(rt.state.channels.wechat.ilink.baseurl, undefined)
   await until(() => (mock.calls.some(entry => entry.url.startsWith('/ilink/bot/msg/notifystart')) ? true : undefined), 'notifyStart on the configured host')
   await until(() => (mock.calls.some(entry => entry.url.startsWith('/ilink/bot/getupdates')) ? true : undefined), 'the long poll on the configured host')
+})
+
+// ---- -14 pauses, and reusing an existing bot binding ----
+test('CB-21 a paused channel skips the Bot API on mount and starts once the deadline passes', async (t) => {
+  const mock = await startIlinkMock({ statuses: ['wait'] })
+  t.after(() => mock.close())
+  const { ctx, rt, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const saved = await call(ctx, 'connector-set-settings', { id: 'wechat', values: { transport: 'clawbot', botId: 'b1' } })
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  // WeChat paused this account a moment ago; the old state carries the deadline.
+  rt.state.channels = { wechat: { ilink: { pausedUntil: Date.now() + 400, pausedReason: 'session timeout' } } }
+  const connected = await call(ctx, 'connector-connect', { id: 'wechat', values: { WECHAT_ILINK_TOKEN: 'preset-token' } })
+  assert.equal(connected.ok, true, JSON.stringify(connected))
+  const starts = () => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/msg/notifystart')).length
+  const polls = () => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/getupdates')).length
+  await new Promise(resolve => setTimeout(resolve, 200))
+  // While the window is open the mount touched nothing: any call would restart the clock.
+  assert.equal(starts(), 0)
+  assert.equal(polls(), 0)
+  await until(() => (starts() >= 1 ? true : undefined), 'notifyStart after the pause')
+  await until(() => (polls() >= 1 ? true : undefined), 'the long poll after the pause')
+})
+
+test('CB-22 the QR request offers the stored bot tokens so a login reuses its binding', async (t) => {
+  const mock = await startIlinkMock({ statuses: ['confirmed'] })
+  t.after(() => mock.close())
+  const { ctx, rt, home } = setup({ config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  await connectClawbot(ctx)
+  await loginClawbot(ctx)
+  const qrBodies = () => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/get_bot_qrcode')).map(entry => entry.json)
+  // The first ask had no stored token yet.
+  assert.deepEqual(qrBodies()[0].local_token_list, [])
+  // A refresh offers the token the login just stored.
+  const refreshed = await call(ctx, 'connector-command', { id: 'wechat', action: 'login-refresh' })
+  assert.equal(refreshed.ok, true, JSON.stringify(refreshed))
+  assert.deepEqual(qrBodies().at(-1).local_token_list, ['ilink-token'])
+  // Another WeChat instance's token rides along, this instance's first.
+  assert.equal((await call(ctx, 'connector-create-instance', { base: 'wechat' })).ok, true)
+  const otherSettings = await call(ctx, 'connector-set-settings', { id: 'wechat-2', values: { transport: 'clawbot', botId: 'b2' } })
+  assert.equal(otherSettings.ok, true, JSON.stringify(otherSettings))
+  const otherConnect = await call(ctx, 'connector-connect', { id: 'wechat-2', values: { WECHAT_ILINK_TOKEN: 'other-token' } })
+  assert.equal(otherConnect.ok, true, JSON.stringify(otherConnect))
+  await call(ctx, 'connector-command', { id: 'wechat', action: 'login-refresh' })
+  assert.deepEqual(qrBodies().at(-1).local_token_list, ['ilink-token', 'other-token'])
+  // A state from before this change has no pause field and keeps working.
+  assert.equal(rt.state.channels.wechat.ilink.pausedUntil, undefined)
 })
 
 // ---- P2: inbound listener and its gate ----

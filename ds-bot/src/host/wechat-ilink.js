@@ -130,11 +130,16 @@ export function createIlinkClient({
     backoffMs,
 
     // The QR request: JSON + AuthorizationType + X-WECHAT-UIN, no Authorization/base_info.
-    async getQrCode() {
+    // `local_token_list` carries this account's stored bot tokens (newest first), which is how
+    // the official client asks WeChat to reuse an existing bot binding instead of making one.
+    async getQrCode({ localTokens = [] } = {}) {
+      const tokens = (Array.isArray(localTokens) ? localTokens : [])
+        .filter(token => typeof token === 'string' && token !== '')
+        .slice(0, 10)
       const response = await request(`${baseUrl}/ilink/bot/get_bot_qrcode?bot_type=3`, {
         method: 'POST',
         headers: jsonHeaders({ ...common, AuthorizationType: 'ilink_bot_token', ...uinHeader() }),
-        body: '{}',
+        body: JSON.stringify({ local_token_list: tokens }),
         signal: signalOf(limits.qr),
       })
       return await answer(response)

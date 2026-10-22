@@ -65,16 +65,44 @@ const loginOf = (rt, id) => {
 }
 const consentOf = (rt, id) => rt.state?.channels?.[id]?.ilink?.consent
 const consentCurrent = (rt, id) => consentOf(rt, id)?.version === CONSENT_VERSION
-// After a login, `-14` is WeChat's "session timeout": the stored token is dead. Colour the
-// channel's row and wait for a new scan; never re-login on the user's behalf. During the QR
-// phase the same answer stays retryable (see `command`).
+// A 401/403 is a dead login: the row says so and waits for a new scan. A `-14` is different:
+// WeChat pauses the account's Bot session for about an hour, and every call that carries the
+// credential restarts that clock. The deadline is remembered in the channel state and the
+// channel stays off the network until it passes, instead of burning the window on retries.
 const LOGIN_EXPIRED = 'The WeChat login expired. Webhook channels are not affected; scan the QR code again.'
+const PAUSE_WINDOW_MS = 60 * 60 * 1000
 const expireLogin = (rt, id) => {
   Object.assign(loginOf(rt, id), { state: 'login-expired', qr: null, scanned: false, qrcode: null, error: LOGIN_EXPIRED })
 }
+const hhmm = (at) => {
+  const date = new Date(at)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+const pauseTextOf = (until) => `WeChat account session paused; retry after ${hhmm(until)}`
+const pausedUntilOf = (rt, id) => {
+  const value = rt.state?.channels?.[id]?.ilink?.pausedUntil
+  return Number.isFinite(value) && value > Date.now() ? value : 0
+}
+// The first pause wins: a second `-14` while the window is open must not extend it.
+const pauseIlink = (rt, id, reason) => {
+  const active = pausedUntilOf(rt, id)
+  if (active > 0) return active
+  const until = Date.now() + PAUSE_WINDOW_MS
+  const channels = rt.state.channels ?? (rt.state.channels = {})
+  const channel = channels[id] ?? (channels[id] = {})
+  const why = typeof reason === 'string' && reason !== '' ? reason : 'session timeout'
+  channel.ilink = { ...(channel.ilink ?? {}), pausedUntil: until, pausedReason: why.slice(0, 120) }
+  void rt.save().catch(() => {})
+  rt.warn?.('ds-bot: WeChat channel %s is paused by WeChat until %s', id, hhmm(until))
+  rt.diagnostics?.record?.({ source: 'wechat-login', text: `${id} paused until ${hhmm(until)} (${why})` })
+  return until
+}
 const ilinkFailure = (rt, id, error) => {
   const status = Number(error?.status)
-  if (error?.paused === true || status === 401 || status === 403) {
+  if (error?.paused === true) {
+    return new Error(pauseTextOf(pauseIlink(rt, id, error?.body?.errmsg)))
+  }
+  if (status === 401 || status === 403) {
     expireLogin(rt, id)
     return new Error(LOGIN_EXPIRED)
   }
@@ -84,6 +112,22 @@ const ilinkFailure = (rt, id, error) => {
 // The Bot API host the confirmed login named, kept with the scanned identity. Older state
 // has none: those channels keep the configured base.
 const ilinkBaseurlOf = (rt, id) => botBaseOf(rt.state?.channels?.[id]?.ilink?.baseurl)
+// The stored bot tokens this WeChat knows, this instance's first: the QR body asks WeChat to
+// reuse an existing bot binding instead of creating a new bot on every scan.
+const localIlinkTokens = (rt, id, secretName) => {
+  const names = []
+  try { names.push(secretName(ILINK_TOKEN)) } catch { /* the naming helper may refuse an id */ }
+  for (const key of Object.keys(rt.state?.connectors ?? {})) {
+    if (key !== 'wechat' && !key.startsWith('wechat-')) continue
+    names.push(key === 'wechat' ? ILINK_TOKEN : `${ILINK_TOKEN}_${key.slice('wechat-'.length)}`)
+  }
+  const tokens = []
+  for (const name of names) {
+    const value = rt.secretValue?.(name)
+    if (typeof value === 'string' && value !== '' && !tokens.includes(value)) tokens.push(value)
+  }
+  return tokens.slice(0, 10)
+}
 const rememberConsent = (rt, id) => {
   const channels = rt.state.channels ?? (rt.state.channels = {})
   const channel = channels[id] ?? (channels[id] = {})
@@ -340,6 +384,9 @@ function notifyToolClawbot({ channel, token, account, client, rt }) {
       const text = trim(args?.text)
       if (text === '') throw new Error('Write the message to send first.')
       if (text.length > 4_096) throw new Error('WeChat messages are limited to 4096 characters.')
+      // During a pause any call restarts the pause clock, so answer without touching WeChat.
+      const pausedUntil = pausedUntilOf(rt, channel)
+      if (pausedUntil > 0) throw new Error(pauseTextOf(pausedUntil))
       takeSend(rt, channel)
       try {
         await client.sendMessage({ token, toUserId: account, contextToken: undefined, text })
@@ -441,6 +488,8 @@ export default {
       const hub = inboundFor(rt)
       return hub.statusOf(id).status ?? { inbound: 'needs-secret' }
     }
+    const pausedUntil = pausedUntilOf(rt, id)
+    if (pausedUntil > 0) return { state: 'error', error: pauseTextOf(pausedUntil) }
     const login = loginOf(rt, id)
     if (login.state === 'login-expired') return { state: 'error', error: LOGIN_EXPIRED }
     return {}
@@ -464,7 +513,7 @@ export default {
     // Retry then asks again instead of polling a QR it never received.
     const requestQr = async () => {
       try {
-        const answer = await client.getQrCode()
+        const answer = await client.getQrCode({ localTokens: localIlinkTokens(rt, id, secretName) })
         // A remount replaced this login while the code was asked for: that card is gone.
         if (loginOf(rt, id) !== login) return
         const image = qrForCard(answer?.qrcode_img_content)
@@ -614,6 +663,8 @@ export default {
       if (typeof token !== 'string' || token === '' || typeof ilink.ilinkUserId !== 'string') {
         throw new Error('Scan the QR code to connect this ClawBot channel first.')
       }
+      const pausedUntil = pausedUntilOf(rt, id)
+      if (pausedUntil > 0) throw new Error(pauseTextOf(pausedUntil))
       const config = rt.config?.wechat !== null && typeof rt.config?.wechat === 'object' ? rt.config.wechat : {}
       const client = createIlinkClient({
         base: trim(config.ilinkBase) === '' ? undefined : trim(config.ilinkBase),
@@ -758,38 +809,64 @@ export default {
         deliveries.push({ fromUserId: message.from_user_id, text, contextToken: message.context_token })
         pump()
       }
-      // Best effort: WeChat learns the bot is online. A failure only warns.
-      void client.notifyStart({ token }).catch(error => rt.warn?.('ds-bot: WeChat channel %s did not report it is online: %s', id, error?.message ?? error))
-      // Keep the session alive: WeChat drops a login whose getUpdates loop stops, so a
-      // mounted channel with a token always polls. The cursor only advances on a non-empty
-      // one, and a `-14` ("session timeout") ends the loop with an expired login.
-      void (async () => {
-        while (!controller.signal.aborted) {
-          try {
-            const answer = await client.getUpdates({ token, cursor: channel.ilink?.cursor, signal: controller.signal })
-            if (controller.signal.aborted) return
-            if (typeof answer?.get_updates_buf === 'string' && answer.get_updates_buf !== '' && answer.get_updates_buf !== channel.ilink.cursor) {
-              channel.ilink.cursor = answer.get_updates_buf
-              void rt.save().catch(() => {})
+      let resumeTimer
+      // A paused channel must not call the Bot API at all: even notifyStart would restart the
+      // pause clock. Start (or restart) the session only once the deadline has passed.
+      const scheduleResume = (until) => {
+        if (resumeTimer !== undefined) clearTimeout(resumeTimer)
+        resumeTimer = setTimeout(() => {
+          resumeTimer = undefined
+          if (!controller.signal.aborted) startSession()
+        }, Math.max(0, until - Date.now()) + 50)
+        resumeTimer.unref?.()
+      }
+      const pauseNow = (reason) => scheduleResume(pauseIlink(rt, id, reason))
+      const startSession = () => {
+        // Best effort: WeChat learns the bot is online. A `-14` pauses the session instead.
+        void client.notifyStart({ token }).catch((error) => {
+          if (error?.paused === true) pauseNow(error?.body?.errmsg)
+          else rt.warn?.('ds-bot: WeChat channel %s did not report it is online: %s', id, error?.message ?? error)
+        })
+        // Keep the session alive: WeChat drops a login whose getUpdates loop stops, so a
+        // mounted channel with a token always polls. The cursor only advances on a non-empty
+        // one; a `-14` pauses the account session and holds every call until it expires.
+        void (async () => {
+          while (!controller.signal.aborted) {
+            try {
+              const answer = await client.getUpdates({ token, cursor: channel.ilink?.cursor, signal: controller.signal })
+              if (controller.signal.aborted) return
+              if (typeof answer?.get_updates_buf === 'string' && answer.get_updates_buf !== '' && answer.get_updates_buf !== channel.ilink.cursor) {
+                channel.ilink.cursor = answer.get_updates_buf
+                void rt.save().catch(() => {})
+              }
+              for (const message of Array.isArray(answer?.msgs) ? answer.msgs : []) accept(message)
+            } catch (error) {
+              if (controller.signal.aborted) return
+              if (error?.paused === true) {
+                pauseNow(error?.body?.errmsg)
+                return
+              }
+              if (Number(error?.status) === 401 || Number(error?.status) === 403) {
+                ilinkFailure(rt, id, error)
+                return
+              }
+              await new Promise(resolve => setTimeout(resolve, client.backoffMs()))
             }
-            for (const message of Array.isArray(answer?.msgs) ? answer.msgs : []) accept(message)
-          } catch (error) {
-            if (controller.signal.aborted) return
-            if (error?.paused === true || Number(error?.status) === 401 || Number(error?.status) === 403) {
-              ilinkFailure(rt, id, error)
-              return
-            }
-            await new Promise(resolve => setTimeout(resolve, client.backoffMs()))
           }
-        }
-      })()
+        })()
+      }
+      const pausedUntil = pausedUntilOf(rt, id)
+      if (pausedUntil > 0) scheduleResume(pausedUntil)
+      else startSession()
       return {
         tools,
         close: () => {
           controller.abort()
+          if (resumeTimer !== undefined) clearTimeout(resumeTimer)
           hub.forgetLocal(id)
           ilinkLogins.get(rt)?.delete(id)
-          void client.notifyStop({ token }).catch(() => {})
+          // A paused account hears nothing from us: notifyStop would restart the pause clock.
+          if (pausedUntilOf(rt, id) === 0) void client.notifyStop({ token }).catch(() => {})
         },
       }
     }
