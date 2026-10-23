@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { questionReply, viewReply } from './parts.js'
 import { boardArtifactPreview } from './board-artifacts.js'
+import { defaultRelayLimit } from './groups.js'
 import { validateViewAnswer } from '../shared/views.js'
 import { COLORS, EXTRA_COLORS, ROUTE } from './constants.js'
 
@@ -47,10 +48,10 @@ export function install(rt) {
     })),
     // `parts`: the members' hidden group Sessions and their earlier segments, for usage.
     // `lastActivity`: when the group's newest line or message was, in ms since the epoch.
-    rooms: Object.values(state.rooms).map(({ log, seen, lateRounds, sessions, segments, ...room }) => {
+    rooms: Object.values(state.rooms).map(({ log, seen, lateRounds, relays, sessions, segments, ...room }) => {
       const parts = [...Object.values(sessions ?? {}), ...Object.values(segments ?? {}).flat().map(segment => segment.sessionId)]
       const last = (log ?? []).filter(line => line.kind === undefined).at(-1)
-      return { ...room, parts, lastActivity: rt.roomActivityOf(room.id), ...(last ? { preview: last.who === 'User' ? last.text : `${last.who}：${last.text}` } : {}) }
+      return { ...room, relayLimitDefault: defaultRelayLimit(room), parts, lastActivity: rt.roomActivityOf(room.id), ...(last ? { preview: last.who === 'User' ? last.text : `${last.who}：${last.text}` } : {}) }
     }),
     exchangeTurns: state.exchangeTurns,
     questions: state.questions,
@@ -105,6 +106,11 @@ export function install(rt) {
       if (body.motion === null || body.motion === 'normal') delete state.prefs.motion
       else if (body.motion === 'quiet' || body.motion === 'lively') state.prefs.motion = body.motion
       else throw invalid('Motion must be quiet, normal or lively')
+    }
+    if (body.width !== undefined) {
+      if (body.width === null || body.width === 80) delete state.prefs.width
+      else if (Number.isInteger(body.width) && body.width >= 50 && body.width <= 100) state.prefs.width = body.width
+      else throw invalid('Width must be a whole percent from 50 to 100')
     }
     return rt.save()
   }
@@ -262,8 +268,14 @@ export function install(rt) {
             remove: Array.isArray(body.remove) ? body.remove : undefined,
             workDir: body.workDir,
             permission: body.permission,
+            relayLimit: body.relayLimit,
           })
           return ok({ room: view().rooms.find(entry => entry.id === room.id), changes })
+        }
+        case 'room-continue': {
+          await rt.load()
+          await rt.continueRoom(body.roomId)
+          return ok(view())
         }
         case 'folders':
         case 'folder-pick':
