@@ -292,6 +292,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
   const statuses = new Map(ids().map(id => [id, { state: 'off' }]))
   let queue = Promise.resolve()
   let stopped = false
+  // Secrets may load before the team file; their change only triggers a mount pass once the
+  // boot pass below has mounted everything with the loaded team.
+  let booted = false
 
 
   // A blocked toolbox target is refused outright: no approval can make it runnable.
@@ -1199,10 +1202,12 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       return
     }
     // A connector that says it is not ready for the level or settings it has shows the
-    // reason on its row and is not mounted; that is a setup step, not a failure.
+    // reason on its row and is not mounted; that is a setup step, not a failure. It is not
+    // a mount either: the key stays unset, so a later sync retries once the team file or
+    // the settings it read are complete.
     const note = levelNoteOf(id)
     if (note !== undefined) {
-      mounts.set(id, { token })
+      mounts.set(id, { token: undefined })
       statuses.set(id, { state: 'off' })
       return
     }
@@ -1888,9 +1893,20 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
 
   ctx.effect(() => {
     stopped = false
-    void rt.loadSecrets().then(() => {
+    // The team file loads lazily, after this module installs: a mount that ran first would
+    // read an empty team (no settings, no Bot), take a readiness note, and the next sync
+    // would skip it as already mounted. Wait for both, then mount for real.
+    const secretsLoaded = typeof rt.loadSecrets === 'function' ? rt.loadSecrets() : Promise.resolve()
+    const teamLoaded = typeof rt.load === 'function' ? rt.load() : Promise.resolve()
+    void Promise.all([
+      secretsLoaded.catch(error => rt.warn('ds-bot: secrets not loaded before the connectors: %s', reason(error))),
+      teamLoaded.catch(error => rt.warn('ds-bot: the Bot team not loaded before the connectors: %s', reason(error))),
+    ]).then(() => {
       ensureInstances()
+      // Nothing mounts before this pass: the team is loaded, so this is the real first sync
+      // and its readiness notes (if any) describe the team, not an empty one.
       for (const id of ids()) void sync(id)
+      booted = true
     })
     return () => {
       stopped = true
@@ -1904,6 +1920,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     connectorsView,
     connectorEndpoint,
     secretsChanged: () => {
+      if (!booted) return
       ensureInstances()
       for (const id of ids()) void sync(id)
     },

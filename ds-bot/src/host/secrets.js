@@ -97,10 +97,13 @@ export function install(rt) {
   let redact = text => text
   let refreshEnv = () => {}
 
-  const changed = () => {
+  // A failed read says nothing about the credentials a mount is using: the file may be
+  // briefly unreadable while its owner replaces it. Such a read updates the local view but
+  // does not tell the connectors to remount with an empty map.
+  const changed = (notify = true) => {
     redact = redactor([...secrets.values()])
     refreshEnv()
-    rt.secretsChanged?.()
+    if (notify) rt.secretsChanged?.()
   }
 
   // Error messages from JSON.parse quote the file, so only the code or name is logged.
@@ -127,11 +130,12 @@ export function install(rt) {
       if (error?.code === 'ENOENT') {
         blocked = undefined
         secrets.clear()
+        changed()
       } else {
         blocked = reason(error)
         rt.warn('ds-bot: unreadable secrets file %s (%s)', path, blocked)
+        changed(false)
       }
-      changed()
       return
     }
     let parsed
@@ -149,11 +153,12 @@ export function install(rt) {
         blocked = undefined
         secrets.clear()
         rt.warn('ds-bot: unreadable secrets file %s; backed up as %s', path, backup)
+        changed()
       } catch (error) {
         blocked = reason(error)
         rt.warn('ds-bot: unreadable secrets file %s; backup failed: %s', path, error)
+        changed(false)
       }
-      changed()
       return
     }
     blocked = undefined
