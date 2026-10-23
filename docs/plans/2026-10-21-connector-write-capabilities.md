@@ -227,12 +227,21 @@ denied — no level and no approval can run them.
 
 ### notify
 
-A message send is a write: at read level no send tool is registered. At write level every
-send asks, with the chat and the message text shown on the card (redacted and cut at 200
-characters). The user may turn on **automatic sends** for one connector
-(`connector-set-auto-push { id, enabled }`); turning it on asks once, and after that
-background sends skip the per-message card but append an audit entry to the team state
-(`{ at, source, result }`, never the message body). Turning it off takes effect at once.
+A message send is a write: at read level no send tool is registered. At write level a
+messaging connector sends **automatically by default** (`autoPush !== false`), so a Bot
+that reports progress does not raise one approval card per message. The card shows the
+value in force — an unset switch reads as on — and a switch can turn the per-message card
+back on (`connector-set-auto-push { id, enabled: false }`); a change takes effect at once.
+With the card on, the chat and the message text are shown (redacted and cut at 200
+characters) and a refusal sends nothing. Each automatic send appends one audit entry to the
+team state (`{ at, source, result }`, never the message body).
+
+A messaging connector sends at most 20 messages a minute, counted per host and per
+connector, so one connector's burst never blocks another's. The limit covers the automatic
+and the approved path alike, and the refused attempt is audited as a failure without the
+message. The WeChat channel follows the same rule through its own module tool (webhook and
+ClawBot transports: automatic sends, one audit entry per send without the body, 20 a
+minute). Every other connector write keeps the approval described above unchanged.
 
 ## Approval card with arguments
 
