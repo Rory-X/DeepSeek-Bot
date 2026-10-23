@@ -207,6 +207,8 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   // A notification connector keeps one secret and points it at a chat: the card draws the
   // secret's own fields plus the chat id, and tests the message path from the same row.
   const notify = connector.mode === 'notify'
+  // The host always sends a boolean: an explicit false is the only way to keep approvals on.
+  const autoPush = connector.autoPush === true
   const [chatDraft, setChatDraft] = useState(null)
   // `null` follows the view, so a chat id the host finds after a Test shows up in the field.
   const chatValue = chatDraft ?? (typeof connector.chatId === 'string' ? connector.chatId : '')
@@ -425,6 +427,24 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       typeof connector.chatId === 'string' && connector.chatId !== ''
         ? null
         : h('div', { className: 'bt-connector-hint' }, t('Send the bot a message first, then press Test.')))
+      : null,
+    // One notification connector can send without an approval card. The host decides the
+    // default; this switch only reports it and flips it.
+    notify && connector.state === 'ready'
+      ? h('div', { className: 'bt-connector-setting bt-connector-auto-push', 'data-auto-push': autoPush === true ? 'on' : 'off' },
+        h('div', { className: 'bt-connector-action-title' }, t('Automatic sends')),
+        h('div', { className: 'bt-connector-hint' }, t('Send messages as they happen. Turn this off to approve each one first.')),
+        h('div', { className: 'bt-connector-form-row', role: 'radiogroup', 'aria-label': t('Automatic sends') },
+          h('button', {
+            type: 'button', role: 'radio', 'aria-checked': autoPush !== true, className: 'bt-soft bt-soft-sm',
+            disabled: busy, 'data-auto-push-choice': 'off',
+            onClick: (event) => { event.stopPropagation(); if (autoPush === true) void run(actions.connectorSetAutoPush(connector.id, false)) },
+          }, t('Off')),
+          h('button', {
+            type: 'button', role: 'radio', 'aria-checked': autoPush === true, className: 'bt-soft bt-soft-sm',
+            disabled: busy, 'data-auto-push-choice': 'on',
+            onClick: (event) => { event.stopPropagation(); if (autoPush !== true) void run(actions.connectorSetAutoPush(connector.id, true)) },
+          }, t('On'))))
       : null,
     levelNote !== null ? h('div', { className: 'bt-connector-hint' }, levelNote) : null,
     needsReauth ? h('div', { className: 'bt-connector-hint' }, t('Click Connect to authorize with this access level again.')) : null,
