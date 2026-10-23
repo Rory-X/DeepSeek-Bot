@@ -1,15 +1,15 @@
-import { createElement as h, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createElement as h, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { FishLogo } from './dsh-primitives.js'
 import { isMainOf } from './sources.js'
 import { currentPart, previewOf, relativeShort } from './text.js'
-import { PlusIcon, SearchIcon, SidebarIcon, GaugeIcon, PlugIcon, ClockIcon, GearIcon, PinMarkIcon, ConnectorIcon, SwitchIcon, CloudDownloadIcon } from './icons.js'
+import { PlusIcon, SearchIcon, SidebarIcon, GaugeIcon, PlugIcon, ClockIcon, GearIcon, PinMarkIcon, ConnectorIcon, SwitchIcon, CloudDownloadIcon, SignOutIcon } from './icons.js'
 import { MAIN_LOOK } from './characters.js'
 import { botState, BotMark, BotAvatar, RoomAvatar } from './mark.js'
 import { reducedMotion } from './activity-row.js'
-
 import { workStateLine } from './member-status.js'
-import { springEasing, SPRING_SHAPE } from './motion.js'
+import { Shimmer, workPhrase } from './cells.js'
+import { springEasing, SPRING_SHAPE, useViewport, viewBottom } from './motion.js'
 import { hostText, t } from './i18n.js'
 import { showsDshRow } from './dsh-offer.js'
 import { useRowMenu } from './hold.js'
@@ -39,6 +39,9 @@ const useApproval = (useWork, match) => (useWork ? useWork(work => (work.approva
 const useGroupWork = (useWork, pick) => (useWork ? useWork(work => JSON.stringify(pick(work.rooms ?? {}))) : '[]')
 const workKeys = text => JSON.parse(text)
 const doingOf = ({ tool, said, note, target, switching, since }) => ({ tool, said, note, target, switching, since })
+const workLine = (lead, doing, more) => h(Shimmer, null, `${lead} · ${workPhrase(doing)}…${more > 0 ? ` +${more}` : ''}`)
+// The row already names the Bot; its own-chat preview is just what it is doing.
+const doingLine = doing => h(Shimmer, null, `${workPhrase(doing)}…`)
 // The Bots and groups a Bot waits for (handoffs.js), by the names they have now.
 const waitingFor = (roster, waits) => {
   const names = [...(waits?.bots ?? []).map(id => roster.byId[id]?.name), ...(waits?.rooms ?? []).map(id => roster.roomsById[id]?.name)].filter(Boolean)
@@ -61,16 +64,10 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   // Work in a group runs in a Session of its own, so the Bot's chat stays idle meanwhile.
   const groups = workKeys(useGroupWork(useWork, rooms => Object.entries(rooms).flatMap(([roomId, entries]) => entries.filter(entry => entry.botId === id).map(entry => ({ id: roomId, ...doingOf(entry) })))))
   const away = !running && groups.length > 0
-  // A Bot at work in its own chat, as the group's member list reads it: its own chat wins
-  // over a group there, so an entry that carries a room is the group's line.
-  const own = workKeys(useWork ? useWork(work => JSON.stringify(work.bots?.[id] ?? null)) : 'null')
   const state = botState(running || away, doing, alert)
-  // The row is the Bot, so its own chat needs no place named; a group is named without a
-  // joining word, and a long name is cut by the line's own ellipsis.
-  const busy = running && own !== null && own.roomId === undefined
-    ? { doing: own, where: '' }
-    : away ? { doing: groups[0], where: `· ${roster.roomsById[groups[0].id]?.name ?? t('a group chat')}` } : null
-  const busyLine = busy ? workStateLine({ ...busy, className: 'bt-member-state bt-row-state' }) : null
+  // A Bot running in its own chat previews what it is doing, like a group's row.
+  const runningLine = running && doing ? doingLine(doing) : null
+  const awayLine = away ? workLine(roster.roomsById[groups[0].id]?.name ?? t('a group chat'), groups[0], groups.length - 1) : null
   const waits = workKeys(useWork ? useWork(work => JSON.stringify(work.waiting?.[id] ?? null)) : 'null')
   const waitsFor = state === 'waiting' ? waitingFor(roster, waits) : ''
   if (bot.hidden && !active && !main) return null
@@ -96,9 +93,10 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   pinned && !wide ? h(PinMark) : null,
   wide ? h('span', { className: 'bt-row-body' },
     h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, bot.name), bot.role ? h('span', { className: 'bt-row-role' }, bot.role) : null, pinned ? h(PinMark) : null, time ? h('span', { className: 'bt-row-time' }, time) : null),
-    busyLine ? busyLine
-      : waitsFor ? h('span', { className: 'bt-row-preview' }, waitsFor)
-        : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
+    runningLine ? h('span', { className: 'bt-row-preview' }, runningLine)
+      : awayLine ? h('span', { className: 'bt-row-preview' }, awayLine)
+        : waitsFor ? h('span', { className: 'bt-row-preview' }, waitsFor)
+          : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
   wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true }) : null)
 }
 
@@ -613,11 +611,13 @@ function UpdateButton({ useUpdate, actions }) {
   const dshRow = showsDshRow(dsh, update?.app)
   if (!update?.available && !dshRow && phase === 'idle' && dshPhase === 'idle') return null
   const cloudPhase = phase === 'installing' || dshPhase === 'installing' ? 'installing' : phase !== 'idle' ? phase : dshPhase
-  const toggle = () => {
+  const tick = useViewport()
+  useLayoutEffect(() => {
+    if (!open) return
     const rect = button.current?.getBoundingClientRect()
     if (rect) setBox({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 288)), top: rect.bottom + 6 })
-    setOpen(value => !value)
-  }
+  }, [open, tick])
+  const toggle = () => setOpen(value => !value)
   const start = () => {
     setError('')
     void actions.installUpdate().catch(failure => setError(hostText(failure?.message ?? String(failure))))
@@ -796,19 +796,24 @@ function useAccountMenu(actions, place = 'up') {
   return { open, anchor, toggle, menu, close: () => setOpen(false) }
 }
 
+const NO_SUBSCRIBE = () => () => {}
+const NO_SNAPSHOT = () => null
+
 // The footer avatar opens an account menu above itself, with Bot settings as one
 // entry. Shell panels hidden from the Bot sidebar (plugins, automation) live here too.
 // `seat` is the shell's settings.launcher seat: at priority -10 the whale wins it
 // over a shell account plugin's own launcher (the Desktop's "··· More"), which comes
 // back in Agent mode; FooterAccount stands in while no seat exists at all.
 export function AccountLauncher({ seat = true, settingsOpen, openSettings, openOnboarding, actions }) {
-  const menu = useAccountMenu(actions, 'up')
+  const [open, setOpen] = useState(false)
+  const [box, setBox] = useState(null)
+  const button = useRef(null)
   useLayoutEffect(() => {
     if (!seat) return undefined
     actions.seatAccount(true)
     return () => actions.seatAccount(false)
   }, [seat])
-  useEffect(() => { if (settingsOpen) menu.close() }, [settingsOpen])
+  useEffect(() => { if (settingsOpen) setOpen(false) }, [settingsOpen])
   // The settings dialog links back to the shell's own settings (models, providers).
   useEffect(() => {
     if (!openSettings) return undefined
@@ -820,10 +825,93 @@ export function AccountLauncher({ seat = true, settingsOpen, openSettings, openO
     openShellOnboarding = openOnboarding
     return () => { if (openShellOnboarding === openOnboarding) openShellOnboarding = null }
   }, [openOnboarding])
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (event) => {
+      if (event.target instanceof Element && (event.target.closest('.bt-account-menu') || button.current?.contains(event.target))) return
+      setOpen(false)
+    }
+    const onKey = (event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); button.current?.focus() } }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey, true)
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true) }
+  }, [open])
+  // The shell's account plugin lends its sign-out operation; the item shows only
+  // when the plugin's entry is there and its account snapshot says signed in. The
+  // entry can arrive after this mounts, so its operations follow the entry.
+  const signIn = actions.signInEntry?.() ?? null
+  const ops = useMemo(() => signIn?.inject?.() ?? {}, [signIn])
+  const accountSource = ops.hooks?.account
+  const account = useSyncExternalStore(accountSource?.subscribe ?? NO_SUBSCRIBE, accountSource ? () => accountSource.getSnapshot() : NO_SNAPSHOT)
+  const signedIn = signIn !== null && typeof ops.signOut === 'function' && account?.view?.status === 'credential-stored'
+  const accountT = actions.accountT?.() ?? (key => key)
+  const [confirm, setConfirm] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [signOutError, setSignOutError] = useState('')
+  const askSignOut = async () => {
+    setSignOutError('')
+    let state = 'none'
+    try {
+      if (await ops.hasRunningAccountTasks?.()) state = 'running'
+    } catch { state = 'unknown' }
+    setConfirm(state)
+  }
+  const cancelSignOut = () => { setConfirm(null); setSignOutError('') }
+  const runSignOut = async () => {
+    setBusy(true)
+    setSignOutError('')
+    try {
+      await ops.signOut()
+      setConfirm(null)
+      setOpen(false)
+    } catch (error) {
+      setSignOutError(String(error?.message ?? error))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const tick = useViewport()
+  const anchor = () => {
+    const rect = button.current?.getBoundingClientRect()
+    if (rect) setBox({ left: rect.left, bottom: viewBottom() - rect.top + 5 })
+  }
+  useLayoutEffect(() => { if (open) anchor() }, [open, tick])
+  const toggle = () => { if (!open) anchor(); setOpen(value => !value) }
+  // Closing the menu drops a half-finished sign-out confirm with it.
+  useEffect(() => {
+    if (open) return
+    setConfirm(null)
+    setSignOutError('')
+    setBusy(false)
+  }, [open])
+  const groups = [
+    [
+      [t('Usage'), GaugeIcon, () => actions.openSettings('usage')],
+      [t('Connectors'), ConnectorIcon, () => actions.openConnectors()],
+      [t('Automation tasks'), ClockIcon, () => actions.selectPanel('schedules')],
+      [t('Bot settings'), GearIcon, () => actions.openSettings('general')],
+    ],
+    [
+      [t('Switch to classic Agent mode'), SwitchIcon, () => actions.setSurface('agent')],
+    ],
+  ]
+  if (signedIn) groups.push([[accountT('signOut'), SignOutIcon, askSignOut, undefined, true]])
   return h(Fragment, null,
-    h('button', { ref: menu.anchor, type: 'button', className: 'bt-account', 'aria-label': t('Account'), 'aria-haspopup': 'menu', 'aria-expanded': menu.open, onClick: menu.toggle },
+    h('button', { ref: button, type: 'button', className: 'bt-account', 'aria-label': t('Account'), 'aria-haspopup': 'menu', 'aria-expanded': open, onClick: toggle },
       h('span', { className: 'bt-you', 'aria-hidden': true }, h(BotMark, { look: MAIN_LOOK, size: 24 }))),
-    menu.menu)
+    open && box ? createPortal(h('div', { className: 'bt-menu bt-menu-up bt-account-menu', role: 'menu', 'aria-label': t('Account'), style: box },
+      confirm !== null ? h('div', { className: 'bt-confirm', role: 'alertdialog', 'aria-label': accountT('signOut') },
+        h('p', { className: 'bt-confirm-text' }, accountT(confirm === 'running' ? 'signOutRunningDescription' : confirm === 'unknown' ? 'signOutUnknownDescription' : 'signOutDescription')),
+        signOutError !== '' ? h('p', { className: 'bt-confirm-error', role: 'alert' }, signOutError) : null,
+        h('div', { className: 'bt-confirm-row' },
+          h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: cancelSignOut }, t('Cancel')),
+          h('button', { type: 'button', className: 'bt-confirm-go', disabled: busy, onClick: () => { void runSignOut() } }, accountT('signOut'))))
+        : groups.map((group, index) => h(Fragment, { key: index },
+          index > 0 ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
+          group.map(([label, Icon, run, hint, stay]) => h('button', {
+            key: label, type: 'button', role: 'menuitem',
+            onClick: () => { if (stay !== true) setOpen(false); void Promise.resolve(run()).catch(error => actions.reportError(error, 'menu')) },
+          }, h(Icon), h('span', { className: 'bt-menu-label' }, label), hint ? h('span', { className: 'bt-menu-hint' }, hint) : null))))), document.body) : null)
 }
 
 // Opens the Main Bot whenever the main view holds no Bot conversation, the way
@@ -896,6 +984,14 @@ export function BrandName() {
 // shell's footer classes are CSS-module names, so they match on their stems.
 export const SIDEBAR_CSS = `
 ${BOT_FOLDERS_CSS}
+.bt-confirm{width:260px;max-width:72vw;padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.bt-confirm-text{margin:0;font-size:13px;line-height:19px;color:var(--bt-ink-2)}
+.bt-confirm-error{margin:0;font-size:12px;line-height:17px;color:var(--bt-danger);overflow-wrap:anywhere}
+.bt-confirm-row{display:flex;justify-content:flex-end;gap:8px}
+.bt-menu .bt-confirm button{width:auto;min-height:0}
+.bt-confirm-go{height:28px;padding:0 14px;border:0;border-radius:999px;background:var(--bt-accent);color:var(--bt-accent-ink);font:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:opacity .12s ease}
+.bt-confirm-go:hover:not(:disabled){opacity:.9}
+.bt-confirm-go:disabled{opacity:.6;cursor:default}
 .bt-side-top .bt-brand{cursor:default;padding-left:6px}
 .bt-side-top .bt-brand:hover{background:none}
 .bt-brand .bt-mark{flex:none}
