@@ -108,6 +108,29 @@ function useDismiss(open, close, refs) {
   }, [open])
 }
 
+const clampValue = (value, low, high) => Math.min(Math.max(value, low), Math.max(low, high))
+
+// Every visible line of text in the transcript except the message the strip belongs to,
+// as boxes: a strip placed in a margin may not sit on a time, sender or neighbour's words.
+const textBoxesNear = (root, exclude) => {
+  const boxes = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node = walker.nextNode()
+  while (node !== null) {
+    if (node.nodeValue?.trim() && !exclude.contains(node)) {
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      for (const rect of range.getClientRects()) {
+        if (rect.width > 0 && rect.height > 0) boxes.push({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })
+      }
+    }
+    node = walker.nextNode()
+  }
+  return boxes
+}
+
+const hitsText = (rect, boxes) => boxes.some(box => rect.left < box.right && box.left < rect.right && rect.top < box.bottom && box.top < rect.bottom)
+
 // The hover toolbar beside a reply bubble: Add reaction, Reply, More. `open` is
 // the touch fallback: a tap on the bubble toggles it (see Bubble).
 function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, bubbleRef = null }) {
@@ -124,24 +147,52 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
   const [placed, setPlaced] = useState(null)
   useLayoutEffect(() => {
     if (!tapped) { setPlaced(null); return undefined }
+    let frame = 0
     const measure = () => {
+      frame = 0
       const strip = tools.current
       const anchor = bubbleRef?.current
       const line = strip?.parentElement
       if (strip === null || strip === undefined || anchor === null || anchor === undefined || line === null || line === undefined) return
       const bubble = rectOf(anchor)
+      if (bubble === null) return
+      const buttons = [...strip.querySelectorAll('.bt-tool')]
       const toolbar = rectOf(strip)
-      if (bubble === null || toolbar === null) return
-      const spot = placeToolbar({ bubble, toolbar, viewport: { width: window.innerWidth, height: viewBottom() } })
+      const buttonWidth = buttons.length === 0 ? toolbar?.width ?? 44 : Math.max(...buttons.map(button => button.offsetWidth))
+      const buttonHeight = buttons.length === 0 ? toolbar?.height ?? 44 : Math.max(...buttons.map(button => button.offsetHeight))
+      // A row of 44px tools needs more room than a phone leaves beside a wide bubble; as a
+      // column it is one button wide and fits that margin without taking a neighbour's line.
+      const row = { width: buttons.reduce((sum, button) => sum + button.offsetWidth, 0) + 2 * Math.max(0, buttons.length - 1) + 4, height: buttonHeight + 4 }
+      const stack = { width: buttonWidth, height: buttons.reduce((sum, button) => sum + button.offsetHeight, 0) + 2 * Math.max(0, buttons.length - 1) }
+      const viewport = { width: window.innerWidth, height: viewBottom() }
+      const boxes = textBoxesNear(line.closest('[data-conversation-scroll]') ?? document.body, anchor.closest('.bt-msg') ?? anchor)
+      const candidates = []
+      const consider = (spot, stacked) => {
+        if (spot === null || spot === undefined) return
+        const size = stacked ? stack : row
+        if (hitsText({ left: spot.left, top: spot.top, right: spot.left + size.width, bottom: spot.top + size.height }, boxes)) return
+        candidates.push({ spot, stacked })
+      }
+      for (const stacked of [false, true]) consider(placeToolbar({ bubble, toolbar: stacked ? stack : row, viewport }), stacked)
+      // Pin to the viewport's margin when the gap beside the bubble is taken by a label.
+      for (const stacked of [true, false]) {
+        const size = stacked ? stack : row
+        const top = clampValue(bubble.top + (bubble.height - size.height) / 2, 8, viewport.height - size.height - 8)
+        if (viewport.width - size.width - 8 >= bubble.right + 2) consider({ side: 'right', left: viewport.width - size.width - 8, top }, stacked)
+        if (8 + size.width <= bubble.left - 2) consider({ side: 'left', left: 8, top }, stacked)
+      }
+      const picked = candidates[0] ?? { spot: placeToolbar({ bubble, toolbar: stack, viewport }), stacked: true }
       const origin = line.getBoundingClientRect()
-      setPlaced({ side: spot.side, left: spot.left - origin.left, top: spot.top - origin.top })
+      setPlaced({ side: picked.spot.side, left: picked.spot.left - origin.left, top: picked.spot.top - origin.top, stack: picked.stacked })
     }
+    const schedule = () => { if (frame === 0) frame = requestAnimationFrame(measure) }
     measure()
-    window.addEventListener('resize', measure)
-    window.addEventListener('scroll', measure, true)
+    window.addEventListener('resize', schedule)
+    window.addEventListener('scroll', schedule, true)
     return () => {
-      window.removeEventListener('resize', measure)
-      window.removeEventListener('scroll', measure, true)
+      window.removeEventListener('resize', schedule)
+      window.removeEventListener('scroll', schedule, true)
+      if (frame !== 0) cancelAnimationFrame(frame)
     }
   }, [tapped, tick, bubbleRef])
   const close = () => setPanel(null)
@@ -171,6 +222,7 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
     ref: tools, className: 'bt-tools',
     'data-open': panel !== null || tapped || undefined,
     'data-side': tapped && placed !== null ? placed.side : undefined,
+    'data-stack': tapped && placed?.stack === true ? '' : undefined,
     style: tapped && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: 'none' } : undefined,
   },
     react ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Add reaction'), title: t('Add reaction'), 'aria-expanded': panel?.kind === 'react', onClick: event => open('react', event) }, h(SmileIcon)) : null,

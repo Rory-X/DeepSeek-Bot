@@ -38,6 +38,18 @@ test('a received bubble near the phone edge keeps its strip outside the words', 
   assert.ok(spot.side === 'below' || spot.side === 'above')
 })
 
+test('a stacked strip fits the margin beside a wide phone bubble instead of taking a line below it', () => {
+  for (const viewport of [{ width: 390, height: 800 }, { width: 320, height: 700 }]) {
+    const bubble = box(16, 100, viewport.width - 98, 120)
+    const toolbar = { width: 44, height: 140 }
+    const spot = placeToolbar({ bubble, toolbar, viewport })
+    const placed = { ...spot, right: spot.left + toolbar.width, bottom: spot.top + toolbar.height }
+    assert.equal(spot.side, 'right', `at ${viewport.width}px the stack fits the right margin`)
+    assert.ok(!overlaps(placed, bubble), 'the stacked strip stays outside the bubble')
+    assert.ok(inside(spot, toolbar, viewport), `the stacked strip stays inside a ${viewport.width}px viewport`)
+  }
+})
+
 test('an own message puts the strip on its left, where the right-aligned bubble leaves room', () => {
   const viewport = { width: 390, height: 800 }
   const bubble = box(300, 100, 82, 80)
@@ -70,4 +82,8 @@ test('the toolbar shows on hover or focus, and on a touch screen only after a ta
   // And a touch device no longer shows the strip everywhere all the time.
   assert.ok(!bundle.includes('@media (hover:none){.bt-tools{opacity:1;visibility:visible}'))
   assert.ok(!bundle.includes('@media (hover:none){.bt-utools{opacity:1;visibility:visible}'))
+  // In the margin the strip goes one button wide, so it never needs the next row's line.
+  assert.ok(bundle.includes('.bt-tools[data-stack]{flex-direction:column'))
+  // A flat message reserves that margin on a touch screen instead of covering a neighbour.
+  assert.ok(bundle.includes('body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead]>.bt-msg{box-sizing:border-box;padding-right:52px}'))
 })

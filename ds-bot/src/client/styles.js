@@ -1342,6 +1342,10 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 @media (hover:none){
   .bt-tools{border-radius:999px;padding:2px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
   .bt-tools[data-side]{margin-left:0}
+  /* One column in the margin beside a wide bubble: a row would need the next line's
+     room, and the strip may never cover a time or a sender label. */
+  .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:0}
+  body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead]>.bt-msg{box-sizing:border-box;padding-right:52px}
   .bt-tools::after{display:none}
   .bt-tool{width:44px;height:44px}
   .bt-menu button,.bt-menu [role=menuitem],.bt-react-strip button{min-height:44px}

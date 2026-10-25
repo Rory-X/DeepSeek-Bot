@@ -4375,6 +4375,10 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 @media (hover:none){
   .bt-tools{border-radius:999px;padding:2px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
   .bt-tools[data-side]{margin-left:0}
+  /* One column in the margin beside a wide bubble: a row would need the next line's
+     room, and the strip may never cover a time or a sender label. */
+  .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:0}
+  body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead]>.bt-msg{box-sizing:border-box;padding-right:52px}
   .bt-tools::after{display:none}
   .bt-tool{width:44px;height:44px}
   .bt-menu button,.bt-menu [role=menuitem],.bt-react-strip button{min-height:44px}
@@ -8461,6 +8465,24 @@ function useDismiss(open, close, refs) {
     };
   }, [open]);
 }
+var clampValue = (value, low, high) => Math.min(Math.max(value, low), Math.max(low, high));
+var textBoxesNear = (root, exclude) => {
+  const boxes = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node !== null) {
+    if (node.nodeValue?.trim() && !exclude.contains(node)) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        if (rect.width > 0 && rect.height > 0) boxes.push({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+      }
+    }
+    node = walker.nextNode();
+  }
+  return boxes;
+};
+var hitsText = (rect, boxes) => boxes.some((box) => rect.left < box.right && box.left < rect.right && rect.top < box.bottom && box.top < rect.bottom);
 function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, bubbleRef = null }) {
   const [panel, setPanel] = (0, import_react13.useState)(null);
   const [copied, setCopied] = (0, import_react13.useState)(false);
@@ -8473,24 +8495,51 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
       setPlaced(null);
       return void 0;
     }
+    let frame = 0;
     const measure = () => {
+      frame = 0;
       const strip = tools.current;
       const anchor = bubbleRef?.current;
       const line = strip?.parentElement;
       if (strip === null || strip === void 0 || anchor === null || anchor === void 0 || line === null || line === void 0) return;
       const bubble = rectOf(anchor);
+      if (bubble === null) return;
+      const buttons = [...strip.querySelectorAll(".bt-tool")];
       const toolbar = rectOf(strip);
-      if (bubble === null || toolbar === null) return;
-      const spot = placeToolbar({ bubble, toolbar, viewport: { width: window.innerWidth, height: viewBottom() } });
+      const buttonWidth = buttons.length === 0 ? toolbar?.width ?? 44 : Math.max(...buttons.map((button) => button.offsetWidth));
+      const buttonHeight = buttons.length === 0 ? toolbar?.height ?? 44 : Math.max(...buttons.map((button) => button.offsetHeight));
+      const row = { width: buttons.reduce((sum, button) => sum + button.offsetWidth, 0) + 2 * Math.max(0, buttons.length - 1) + 4, height: buttonHeight + 4 };
+      const stack = { width: buttonWidth, height: buttons.reduce((sum, button) => sum + button.offsetHeight, 0) + 2 * Math.max(0, buttons.length - 1) };
+      const viewport = { width: window.innerWidth, height: viewBottom() };
+      const boxes = textBoxesNear(line.closest("[data-conversation-scroll]") ?? document.body, anchor.closest(".bt-msg") ?? anchor);
+      const candidates = [];
+      const consider = (spot, stacked) => {
+        if (spot === null || spot === void 0) return;
+        const size = stacked ? stack : row;
+        if (hitsText({ left: spot.left, top: spot.top, right: spot.left + size.width, bottom: spot.top + size.height }, boxes)) return;
+        candidates.push({ spot, stacked });
+      };
+      for (const stacked of [false, true]) consider(placeToolbar({ bubble, toolbar: stacked ? stack : row, viewport }), stacked);
+      for (const stacked of [true, false]) {
+        const size = stacked ? stack : row;
+        const top = clampValue(bubble.top + (bubble.height - size.height) / 2, 8, viewport.height - size.height - 8);
+        if (viewport.width - size.width - 8 >= bubble.right + 2) consider({ side: "right", left: viewport.width - size.width - 8, top }, stacked);
+        if (8 + size.width <= bubble.left - 2) consider({ side: "left", left: 8, top }, stacked);
+      }
+      const picked = candidates[0] ?? { spot: placeToolbar({ bubble, toolbar: stack, viewport }), stacked: true };
       const origin = line.getBoundingClientRect();
-      setPlaced({ side: spot.side, left: spot.left - origin.left, top: spot.top - origin.top });
+      setPlaced({ side: picked.spot.side, left: picked.spot.left - origin.left, top: picked.spot.top - origin.top, stack: picked.stacked });
+    };
+    const schedule = () => {
+      if (frame === 0) frame = requestAnimationFrame(measure);
     };
     measure();
-    window.addEventListener("resize", measure);
-    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", schedule, true);
     return () => {
-      window.removeEventListener("resize", measure);
-      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
+      if (frame !== 0) cancelAnimationFrame(frame);
     };
   }, [tapped, tick, bubbleRef]);
   const close = () => setPanel(null);
@@ -8531,6 +8580,7 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
       className: "bt-tools",
       "data-open": panel !== null || tapped || void 0,
       "data-side": tapped && placed !== null ? placed.side : void 0,
+      "data-stack": tapped && placed?.stack === true ? "" : void 0,
       style: tapped && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: "none" } : void 0
     },
     react ? (0, import_react13.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("Add reaction"), title: t("Add reaction"), "aria-expanded": panel?.kind === "react", onClick: (event) => open("react", event) }, (0, import_react13.createElement)(SmileIcon)) : null,
