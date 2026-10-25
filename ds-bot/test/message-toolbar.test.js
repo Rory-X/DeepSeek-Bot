@@ -79,6 +79,11 @@ test('the toolbar shows on hover or focus, and on a touch screen only after a ta
   assert.ok(bundle.includes('.bt-utools[data-open]'))
   // The old touch rule parked the strip inside the bubble, over its text.
   assert.ok(!bundle.includes('.bt-tools{left:auto;right:4px'), 'no inside-the-bubble placement')
+  // A closed strip takes no room: a hidden 140px row must not widen the transcript.
+  assert.ok(bundle.includes('transform:translateY(-50%);display:none'), 'the closed strip is not laid out')
+  // The compact touch strip is one 36px button wide, so it fits a phone's margin.
+  assert.ok(bundle.includes('.bt-tool{width:36px;height:36px;border-radius:8px}'))
+  assert.ok(bundle.includes('@media (hover:hover){.bt-msg:hover>.bt-msg-line>.bt-tools'))
   // And a touch device no longer shows the strip everywhere all the time.
   assert.ok(!bundle.includes('@media (hover:none){.bt-tools{opacity:1;visibility:visible}'))
   assert.ok(!bundle.includes('@media (hover:none){.bt-utools{opacity:1;visibility:visible}'))
