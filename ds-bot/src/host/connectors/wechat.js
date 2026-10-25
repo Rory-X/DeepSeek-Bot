@@ -769,9 +769,9 @@ export default {
         }
         const answered = typeof result?.text === 'string' && result.text.trim() !== ''
         const reply = answered ? result.text.trim() : String(result?.message ?? FALLBACK_REPLY)
-        // A failed or timed-out turn still gets a readable answer in WeChat; the audit keeps
-        // the code only, never the words.
-        if (!answered) auditReply(reply.length, String(result?.code ?? 'bot-unavailable'))
+        // The turn's own outcome is a separate line; the send below audits itself exactly once,
+        // with what really happened to it. A failed or timed-out turn still answers in WeChat.
+        if (!answered) rt.diagnostics?.record?.({ source: 'wechat-inbound', text: `${id} turn result ${String(result?.code ?? 'bot-unavailable')}, ${reply.length} chars` })
         await sendReply(message, reply)
       }
       const pump = () => {
