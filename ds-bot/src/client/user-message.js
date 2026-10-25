@@ -5,6 +5,7 @@ import { BotMark } from './mark.js'
 import { CheckIcon, CopyIcon } from './icons.js'
 import { dateLocale, t } from './i18n.js'
 import { noHover } from './motion.js'
+import { registerOpenToolbar, closeOtherToolbars } from './message-toolbar.js'
 import { clockLabel, messageClock } from './text.js'
 import { useFold } from './fold.js'
 import { splitQuote, QuoteCard } from './quote.js'
@@ -99,17 +100,25 @@ export function UserMessageCell({ node, sessionId, useRoster, actions, renderMes
   const body = h(UserText, { text: shown, bots: mentionableBots(roster, sessionId), referenceLabels, skillNames: data.skillNames ?? [], references, actions })
   const row = useRef(null)
   // Touch has no hover: a tap on the bubble opens its copy tool, a tap elsewhere closes it.
+  const toolsId = useRef(Symbol('user-message-tools'))
   const [toolsOpen, setToolsOpen] = useState(false)
   useEffect(() => {
     if (!toolsOpen) return undefined
     const onDown = (event) => { if (!row.current?.contains(event.target)) setToolsOpen(false) }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('touchstart', onDown)
-    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('touchstart', onDown) }
+    const release = registerOpenToolbar(toolsId.current, () => setToolsOpen(false))
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('touchstart', onDown)
+      release()
+    }
   }, [toolsOpen])
   const tapTools = (event) => {
     if (!noHover() || event.target instanceof Element && event.target.closest('a,button,input,textarea,select,pre,code,[role=button],[role=link]')) return
-    setToolsOpen(value => !value)
+    if (toolsOpen) { setToolsOpen(false); return }
+    closeOtherToolbars(toolsId.current)
+    setToolsOpen(true)
   }
   return h('div', { ref: row, className: 'bt-umsg', 'data-steering': steering || undefined },
     h('div', { className: 'bt-ustack' },
@@ -140,8 +149,12 @@ export const USER_MESSAGE_CSS = `
 .bt-ufile-meta{font-size:12px;line-height:15px;color:var(--bt-ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-urefs{font-size:13px;line-height:18px;color:var(--bt-ink-3)}
 .bt-utools{display:flex;flex:none;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
-.bt-umsg:hover .bt-utools,.bt-umsg:focus-within .bt-utools{opacity:1;visibility:visible}
-/* A touch pointer never hovers, and a visibility:hidden child cannot take focus, so the
-   copy button has no way to appear. Show it outright. */
-@media (hover:none){.bt-utools{opacity:1;visibility:visible}}
+.bt-umsg:hover .bt-utools,.bt-umsg:focus-within .bt-utools,.bt-utools[data-open]{opacity:1;visibility:visible}
+/* A touch pointer never hovers: a tap opens the strip, and it sits outside the bubble's
+   left edge, where a right-aligned message keeps its margin. */
+@media (hover:none){
+  .bt-ustack{position:relative}
+  .bt-utools{position:absolute;right:calc(100% + 4px);top:50%;transform:translateY(-50%)}
+  .bt-utools button{width:44px;height:44px}
+}
 `

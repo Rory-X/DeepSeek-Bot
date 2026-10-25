@@ -8,6 +8,10 @@ import { noteClientError } from './diagnostics.js'
 export function teamActions({ call, after, partFor, roster, ui, live, cards, heldCards, turnClock }) {
   // A memory is a Bot's or a group chat's; both are opened by id.
   const memoryOf = id => (roster.getSnapshot().roomsById[id] ? { roomId: id } : { botId: id })
+  // The panel on a side chat's view, on the chat the strip tab or menu named.
+  const openSideChat = (sessionId, chatId) => {
+    ui.set(state => ({ ...state, details: sessionId, view: 'side', side: chatId ?? null, renaming: false, tab: null }))
+  }
   return {
     openBotFolders: (start = {}) => { ui.set(state => ({ ...state, botFolders: start, menu: null, newChat: null, palette: null })) },
     closeBotFolders: () => { ui.set(state => ({ ...state, botFolders: null })) },
@@ -31,11 +35,15 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
       })
     },
     // The open panel follows the main view; a subject with no browser (a group
-    // chat, an outside Session) settles on the details view.
+    // chat, an outside Session) settles on the details view. So does one that
+    // does not own the open side chat.
     followPanel: (id) => {
       ui.set((state) => {
         if (!state.details || state.details === id) return state
-        const view = state.view === 'browser' && roster.getSnapshot().byId[id] === undefined ? 'details' : state.view
+        const snap = roster.getSnapshot()
+        const view = state.view === 'browser' && snap.byId[id] === undefined ? 'details'
+          : state.view === 'side' && !(snap.sideChats?.[snap.byId[id]?.id] ?? []).some(chat => chat?.id === state.side) ? 'details'
+            : state.view
         return { ...state, details: id, view, renaming: false, tab: null }
       })
     },
@@ -49,10 +57,29 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     closeMemory: () => { ui.set(state => (state.memory ? { ...state, memory: null } : state)) },
     openConnectors: () => { ui.set(state => ({ ...state, settings: { page: 'connectors', id: null }, menu: null, palette: null, newChat: null })) },
     setPanelView: (view) => {
-      if (view !== 'details' && view !== 'browser') return
+      if (view !== 'details' && view !== 'browser' && view !== 'side') return
       ui.set(state => (state.details && state.view !== view ? { ...state, view } : state))
     },
-    closePanel: () => { ui.set(state => (state.details ? { ...state, details: null, view: 'details', renaming: false, tab: null } : state)) },
+    // A side chat on the panel's own view, opened from the strip, the `···`
+    // menus or `/side`. Closing the panel keeps the chats; only a tab's × deletes.
+    openSideChat,
+    // The roster is pulled before the panel opens on a new chat: a view on a chat
+    // the roster does not hold yet folds back into details.
+    newSideChat: async (sessionId) => {
+      const value = await after(call('side-new', { sessionId }))
+      openSideChat(sessionId, value?.chatId)
+      return value
+    },
+    sideCall: (name, body) => after(call(name, body)),
+    askSide: (sessionId, chatId, text) => after(call('side-ask', { sessionId, chatId, text })),
+    cancelSide: (chatId, entryId) => after(call('side-cancel', { chatId, entryId })),
+    closeSideChat: (chatId) => {
+      ui.set(state => (state.details && state.view === 'side' && state.side === chatId ? { ...state, view: 'details', side: null } : state))
+      return after(call('side-close', { chatId }))
+    },
+    closePanel: () => { ui.set(state => (state.details ? { ...state, details: null, view: 'details', renaming: false, tab: null, side: null } : state)) },
+    quote: (sessionId, text) => ui.set(state => ({ ...state, quote: { sessionId, text, token: Date.now() } })),
+    clearQuote: token => ui.set(state => (state.quote?.token === token ? { ...state, quote: null } : state)),
     setFlags: (id, flags) => after(call('set-flags', { id, ...flags })),
     deleteRoom: id => after(call('delete-room', { id })),
     openMenu: (menu) => { ui.set(state => ({ ...state, menu })) },
