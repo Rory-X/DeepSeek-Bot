@@ -5,6 +5,7 @@ import { colorOf, BotMark } from './mark.js'
 import { Bubbles } from './cells.js'
 import { stripLongNote } from './fold.js'
 import { useEscape, usePaneLeft } from './overlay-hooks.js'
+import { layoutOf } from './themes.js'
 import { t } from './i18n.js'
 import { ArrowDownIcon } from './icons.js'
 import { reducedMotion } from './activity-row.js'
@@ -95,6 +96,7 @@ export function ExchangeDialog({ pair, roster, actions, at }) {
   }, [pair[0], pair[1]])
   const left = roster.byId[pair[0]]
   const right = roster.byId[pair[1]]
+  const flat = layoutOf(roster.prefs) === 'flat'
   let lastDay = 0
   const paneLeft = usePaneLeft()
   return h('div', { className: 'bt-pane bt-exchange', style: { left: paneLeft }, 'data-leaving': leaving || undefined },
@@ -112,11 +114,12 @@ export function ExchangeDialog({ pair, roster, actions, at }) {
               lastDay = entry.time
               // A long message comes with its start only; the rest is read on request.
               const whole = entry.length === undefined ? undefined : { length: entry.length, load: () => actions.exchangeText(entry.id) }
+              const lead = h('span', { className: 'bt-lead' }, h(BotMark, { bot: bot, size: 22 }))
               return h(Fragment, { key: entry.id },
                 showDay ? h('time', { className: 'bt-time' }, dayLabel(entry.time)) : null,
                 h('div', { className: `bt-group-msg${hit === entry.id ? ' bt-exchange-hit' : ''}`, 'data-exchange-id': entry.id },
-                  h('span', { className: 'bt-group-name', style: { color: inkText(colorOf(bot)) } }, bot.name),
-                  h(Bubbles, { texts: [stripLongNote(entry.text)], roster, selfId: bot.id, actions, whole, lead: h('span', { className: 'bt-lead' }, h(BotMark, { bot: bot, size: 22 })) })))
+                  h('span', { className: 'bt-group-name', style: flat ? undefined : { color: inkText(colorOf(bot)) } }, flat ? lead : null, bot.name),
+                  h(Bubbles, { texts: [stripLongNote(entry.text)], roster, selfId: bot.id, actions, whole, lead: flat ? null : lead })))
             })),
       h('div', { className: 'bt-dialog-foot' }, h('button', { type: 'button', className: 'bt-soft', onClick: close }, t('Close Chat'))),
       entries !== null && offBottom

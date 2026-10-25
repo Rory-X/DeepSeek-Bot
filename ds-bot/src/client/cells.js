@@ -12,10 +12,14 @@ import { SecretToolCell } from './secret-card.js'
 import { t } from './i18n.js'
 import { call } from './api.js'
 import { failureLabel } from './diagnostics.js'
-import { turnReasoning, thinkingStep } from './turn-reasoning.js'
+import { turnReasoning, thinkingStep, opensReply } from './turn-reasoning.js'
 import { FOLD_AT, FOLD_HUGE, stripLongNote, useFold } from './fold.js'
 import { noHover, useViewport, viewBottom } from './motion.js'
+import { placeToolbar, rectOf, registerOpenToolbar, closeOtherToolbars } from './message-toolbar.js'
 import { heldCardKey } from './sources.js'
+import { BtwCardView } from './btw.js'
+import { partIndexOf, withBtwRows } from './btw-model.js'
+import { layoutOf, thinkingShown } from './themes.js'
 
 export { clockLabel }
 
@@ -55,21 +59,29 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
   const key = msgKey ? `${msgKey}:${index}` : undefined
   const body = h(MarkdownText, { text: linkMentions(shown, roster.bots, selfId), streaming: live, labels: mdLabels(), variant: 'compact', fileMentions: mentions })
   const row = useRef(null)
+  const bubble = useRef(null)
+  const toolsId = useRef(Symbol('message-tools'))
   // Touch has no hover: a tap on the bubble opens its tools, a tap elsewhere
   // closes them. Interactive targets keep their own meaning.
   const [toolsOpen, setToolsOpen] = useState(false)
   useDismiss(toolsOpen, () => setToolsOpen(false), [row])
+  useEffect(() => {
+    if (!toolsOpen) return undefined
+    return registerOpenToolbar(toolsId.current, () => setToolsOpen(false))
+  }, [toolsOpen])
   const tapTools = (event) => {
     if (!noHover() || event.target instanceof Element && event.target.closest('a,button,input,textarea,select,pre,code,[role=button],[role=link]')) return
-    setToolsOpen(value => !value)
+    if (toolsOpen) { setToolsOpen(false); return }
+    closeOtherToolbars(toolsId.current)
+    setToolsOpen(true)
   }
   return h('div', { ref: row, className: 'bt-msg', onClick: tapTools },
     h('div', { className: 'bt-msg-line' },
       lead,
-      h('div', { className: 'bt-bubble', 'data-folded': folded || undefined },
+      h('div', { ref: bubble, className: 'bt-bubble', 'data-folded': folded || undefined },
         control ? h('div', { className: 'bt-fold-body' }, body) : body,
         control),
-      live ? null : h(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t('Bot'), bot: roster.byId[selfId], sessionId, react: key ? emoji => actions.toggleReaction(msgKey, index, emoji) : undefined, actions, open: toolsOpen })),
+      live ? null : h(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t('Bot'), bot: roster.byId[selfId], sessionId, react: key ? emoji => actions.toggleReaction(msgKey, index, emoji) : undefined, actions, open: toolsOpen, bubbleRef: bubble })),
     picked.length ? h('div', { className: 'bt-reacts' }, picked.map(emoji => h('button', {
       key: emoji, type: 'button', className: 'bt-react', 'aria-label': t('Remove reaction {emoji}', { emoji }), onClick: () => actions.toggleReaction(msgKey, index, emoji),
     }, emoji))) : null)
@@ -98,7 +110,7 @@ function useDismiss(open, close, refs) {
 
 // The hover toolbar beside a reply bubble: Add reaction, Reply, More. `open` is
 // the touch fallback: a tap on the bubble toggles it (see Bubble).
-function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped }) {
+function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, bubbleRef = null }) {
   // The anchor element is kept, not its rect: the visible viewport can move
   // (on-screen keyboard) while the popover is open.
   const [panel, setPanel] = useState(null)
@@ -106,6 +118,32 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
   const tools = useRef(null)
   const pop = useRef(null)
   const tick = useViewport()
+  // A tap puts the strip outside the bubble: beside it when the column has room, on a
+  // line above or below it when it does not. Measured before paint, so it never covers
+  // the words waiting for a layout pass.
+  const [placed, setPlaced] = useState(null)
+  useLayoutEffect(() => {
+    if (!tapped) { setPlaced(null); return undefined }
+    const measure = () => {
+      const strip = tools.current
+      const anchor = bubbleRef?.current
+      const line = strip?.parentElement
+      if (strip === null || strip === undefined || anchor === null || anchor === undefined || line === null || line === undefined) return
+      const bubble = rectOf(anchor)
+      const toolbar = rectOf(strip)
+      if (bubble === null || toolbar === null) return
+      const spot = placeToolbar({ bubble, toolbar, viewport: { width: window.innerWidth, height: viewBottom() } })
+      const origin = line.getBoundingClientRect()
+      setPlaced({ side: spot.side, left: spot.left - origin.left, top: spot.top - origin.top })
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [tapped, tick, bubbleRef])
   const close = () => setPanel(null)
   useDismiss(panel !== null, close, [tools, pop])
   const open = (kind, event) => { if (panel?.kind === kind) { close(); return } setPanel({ kind, node: event.currentTarget }) }
@@ -129,7 +167,12 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
   const item = (label, Icon, run) => h('button', { key: label, type: 'button', role: 'menuitem', onClick: () => { close(); run() } }, h(Icon), label)
-  return h('div', { ref: tools, className: 'bt-tools', 'data-open': panel !== null || tapped || undefined },
+  return h('div', {
+    ref: tools, className: 'bt-tools',
+    'data-open': panel !== null || tapped || undefined,
+    'data-side': tapped && placed !== null ? placed.side : undefined,
+    style: tapped && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: 'none' } : undefined,
+  },
     react ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Add reaction'), title: t('Add reaction'), 'aria-expanded': panel?.kind === 'react', onClick: event => open('react', event) }, h(SmileIcon)) : null,
     sessionId ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Reply'), title: t('Reply'), onClick: (event) => actions.quote(sessionId, text, bot, event.currentTarget.closest('.bt-msg-line')?.querySelector('.bt-bubble') ?? event.currentTarget.closest('.bt-msg-line')) }, h(ReplyIcon)) : null,
     h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('More message actions'), title: t('More'), 'aria-haspopup': 'menu', 'aria-expanded': panel?.kind === 'more', onClick: event => open('more', event) }, copied ? h(CheckIcon) : h(DotsIcon)),
@@ -224,14 +267,14 @@ export function AssistantCell({ node, groupPart, sessionId, openFile, fileMentio
   const texts = groupPart === 'reasoning' ? [] : data.blocks.filter(block => block.kind === 'text' && block.text.trim() !== '').map(block => block.text)
   const running = data.status === 'running'
   const members = steps.length ? steps : [data]
-  const reasoning = groupPart === 'response' ? '' : turnReasoning(steps, data)
+  const shown = thinkingShown(roster.prefs)
+  const reasoning = groupPart === 'response' || !shown ? '' : turnReasoning(steps, data)
   // A live step of the same Turn keeps the row ticking even when it sits on an
   // earlier step's cell.
-  const thinking = groupPart === 'response' ? undefined : thinkingStep(members)
+  const thinking = groupPart === 'response' || !shown ? undefined : thinkingStep(members)
   const ms = useThinkingMs({ sessionId, turn: data.turn, settledSteps: members.filter(step => step.status !== 'running').length, skip: hidden || reasoning === '' })
-  // A streaming reply — or a live reasoning row — stands in for the activity row.
+  // A streaming reply stands in for the activity row.
   useLiveNote(actions, sessionId, `text:${node.key ?? data.seq}`, !hidden && running && texts.length > 0 ? { text: true } : null)
-  useLiveNote(actions, sessionId, `think:${node.key ?? data.seq}`, !hidden && thinking !== undefined && reasoning !== '' ? { text: true } : null)
   if (hidden) return null
   // A relay spliced mid-turn is a 'context' node, hidden from the chat flow on
   // DSH 0.2; the step that answers it shows the event line where it was read,
@@ -239,6 +282,11 @@ export function AssistantCell({ node, groupPart, sessionId, openFile, fileMentio
   const relays = relayPart(data, groupPart) ? relaysBefore(contexts, steps, data) : []
   if (texts.length === 0 && !reasoning && relays.length === 0) return null
   const selfId = roster.byId[sessionId]?.id ?? sessionId
+  // The flat layout heads a reply with who speaks, once per Turn: in the step that opens
+  // it, in that step's reasoning part when the reasoning shows there.
+  const speaker = layoutOf(roster.prefs) === 'flat' ? roster.byId[sessionId] : undefined
+  const head = speaker !== undefined && opensReply(steps, data, shown)
+    && (reasoning !== '' || (texts.length > 0 && !(groupPart === 'response' && shown && turnReasoning(steps, data) !== '')))
   return h(Fragment, null,
     relays.map(relay => {
       const source = relay.source
@@ -251,6 +299,7 @@ export function AssistantCell({ node, groupPart, sessionId, openFile, fileMentio
         whole: true,
       })
     }),
+    head ? h(SpeakerHead, { bot: speaker, time: data.time }) : null,
     reasoning ? h(ThinkingRow, {
       text: reasoning, live: thinking !== undefined, viewKey: `${sessionId}:${data.turn}`,
       // The live clock counts the settled steps too: backing `at` by the settled
@@ -276,18 +325,27 @@ function EventLine({ prefix, bots, joiner = t('and'), onOpen, whole = false }) {
   return h('div', { className: 'bt-event' }, parts)
 }
 
+// The flat layout's head over a Bot's reply in its own chat: avatar, name, time.
+function SpeakerHead({ bot, time }) {
+  return h('div', { className: 'bt-group-name' },
+    h('span', { className: 'bt-lead' }, h(BotMark, { bot, size: 22 })), bot.name,
+    Number.isFinite(time) ? h('span', { className: 'bt-group-time', title: clockLabel(time) }, messageClock(time)) : null)
+}
+
 // One Bot message inside a group chat: avatar, name (with its group role), when it ran
-// and how long it took, bubble.
+// and how long it took, bubble. The flat layout moves the avatar from beside the last
+// bubble to the head of the name row, so the text below runs the whole width.
 function GroupMessage({ bot, text, texts = [text], room, roster, actions, msgKey, useUi, whole, time, duration }) {
   const lead = h('button', { type: 'button', className: 'bt-lead', 'aria-label': t("Open {name}'s chat", { name: bot.name }), onClick: () => actions.openSession(bot.id) },
     h(BotMark, { bot, size: 22 }))
+  const flat = layoutOf(roster.prefs) === 'flat'
   const took = Number.isFinite(duration) ? elapsedLabel(duration) : undefined
   return h('div', { className: 'bt-group-msg' },
-    h('span', { className: 'bt-group-name', style: { color: inkText(colorOf(bot)) } }, bot.name,
+    h('span', { className: 'bt-group-name', style: flat ? undefined : { color: inkText(colorOf(bot)) } }, flat ? lead : null, bot.name,
       room?.admin === bot.id ? h('span', { className: 'bt-group-role' }, t('Admin')) : null,
       Number.isFinite(time) ? h('span', { className: 'bt-group-time', title: clockLabel(time) }, messageClock(time)) : null,
       took ? h('span', { className: 'bt-group-took', title: t('Ran for {duration}', { duration: took }) }, took) : null),
-    h(Bubbles, { texts, roster, selfId: bot.id, actions, sessionId: room?.id, msgKey, useUi, lead, whole }))
+    h(Bubbles, { texts, roster, selfId: bot.id, actions, sessionId: room?.id, msgKey, useUi, lead: flat ? null : lead, whole }))
 }
 
 // A member's messages in a row, as one block under its name: what it says while it
@@ -353,38 +411,54 @@ function EarlierUser({ row, roster }) {
 // Pages load from the host as the user scrolls up; a thin line marks where each
 // part begins, the last one where the current part begins.
 function EarlierParts({ sessionId, roster, actions }) {
-  const [view, setView] = useState({ items: [], cursor: undefined, loading: true, failed: false, startedAt: null })
+  const [view, setView] = useState({ pages: [], cursor: undefined, loading: true, failed: false, startedAt: null })
   const top = useRef(null)
   const busy = useRef(false)
-  const alive = useRef(true)
+  const generation = useRef(0)
   const restore = useRef(null)
   const load = (cursor) => {
     if (busy.current) return
+    const mine = generation.current
+    // The host numbers a page by the same part index: cursor.part, or the part before this one.
+    const partIndex = partIndexOf(roster.byId[sessionId], sessionId, cursor)
     busy.current = true
     setView(current => ({ ...current, loading: true, failed: false }))
     actions.earlier(sessionId, cursor).then((page) => {
+      if (mine !== generation.current) return
       busy.current = false
-      if (!alive.current) return
       // The chat's scroller does not anchor content prepended above the viewport,
       // so the page keeps its distance from the end by hand.
       const scroller = top.current && scrollParent(top.current)
       if (scroller) restore.current = { scroller, fromEnd: scroller.scrollHeight - scroller.scrollTop }
-      setView(current => ({ items: [...page.items, ...current.items], cursor: page.cursor, loading: false, failed: false, startedAt: page.startedAt ?? current.startedAt }))
+      const incoming = Array.isArray(page.items) ? page.items : []
+      setView(current => {
+        const pages = current.pages.slice()
+        const at = pages.findIndex(entry => entry.partIndex === partIndex)
+        // The host sends a part's aside cards on every page of that part.
+        const btw = Array.isArray(page.btw) ? page.btw : (at >= 0 ? pages[at].btw : [])
+        if (at >= 0) pages[at] = { partIndex, items: [...incoming, ...pages[at].items], btw }
+        else pages.push({ partIndex, items: incoming, btw })
+        pages.sort((a, b) => a.partIndex - b.partIndex)
+        return { pages, cursor: page.cursor, loading: false, failed: false, startedAt: page.startedAt ?? current.startedAt }
+      })
     }, () => {
+      if (mine !== generation.current) return
       busy.current = false
-      if (alive.current) setView(current => ({ ...current, loading: false, failed: true }))
+      setView(current => ({ ...current, loading: false, failed: true }))
     })
   }
   useEffect(() => {
-    alive.current = true
+    generation.current += 1
+    busy.current = false
+    setView({ pages: [], cursor: undefined, loading: true, failed: false, startedAt: null })
     load(undefined)
-    return () => { alive.current = false }
+    return () => { generation.current += 1 }
   }, [sessionId])
   useLayoutEffect(() => {
     const pending = restore.current
     restore.current = null
     if (pending) pending.scroller.scrollTop = pending.scroller.scrollHeight - pending.fromEnd
-  }, [view.items])
+  }, [view.pages])
   useEffect(() => {
     const node = top.current
     if (!node || view.loading || view.failed || !view.cursor || typeof IntersectionObserver !== 'function') return undefined
@@ -394,12 +468,14 @@ function EarlierParts({ sessionId, roster, actions }) {
     observer.observe(node)
     return () => observer.disconnect()
   }, [view.cursor, view.loading, view.failed])
+  const items = []
+  for (const page of view.pages) items.push(...withBtwRows(page.items, page.btw))
   return h('div', { className: 'bt-earlier', role: 'feed', 'aria-label': t('Earlier messages'), 'aria-busy': view.loading },
     h('div', { ref: top, className: 'bt-earlier-top' },
       view.loading ? h(Shimmer, null, t('Loading earlier messages…'))
         : view.failed ? h('button', { type: 'button', className: 'bt-soft', onClick: () => load(view.cursor) }, t('Couldn’t load earlier messages · Retry'))
           : view.cursor ? h('button', { type: 'button', className: 'bt-soft', onClick: () => load(view.cursor) }, t('Load earlier')) : null),
-    h(ChatRows, { items: view.items, sessionId, roster, actions }),
+    h(ChatRows, { items, sessionId, roster, actions }),
     h(PartLine, { time: view.startedAt }))
 }
 
@@ -440,7 +516,12 @@ function chatRow(row, key, { sessionId, selfId, roster, actions, useUi }) {
     case 'answer': return h(AnsweredReply, { key, node: { data: row } })
     // A display-only view replays from the blueprint the host kept on the call.
     case 'view': return h(WidgetCell, { key, sessionId, callId: row.callId, args: { text: name => name === 'title' ? row.title : undefined, value: name => name === 'view' ? row.view : undefined }, done: true, isError: false, roster, actions })
-    case 'bot': return h(Bubbles, { key, texts: row.texts, roster, selfId, actions, sessionId: useUi ? sessionId : undefined, msgKey: useUi ? `${sessionId}:${row.time}` : undefined, useUi, fold: FOLD_HUGE })
+    case 'bot': {
+      const bubbles = h(Bubbles, { key, texts: row.texts, roster, selfId, actions, sessionId: useUi ? sessionId : undefined, msgKey: useUi ? `${sessionId}:${row.time}` : undefined, useUi, fold: FOLD_HUGE })
+      const speaker = layoutOf(roster.prefs) === 'flat' ? roster.byId[selfId] : undefined
+      return speaker ? h(Fragment, { key }, h(SpeakerHead, { bot: speaker, time: row.time }), bubbles) : bubbles
+    }
+    case 'btw': return h(BtwCardView, { key, card: row.card, actions })
     case 'event': {
       if (row.role === 'report') return h(GroupEvent, { key, prefix: t('Replies from'), room: roster.roomsById[row.roomId], name: t('a group chat'), roster, actions })
       const other = roster.byId[row.botId] ?? { id: row.botId, name: row.name ?? t('a Bot'), color: 'gray' }
@@ -709,8 +790,8 @@ function toolActivity(name, arg, findBot, self) {
 // call's own description, else the kind of tool and what it works on. `doing` is a work
 // entry, or just a tool name.
 export function workPhrase(doing) {
-  const { tool, said, note, target, switching } = typeof doing === 'string' ? { tool: doing } : doing ?? {}
-  if (switching) return t('Moving to a fresh conversation')
+  const { tool, said, note, target, switching, folder } = typeof doing === 'string' ? { tool: doing } : doing ?? {}
+  if (switching) return folder === true ? t('Switching working folder') : t('Moving to a fresh conversation')
   const own = (said || note)?.replace(/[\s.。…]+$/u, '')
   if (own) return own
   if (!tool) return t('Thinking about it')

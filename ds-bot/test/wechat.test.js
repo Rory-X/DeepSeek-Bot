@@ -1980,12 +1980,17 @@ test('G-2 a URL that cannot be stored keeps working outbound and is retried late
   const { ctx, rt } = setup({ home })
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
   await rt.load()
+  // The host mounts at startup, so it may already have moved the plain URL into the store.
+  // Put the scenario back where a refusing store leaves it: the plain URL is the only copy.
+  await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the channel at startup')
+  rt.state.connectors.wechat.settings = { ...rt.state.connectors.wechat.settings, webhookUrl: receiver.url }
   // The credential store refuses the write; the plain URL must stay usable.
   const real = rt.secretEndpoint
   rt.secretEndpoint = async (endpoint, body) => {
     if (endpoint === 'secret-set' && body.name === 'WECHAT_WEBHOOK_URL') throw new Error('store down')
     return await real(endpoint, body)
   }
+  if (rt.secretValue('WECHAT_WEBHOOK_URL') !== undefined) await rt.secretEndpoint('secret-delete', { name: 'WECHAT_WEBHOOK_URL' })
   await call(ctx, 'connector-retry', { id: 'wechat' })
   await until(async () => ((await rowOf(ctx))?.state === 'ready' ? true : undefined), 'the fallback channel')
   assert.equal(rt.state.connectors.wechat.settings.webhookUrl, receiver.url)
