@@ -359,7 +359,7 @@ function turnsHost(state = { exchangeTurns: {}, questions: {} }, { selfOf = id =
   }
   installTurns(rt)
   let seq = 0
-  const emit = (id, type, data, time) => listener({ id }, { type, seq: ++seq, data, ...(time === undefined ? {} : { time }) })
+  const emit = (id, type, data, extra) => listener({ id }, { type, seq: ++seq, data, ...extra })
   return { rt, emit, delivered }
 }
 

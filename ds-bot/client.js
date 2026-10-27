@@ -3961,9 +3961,10 @@ body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:
 .bt-msg-line>.bt-bubble{max-width:none;min-width:0}
 /* The same bubble width as beside an avatar column: the share of (100% - 30px), plus the 30px. */
 .bt-astack[data-lead]>.bt-msg{max-width:min(calc(var(--bt-msg-w) * (100% - 30px) + 30px),calc(100% - 52px))}
-.bt-tools{position:absolute;top:50%;left:100%;margin-left:6px;transform:translateY(-50%);display:flex;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
+.bt-tools{position:absolute;top:50%;left:100%;margin-left:6px;transform:translateY(-50%);display:none;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
 .bt-tools::after{content:"";position:absolute;top:-8px;bottom:-8px;right:100%;width:128px;z-index:-1}
-.bt-msg:hover>.bt-msg-line>.bt-tools,.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open]{opacity:1;visibility:visible}
+.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open]{display:flex;opacity:1;visibility:visible}
+@media (hover:hover){.bt-msg:hover>.bt-msg-line>.bt-tools{display:flex;opacity:1;visibility:visible}}
 /* A touch pointer never hovers, and the :focus-within fallback cannot fire either: a
    visibility:hidden child cannot take focus. Show the toolbar outright. */
 @media (hover:none){
@@ -3982,6 +3983,8 @@ body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead
 body[data-bt-layout=flat] .bt-bubble{background:none;padding:0;border-radius:0}
 body[data-bt-layout=flat] .bt-tools{top:-14px;right:0;left:auto;margin-left:0;transform:none;padding:2px;border-radius:999px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
 body[data-bt-layout=flat] .bt-tools::after{display:none}
+/* When the margin only fits one column, the strip stacks and stays out of the words. */
+.bt-tools[data-stack]{flex-direction:column;gap:2px;padding:2px;border-radius:10px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
 .bt-tool{width:24px;height:24px;border:0;padding:0;border-radius:6px;background:none;color:var(--bt-ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s ease,color .12s ease}
 .bt-tool:hover,.bt-tool[aria-expanded=true]{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-tool:active{background:var(--bt-active)}
@@ -4427,17 +4430,17 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
 /* Touch devices never hover: tap-open toolbars (data-open on the message), always
    visible icon buttons and 44px targets replace the hover affordances. */
 @media (hover:none){
-  .bt-tools{border-radius:999px;padding:2px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
+  .bt-tools{border-radius:12px;padding:2px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
   .bt-tools[data-side]{margin-left:0}
   /* One column in the margin beside a wide bubble: a row would need the next line's
      room, and the strip may never cover a time or a sender label. */
   .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:0}
   body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead]>.bt-msg{box-sizing:border-box;padding-right:52px}
   .bt-tools::after{display:none}
-  .bt-tool{width:44px;height:44px}
+  .bt-tool{width:36px;height:36px;border-radius:8px}
   .bt-menu button,.bt-menu [role=menuitem],.bt-react-strip button{min-height:44px}
   .bt-utools[data-open]{opacity:1;visibility:visible}
-  .bt-utools button{width:44px;height:44px}
+  .bt-utools button{width:36px;height:36px}
   [data-chat-flow-kind=user] [class*="_actions"] button{width:44px;height:44px}
 }
 [data-composer-card]:has(button[class*="_primary"]:disabled) .bt-voice{display:inline-grid}
@@ -8456,6 +8459,7 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
   const bubble = (0, import_react13.useRef)(null);
   const toolsId = (0, import_react13.useRef)(/* @__PURE__ */ Symbol("message-tools"));
   const [toolsOpen, setToolsOpen] = (0, import_react13.useState)(false);
+  const [toolsHover, setToolsHover] = (0, import_react13.useState)(false);
   useDismiss(toolsOpen, () => setToolsOpen(false), [row]);
   (0, import_react13.useEffect)(() => {
     if (!toolsOpen) return void 0;
@@ -8470,9 +8474,15 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
     closeOtherToolbars(toolsId.current);
     setToolsOpen(true);
   };
+  const hoverTools = () => {
+    if (!noHover()) setToolsHover(true);
+  };
+  const leaveTools = () => {
+    if (!noHover()) setToolsHover(false);
+  };
   return (0, import_react13.createElement)(
     "div",
-    { ref: row, className: "bt-msg", onClick: tapTools },
+    { ref: row, className: "bt-msg", onClick: tapTools, onMouseEnter: hoverTools, onMouseLeave: leaveTools },
     (0, import_react13.createElement)(
       "div",
       { className: "bt-msg-line" },
@@ -8483,7 +8493,7 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
         control ? (0, import_react13.createElement)("div", { className: "bt-fold-body" }, body) : body,
         control
       ),
-      live ? null : (0, import_react13.createElement)(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t("Bot"), bot: roster.byId[selfId], sessionId, react: key ? (emoji) => actions.toggleReaction(msgKey, index, emoji) : void 0, actions, open: toolsOpen, bubbleRef: bubble })
+      live ? null : (0, import_react13.createElement)(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t("Bot"), bot: roster.byId[selfId], sessionId, react: key ? (emoji) => actions.toggleReaction(msgKey, index, emoji) : void 0, actions, open: toolsOpen, hovered: toolsHover, bubbleRef: bubble })
     ),
     picked.length ? (0, import_react13.createElement)("div", { className: "bt-reacts" }, picked.map((emoji) => (0, import_react13.createElement)("button", {
       key: emoji,
@@ -8537,7 +8547,8 @@ var textBoxesNear = (root, exclude) => {
   return boxes;
 };
 var hitsText = (rect, boxes) => boxes.some((box) => rect.left < box.right && box.left < rect.right && rect.top < box.bottom && box.top < rect.bottom);
-function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, bubbleRef = null }) {
+function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, hovered = false, bubbleRef = null }) {
+  const active = tapped || hovered;
   const [panel, setPanel] = (0, import_react13.useState)(null);
   const [copied, setCopied] = (0, import_react13.useState)(false);
   const tools = (0, import_react13.useRef)(null);
@@ -8545,7 +8556,7 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
   const tick = useViewport();
   const [placed, setPlaced] = (0, import_react13.useState)(null);
   (0, import_react13.useLayoutEffect)(() => {
-    if (!tapped) {
+    if (!active) {
       setPlaced(null);
       return void 0;
     }
@@ -8595,7 +8606,7 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
       window.removeEventListener("scroll", schedule, true);
       if (frame !== 0) cancelAnimationFrame(frame);
     };
-  }, [tapped, tick, bubbleRef]);
+  }, [active, tick, bubbleRef]);
   const close = () => setPanel(null);
   useDismiss(panel !== null, close, [tools, pop]);
   const open = (kind, event) => {
@@ -8633,9 +8644,9 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
       ref: tools,
       className: "bt-tools",
       "data-open": panel !== null || tapped || void 0,
-      "data-side": tapped && placed !== null ? placed.side : void 0,
-      "data-stack": tapped && placed?.stack === true ? "" : void 0,
-      style: tapped && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: "none" } : void 0
+      "data-side": active && placed !== null ? placed.side : void 0,
+      "data-stack": active && placed?.stack === true ? "" : void 0,
+      style: active && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: "none" } : void 0
     },
     react ? (0, import_react13.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("Add reaction"), title: t("Add reaction"), "aria-expanded": panel?.kind === "react", onClick: (event) => open("react", event) }, (0, import_react13.createElement)(SmileIcon)) : null,
     sessionId ? (0, import_react13.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("Reply"), title: t("Reply"), onClick: (event) => actions.quote(sessionId, text, bot, event.currentTarget.closest(".bt-msg-line")?.querySelector(".bt-bubble") ?? event.currentTarget.closest(".bt-msg-line")) }, (0, import_react13.createElement)(ReplyIcon)) : null,
@@ -23954,7 +23965,7 @@ var USER_MESSAGE_CSS = `
 @media (hover:none){
   .bt-ustack{position:relative}
   .bt-utools{position:absolute;right:calc(100% + 4px);top:50%;transform:translateY(-50%)}
-  .bt-utools button{width:44px;height:44px}
+  .bt-utools button{width:36px;height:36px}
 }
 `;
 
