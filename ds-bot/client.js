@@ -3914,7 +3914,15 @@ body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:
 .bt-astack[data-lead]>.bt-msg{max-width:min(calc(var(--bt-msg-w) * (100% - 30px) + 30px),calc(100% - 52px))}
 .bt-tools{position:absolute;top:50%;left:100%;margin-left:6px;transform:translateY(-50%);display:none;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
 .bt-tools::after{content:"";position:absolute;top:-8px;bottom:-8px;right:100%;width:128px;z-index:-1}
-.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open]{display:flex;opacity:1;visibility:visible}
+/* The strip floats 6px beside the bubble, and that gap belongs to no element of the row:
+   a bridge over it keeps a pointer heading for a tool inside the row, so the strip cannot
+   vanish under it. Each side gets the bridge on the bubble-facing edge. */
+.bt-tools::before{content:"";position:absolute;z-index:1}
+.bt-tools[data-side=right]::before{right:100%;top:-8px;bottom:-8px;width:var(--bt-bridge-w,6px)}
+.bt-tools[data-side=left]::before{left:100%;top:-8px;bottom:-8px;width:var(--bt-bridge-w,6px)}
+.bt-tools[data-side=below]::before{left:0;right:0;bottom:100%;height:6px}
+.bt-tools[data-side=above]::before{left:0;right:0;top:100%;height:6px}
+.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open],.bt-tools[data-hover]{display:flex;opacity:1;visibility:visible}
 @media (hover:hover){.bt-msg:hover>.bt-msg-line>.bt-tools{display:flex;opacity:1;visibility:visible}}
 /* A touch pointer never hovers, and the :focus-within fallback cannot fire either: a
    visibility:hidden child cannot take focus. Show the toolbar outright. */
@@ -3923,6 +3931,7 @@ body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:
    way from the bubble; a finger has no such path, and the strip swallows taps meant for
    whatever sits under it, the conversation header included. */
 .bt-tools::after{display:none}
+.bt-tools::before{display:none}
 /* A group message is sized against the row the sender's avatar shares, so its cap left the
    toolbar's own 82px out: the toolbar then reached past the transcript's scrollport and the
    conversation could be panned sideways by a few pixels. */
@@ -3934,6 +3943,7 @@ body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead
 body[data-bt-layout=flat] .bt-bubble{background:none;padding:0;border-radius:0}
 body[data-bt-layout=flat] .bt-tools{top:-14px;right:0;left:auto;margin-left:0;transform:none;padding:2px;border-radius:999px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
 body[data-bt-layout=flat] .bt-tools::after{display:none}
+body[data-bt-layout=flat] .bt-tools::before{display:none}
 /* When the margin only fits one column, the strip stacks and stays out of the words. */
 .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:2px;border-radius:10px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
 .bt-tool{width:24px;height:24px;border:0;padding:0;border-radius:6px;background:none;color:var(--bt-ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s ease,color .12s ease}
@@ -4383,6 +4393,7 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
   .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:0}
   body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead]>.bt-msg{box-sizing:border-box;padding-right:52px}
   .bt-tools::after{display:none}
+  .bt-tools::before{display:none}
   .bt-tool{width:36px;height:36px;border-radius:8px}
   .bt-menu button,.bt-menu [role=menuitem],.bt-react-strip button{min-height:44px}
   .bt-utools[data-open]{opacity:1;visibility:visible}
@@ -8071,6 +8082,45 @@ function closeOtherToolbars(id) {
   for (const [key, close] of [...openToolbars]) if (key !== id) close();
 }
 
+// src/client/hover-linger.js
+var HOVER_LINGER_MS = 180;
+function createHoverLinger(onShown, { ms = HOVER_LINGER_MS, setTimer, clearTimer } = {}) {
+  const schedule = setTimer ?? ((run2, delay) => setTimeout(run2, delay));
+  const cancelTimer = clearTimer ?? ((id) => clearTimeout(id));
+  let timer = 0;
+  let shown = false;
+  const publish2 = (value) => {
+    if (value === shown) return;
+    shown = value;
+    onShown(value);
+  };
+  const stop = () => {
+    if (timer === 0) return;
+    cancelTimer(timer);
+    timer = 0;
+  };
+  return {
+    hold() {
+      stop();
+      publish2(true);
+    },
+    release() {
+      stop();
+      timer = schedule(() => {
+        timer = 0;
+        publish2(false);
+      }, ms);
+    },
+    dispose() {
+      stop();
+      shown = false;
+    },
+    get shown() {
+      return shown;
+    }
+  };
+}
+
 // src/client/btw-model.js
 function seqNum(value) {
   const seq = value !== null && typeof value === "object" ? value.seq : value;
@@ -8406,6 +8456,11 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
   const toolsId = (0, import_react13.useRef)(/* @__PURE__ */ Symbol("message-tools"));
   const [toolsOpen, setToolsOpen] = (0, import_react13.useState)(false);
   const [toolsHover, setToolsHover] = (0, import_react13.useState)(false);
+  const linger = (0, import_react13.useRef)(null);
+  if (linger.current === null) linger.current = createHoverLinger((value) => setToolsHover(value), { ms: HOVER_LINGER_MS });
+  (0, import_react13.useEffect)(() => () => linger.current?.dispose(), []);
+  const holdTools = () => linger.current?.hold();
+  const releaseTools = () => linger.current?.release();
   useDismiss(toolsOpen, () => setToolsOpen(false), [row]);
   (0, import_react13.useEffect)(() => {
     if (!toolsOpen) return void 0;
@@ -8421,14 +8476,20 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
     setToolsOpen(true);
   };
   const hoverTools = () => {
-    if (!noHover()) setToolsHover(true);
+    if (!noHover()) holdTools();
   };
   const leaveTools = () => {
-    if (!noHover()) setToolsHover(false);
+    if (!noHover()) releaseTools();
+  };
+  const focusTools = () => holdTools();
+  const blurTools = (event) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    releaseTools();
   };
   return (0, import_react13.createElement)(
     "div",
-    { ref: row, className: "bt-msg", onClick: tapTools, onMouseEnter: hoverTools, onMouseLeave: leaveTools },
+    { ref: row, className: "bt-msg", onClick: tapTools, onMouseEnter: hoverTools, onMouseLeave: leaveTools, onFocus: focusTools, onBlur: blurTools },
     (0, import_react13.createElement)(
       "div",
       { className: "bt-msg-line" },
@@ -8439,7 +8500,7 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
         control ? (0, import_react13.createElement)("div", { className: "bt-fold-body" }, body) : body,
         control
       ),
-      live ? null : (0, import_react13.createElement)(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t("Bot"), bot: roster.byId[selfId], sessionId, react: key ? (emoji) => actions.toggleReaction(msgKey, index, emoji) : void 0, actions, open: toolsOpen, hovered: toolsHover, bubbleRef: bubble })
+      live ? null : (0, import_react13.createElement)(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t("Bot"), bot: roster.byId[selfId], sessionId, react: key ? (emoji) => actions.toggleReaction(msgKey, index, emoji) : void 0, actions, open: toolsOpen, hovered: toolsHover, hold: holdTools, release: releaseTools, bubbleRef: bubble })
     ),
     picked.length ? (0, import_react13.createElement)("div", { className: "bt-reacts" }, picked.map((emoji) => (0, import_react13.createElement)("button", {
       key: emoji,
@@ -8493,9 +8554,9 @@ var textBoxesNear = (root, exclude) => {
   return boxes;
 };
 var hitsText = (rect, boxes) => boxes.some((box) => rect.left < box.right && box.left < rect.right && rect.top < box.bottom && box.top < rect.bottom);
-function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, hovered = false, bubbleRef = null }) {
-  const active = tapped || hovered;
+function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, hovered = false, hold, release, bubbleRef = null }) {
   const [panel, setPanel] = (0, import_react13.useState)(null);
+  const active = tapped || hovered || panel !== null;
   const [copied, setCopied] = (0, import_react13.useState)(false);
   const tools = (0, import_react13.useRef)(null);
   const pop = (0, import_react13.useRef)(null);
@@ -8526,20 +8587,22 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
       const candidates = [];
       const consider = (spot, stacked) => {
         if (spot === null || spot === void 0) return;
-        const size = stacked ? stack : row;
-        if (hitsText({ left: spot.left, top: spot.top, right: spot.left + size.width, bottom: spot.top + size.height }, boxes)) return;
+        const size2 = stacked ? stack : row;
+        if (hitsText({ left: spot.left, top: spot.top, right: spot.left + size2.width, bottom: spot.top + size2.height }, boxes)) return;
         candidates.push({ spot, stacked });
       };
       for (const stacked of [false, true]) consider(placeToolbar({ bubble, toolbar: stacked ? stack : row, viewport }), stacked);
       for (const stacked of [true, false]) {
-        const size = stacked ? stack : row;
-        const top = clampValue(bubble.top + (bubble.height - size.height) / 2, 8, viewport.height - size.height - 8);
-        if (viewport.width - size.width - 8 >= bubble.right + 2) consider({ side: "right", left: viewport.width - size.width - 8, top }, stacked);
-        if (8 + size.width <= bubble.left - 2) consider({ side: "left", left: 8, top }, stacked);
+        const size2 = stacked ? stack : row;
+        const top = clampValue(bubble.top + (bubble.height - size2.height) / 2, 8, viewport.height - size2.height - 8);
+        if (viewport.width - size2.width - 8 >= bubble.right + 2) consider({ side: "right", left: viewport.width - size2.width - 8, top }, stacked);
+        if (8 + size2.width <= bubble.left - 2) consider({ side: "left", left: 8, top }, stacked);
       }
       const picked = candidates[0] ?? { spot: placeToolbar({ bubble, toolbar: stack, viewport }), stacked: true };
       const origin = line.getBoundingClientRect();
-      setPlaced({ side: picked.spot.side, left: picked.spot.left - origin.left, top: picked.spot.top - origin.top, stack: picked.stacked });
+      const size = picked.stacked ? stack : row;
+      const bridge = picked.spot.side === "right" ? Math.max(0, picked.spot.left - bubble.right) : picked.spot.side === "left" ? Math.max(0, bubble.left - picked.spot.left - size.width) : null;
+      setPlaced({ side: picked.spot.side, left: picked.spot.left - origin.left, top: picked.spot.top - origin.top, stack: picked.stacked, bridge });
     };
     const schedule = () => {
       if (frame === 0) frame = requestAnimationFrame(measure);
@@ -8590,9 +8653,18 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
       ref: tools,
       className: "bt-tools",
       "data-open": panel !== null || tapped || void 0,
+      "data-hover": hovered || void 0,
       "data-side": active && placed !== null ? placed.side : void 0,
       "data-stack": active && placed?.stack === true ? "" : void 0,
-      style: active && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: "none" } : void 0
+      // The pointer is on its way from the bubble to a tool, or is working one: never
+      // hide under it. A press holds the strip until the click has run.
+      onMouseEnter: () => hold?.(),
+      onMouseLeave: () => release?.(),
+      onPointerDown: () => hold?.(),
+      onFocus: () => hold?.(),
+      // The measured spot already carries the gap: the stylesheet's own margin would add
+      // a second one, and the hover bridge below only spans the single gap.
+      style: active && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: "none", marginLeft: "0px", ...placed.bridge === null ? {} : { "--bt-bridge-w": `${placed.bridge}px` } } : void 0
     },
     react ? (0, import_react13.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("Add reaction"), title: t("Add reaction"), "aria-expanded": panel?.kind === "react", onClick: (event) => open("react", event) }, (0, import_react13.createElement)(SmileIcon)) : null,
     sessionId ? (0, import_react13.createElement)("button", { type: "button", className: "bt-tool", "aria-label": t("Reply"), title: t("Reply"), onClick: (event) => actions.quote(sessionId, text, bot, event.currentTarget.closest(".bt-msg-line")?.querySelector(".bt-bubble") ?? event.currentTarget.closest(".bt-msg-line")) }, (0, import_react13.createElement)(ReplyIcon)) : null,
