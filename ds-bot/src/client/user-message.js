@@ -155,6 +155,6 @@ export const USER_MESSAGE_CSS = `
 @media (hover:none){
   .bt-ustack{position:relative}
   .bt-utools{position:absolute;right:calc(100% + 4px);top:50%;transform:translateY(-50%)}
-  .bt-utools button{width:44px;height:44px}
+  .bt-utools button{width:36px;height:36px}
 }
 `

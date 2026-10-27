@@ -64,6 +64,7 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
   // Touch has no hover: a tap on the bubble opens its tools, a tap elsewhere
   // closes them. Interactive targets keep their own meaning.
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [toolsHover, setToolsHover] = useState(false)
   useDismiss(toolsOpen, () => setToolsOpen(false), [row])
   useEffect(() => {
     if (!toolsOpen) return undefined
@@ -75,13 +76,17 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
     closeOtherToolbars(toolsId.current)
     setToolsOpen(true)
   }
-  return h('div', { ref: row, className: 'bt-msg', onClick: tapTools },
+  // A pointer hovers; the strip is placed by the same clamp as a tap so a narrow window
+  // cannot grow a horizontal scrollbar either.
+  const hoverTools = () => { if (!noHover()) setToolsHover(true) }
+  const leaveTools = () => { if (!noHover()) setToolsHover(false) }
+  return h('div', { ref: row, className: 'bt-msg', onClick: tapTools, onMouseEnter: hoverTools, onMouseLeave: leaveTools },
     h('div', { className: 'bt-msg-line' },
       lead,
       h('div', { ref: bubble, className: 'bt-bubble', 'data-folded': folded || undefined },
         control ? h('div', { className: 'bt-fold-body' }, body) : body,
         control),
-      live ? null : h(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t('Bot'), bot: roster.byId[selfId], sessionId, react: key ? emoji => actions.toggleReaction(msgKey, index, emoji) : undefined, actions, open: toolsOpen, bubbleRef: bubble })),
+      live ? null : h(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t('Bot'), bot: roster.byId[selfId], sessionId, react: key ? emoji => actions.toggleReaction(msgKey, index, emoji) : undefined, actions, open: toolsOpen, hovered: toolsHover, bubbleRef: bubble })),
     picked.length ? h('div', { className: 'bt-reacts' }, picked.map(emoji => h('button', {
       key: emoji, type: 'button', className: 'bt-react', 'aria-label': t('Remove reaction {emoji}', { emoji }), onClick: () => actions.toggleReaction(msgKey, index, emoji),
     }, emoji))) : null)
@@ -133,7 +138,8 @@ const hitsText = (rect, boxes) => boxes.some(box => rect.left < box.right && box
 
 // The hover toolbar beside a reply bubble: Add reaction, Reply, More. `open` is
 // the touch fallback: a tap on the bubble toggles it (see Bubble).
-function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, bubbleRef = null }) {
+function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, hovered = false, bubbleRef = null }) {
+  const active = tapped || hovered
   // The anchor element is kept, not its rect: the visible viewport can move
   // (on-screen keyboard) while the popover is open.
   const [panel, setPanel] = useState(null)
@@ -146,7 +152,7 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
   // the words waiting for a layout pass.
   const [placed, setPlaced] = useState(null)
   useLayoutEffect(() => {
-    if (!tapped) { setPlaced(null); return undefined }
+    if (!active) { setPlaced(null); return undefined }
     let frame = 0
     const measure = () => {
       frame = 0
@@ -194,7 +200,7 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
       window.removeEventListener('scroll', schedule, true)
       if (frame !== 0) cancelAnimationFrame(frame)
     }
-  }, [tapped, tick, bubbleRef])
+  }, [active, tick, bubbleRef])
   const close = () => setPanel(null)
   useDismiss(panel !== null, close, [tools, pop])
   const open = (kind, event) => { if (panel?.kind === kind) { close(); return } setPanel({ kind, node: event.currentTarget }) }
@@ -221,9 +227,9 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
   return h('div', {
     ref: tools, className: 'bt-tools',
     'data-open': panel !== null || tapped || undefined,
-    'data-side': tapped && placed !== null ? placed.side : undefined,
-    'data-stack': tapped && placed?.stack === true ? '' : undefined,
-    style: tapped && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: 'none' } : undefined,
+    'data-side': active && placed !== null ? placed.side : undefined,
+    'data-stack': active && placed?.stack === true ? '' : undefined,
+    style: active && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: 'none' } : undefined,
   },
     react ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Add reaction'), title: t('Add reaction'), 'aria-expanded': panel?.kind === 'react', onClick: event => open('react', event) }, h(SmileIcon)) : null,
     sessionId ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Reply'), title: t('Reply'), onClick: (event) => actions.quote(sessionId, text, bot, event.currentTarget.closest('.bt-msg-line')?.querySelector('.bt-bubble') ?? event.currentTarget.closest('.bt-msg-line')) }, h(ReplyIcon)) : null,
