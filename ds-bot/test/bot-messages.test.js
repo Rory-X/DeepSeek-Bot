@@ -359,6 +359,8 @@ function turnsHost(state = { exchangeTurns: {}, questions: {} }, { selfOf = id =
   }
   installTurns(rt)
   let seq = 0
+  // The same extra-object form as emit() in start(), so call sites pass { time }: a plain
+  // number would be spread into nothing and the event would lose its time.
   const emit = (id, type, data, extra) => listener({ id }, { type, seq: ++seq, data, ...extra })
   return { rt, emit, delivered }
 }
