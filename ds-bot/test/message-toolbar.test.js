@@ -92,3 +92,20 @@ test('the toolbar shows on hover or focus, and on a touch screen only after a ta
   // A flat message reserves that margin on a touch screen instead of covering a neighbour.
   assert.ok(bundle.includes('body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead]>.bt-msg{box-sizing:border-box;padding-right:52px}'))
 })
+
+test('the strip stays reachable across the gap between it and the bubble', () => {
+  // A bare :hover ends once the pointer leaves the bubble for the gap, so the strip is
+  // also driven by data-hover, which the row sets with a short grace (hover-linger.js).
+  assert.ok(bundle.includes('.bt-tools[data-hover]'), 'the strip can be held open by the row')
+  assert.ok(bundle.includes('onMouseEnter'), 'the row tracks the pointer')
+  // A bridge over the single 6px gap keeps a pointer heading for a tool inside the row.
+  assert.ok(bundle.includes('.bt-tools::before{content:"";position:absolute;z-index:1}'))
+  for (const side of ['right', 'left', 'below', 'above']) {
+    assert.ok(bundle.includes(`.bt-tools[data-side=${side}]::before`), `the ${side} placement bridges its gap`)
+  }
+  // A finger has no hover path: the bridge would only swallow taps.
+  assert.ok(bundle.includes('.bt-tools::before{display:none'), 'the bridge is off on a touch screen')
+  // The measured spot already carries the gap; a stylesheet margin on top of it would
+  // leave a second, unbridged gap.
+  assert.match(bundle, /marginLeft:\s*["']0px["']/, 'placement drops the stylesheet gap')
+})

@@ -898,7 +898,15 @@ body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:
 .bt-astack[data-lead]>.bt-msg{max-width:min(calc(var(--bt-msg-w) * (100% - 30px) + 30px),calc(100% - 52px))}
 .bt-tools{position:absolute;top:50%;left:100%;margin-left:6px;transform:translateY(-50%);display:none;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
 .bt-tools::after{content:"";position:absolute;top:-8px;bottom:-8px;right:100%;width:128px;z-index:-1}
-.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open]{display:flex;opacity:1;visibility:visible}
+/* The strip floats 6px beside the bubble, and that gap belongs to no element of the row:
+   a bridge over it keeps a pointer heading for a tool inside the row, so the strip cannot
+   vanish under it. Each side gets the bridge on the bubble-facing edge. */
+.bt-tools::before{content:"";position:absolute;z-index:1}
+.bt-tools[data-side=right]::before{right:100%;top:-8px;bottom:-8px;width:var(--bt-bridge-w,6px)}
+.bt-tools[data-side=left]::before{left:100%;top:-8px;bottom:-8px;width:var(--bt-bridge-w,6px)}
+.bt-tools[data-side=below]::before{left:0;right:0;bottom:100%;height:6px}
+.bt-tools[data-side=above]::before{left:0;right:0;top:100%;height:6px}
+.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open],.bt-tools[data-hover]{display:flex;opacity:1;visibility:visible}
 @media (hover:hover){.bt-msg:hover>.bt-msg-line>.bt-tools{display:flex;opacity:1;visibility:visible}}
 /* A touch pointer never hovers, and the :focus-within fallback cannot fire either: a
    visibility:hidden child cannot take focus. Show the toolbar outright. */
@@ -907,6 +915,7 @@ body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:
    way from the bubble; a finger has no such path, and the strip swallows taps meant for
    whatever sits under it, the conversation header included. */
 .bt-tools::after{display:none}
+.bt-tools::before{display:none}
 /* A group message is sized against the row the sender's avatar shares, so its cap left the
    toolbar's own 82px out: the toolbar then reached past the transcript's scrollport and the
    conversation could be panned sideways by a few pixels. */
@@ -918,6 +927,7 @@ body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead
 body[data-bt-layout=flat] .bt-bubble{background:none;padding:0;border-radius:0}
 body[data-bt-layout=flat] .bt-tools{top:-14px;right:0;left:auto;margin-left:0;transform:none;padding:2px;border-radius:999px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
 body[data-bt-layout=flat] .bt-tools::after{display:none}
+body[data-bt-layout=flat] .bt-tools::before{display:none}
 /* When the margin only fits one column, the strip stacks and stays out of the words. */
 .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:2px;border-radius:10px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
 .bt-tool{width:24px;height:24px;border:0;padding:0;border-radius:6px;background:none;color:var(--bt-ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s ease,color .12s ease}
@@ -1373,6 +1383,7 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
   .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:0}
   body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead]>.bt-msg{box-sizing:border-box;padding-right:52px}
   .bt-tools::after{display:none}
+  .bt-tools::before{display:none}
   .bt-tool{width:36px;height:36px;border-radius:8px}
   .bt-menu button,.bt-menu [role=menuitem],.bt-react-strip button{min-height:44px}
   .bt-utools[data-open]{opacity:1;visibility:visible}
