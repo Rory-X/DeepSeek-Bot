@@ -568,6 +568,24 @@ button.bt-set-row:hover{background:var(--bt-hover)}
 .bt-set-places .bt-set-hint{overflow-wrap:anywhere}
 .bt-set-value{font-size:13px;color:var(--bt-ink-2);text-align:right}
 .bt-set-bot{flex:1;display:flex;align-items:center;gap:8px;min-width:0}
+.bt-browser-note{margin:0;padding:10px 12px;color:var(--bt-ink-2);font-size:12px;line-height:17px}
+.bt-browser-grant{display:flex;align-items:center;gap:12px;padding:10px 12px}
+.bt-browser-grant+.bt-browser-grant{border-top:.5px solid var(--bt-line)}
+.bt-browser-grant-who{display:flex;align-items:center;gap:8px;flex:0 0 150px;min-width:0;font-size:13px}
+.bt-browser-grant-who>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-browser-grant-meta{display:flex;flex:1;flex-direction:column;gap:4px;min-width:0}
+.bt-browser-grant-site{font-size:13px;overflow-wrap:anywhere}
+.bt-browser-grant-kinds{display:flex;gap:4px;flex-wrap:wrap}
+.bt-browser-grant-expired{opacity:.5}
+.bt-browser-action-list,.bt-browser-duration{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.bt-browser-action-choice{display:inline-flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap}
+.bt-browser-duration-choice{border:1px solid var(--bt-line);border-radius:8px;padding:5px 8px;background:var(--bt-card);color:var(--bt-ink-2);font:inherit;font-size:12px;cursor:pointer}
+.bt-browser-duration-choice[aria-pressed=true]{background:var(--bt-hover);color:var(--bt-ink)}
+.bt-browser-form>.bt-set-row>.bt-set-control{flex:1;min-width:0}
+.bt-browser-form>.bt-set-row+.bt-set-row{border-top:.5px solid var(--bt-line)}
+.bt-browser-site{max-width:320px}
+.bt-browser-form-foot{display:flex;justify-content:flex-end;padding:10px 12px;border-top:.5px solid var(--bt-line)}
+@media(max-width:700px){.bt-browser-grant{flex-wrap:wrap}.bt-browser-grant-who{flex:1}.bt-browser-grant-meta{order:3;flex:1 0 100%}}
 .bt-set-paste{flex-direction:column;align-items:stretch;gap:8px}
 .bt-chevron{color:var(--bt-ink-3);display:inline-flex;flex:none}
 /* A phone has no room for a 198px page list beside the page, so the list becomes a strip
@@ -880,7 +898,15 @@ body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:
 .bt-astack[data-lead]>.bt-msg{max-width:min(calc(var(--bt-msg-w) * (100% - 30px) + 30px),calc(100% - 52px))}
 .bt-tools{position:absolute;top:50%;left:100%;margin-left:6px;transform:translateY(-50%);display:none;gap:2px;opacity:0;visibility:hidden;transition:opacity .12s ease,visibility .12s}
 .bt-tools::after{content:"";position:absolute;top:-8px;bottom:-8px;right:100%;width:128px;z-index:-1}
-.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open]{display:flex;opacity:1;visibility:visible}
+/* The strip floats 6px beside the bubble, and that gap belongs to no element of the row:
+   a bridge over it keeps a pointer heading for a tool inside the row, so the strip cannot
+   vanish under it. Each side gets the bridge on the bubble-facing edge. */
+.bt-tools::before{content:"";position:absolute;z-index:1}
+.bt-tools[data-side=right]::before{right:100%;top:-8px;bottom:-8px;width:var(--bt-bridge-w,6px)}
+.bt-tools[data-side=left]::before{left:100%;top:-8px;bottom:-8px;width:var(--bt-bridge-w,6px)}
+.bt-tools[data-side=below]::before{left:0;right:0;bottom:100%;height:6px}
+.bt-tools[data-side=above]::before{left:0;right:0;top:100%;height:6px}
+.bt-msg:focus-within>.bt-msg-line>.bt-tools,.bt-tools[data-open],.bt-tools[data-hover]{display:flex;opacity:1;visibility:visible}
 @media (hover:hover){.bt-msg:hover>.bt-msg-line>.bt-tools{display:flex;opacity:1;visibility:visible}}
 /* A touch pointer never hovers, and the :focus-within fallback cannot fire either: a
    visibility:hidden child cannot take focus. Show the toolbar outright. */
@@ -889,6 +915,7 @@ body[data-bt-standalone] .bt-tool,body[data-bt-standalone] .bt-tools{transition:
    way from the bubble; a finger has no such path, and the strip swallows taps meant for
    whatever sits under it, the conversation header included. */
 .bt-tools::after{display:none}
+.bt-tools::before{display:none}
 /* A group message is sized against the row the sender's avatar shares, so its cap left the
    toolbar's own 82px out: the toolbar then reached past the transcript's scrollport and the
    conversation could be panned sideways by a few pixels. */
@@ -900,6 +927,7 @@ body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead
 body[data-bt-layout=flat] .bt-bubble{background:none;padding:0;border-radius:0}
 body[data-bt-layout=flat] .bt-tools{top:-14px;right:0;left:auto;margin-left:0;transform:none;padding:2px;border-radius:999px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
 body[data-bt-layout=flat] .bt-tools::after{display:none}
+body[data-bt-layout=flat] .bt-tools::before{display:none}
 /* When the margin only fits one column, the strip stacks and stays out of the words. */
 .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:2px;border-radius:10px;background:var(--bt-card);box-shadow:inset 0 0 0 .5px var(--bt-line-2),0 4px 14px rgba(0,0,0,.14)}
 .bt-tool{width:24px;height:24px;border:0;padding:0;border-radius:6px;background:none;color:var(--bt-ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .12s ease,color .12s ease}
@@ -1297,6 +1325,11 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
    send button wraps away from the input. The rail takes a line of its own and scrolls there. */
 [data-composer-card]>[data-slot="conversation.input.attachments"]{order:-1!important}
 [data-composer-card]>[data-slot="conversation.input.attachments"]>*{order:-1!important;flex:0 0 100%!important;min-width:0!important;max-width:100%!important;margin-bottom:2px!important;box-sizing:border-box}
+/* The slot anchor is display:contents, so the rail inside it is the flex item. */
+[data-composer-card]>[data-slot="conversation.input.attachments"]>[class*="_rail"]{order:0!important;flex:0 0 100%!important;margin:0!important;padding:2px 8px 6px!important}
+[data-composer-card]:has(> [data-slot="conversation.input.attachments"] > [class*="_rail"])>[data-input-scroll]{order:1!important;flex:0 0 100%!important;margin:0 0 6px!important}
+[data-composer-card]:has(> [data-slot="conversation.input.attachments"] > [class*="_rail"]) [class*="_tools"]{order:2!important}
+[data-composer-card]:has(> [data-slot="conversation.input.attachments"] > [class*="_rail"]) [class*="_trailing"]{margin-left:auto!important}
 [data-composer-card] [data-composer-input]{min-height:24px!important;padding:2px 0!important}
 [data-composer-card] [data-composer-placeholder]{left:0!important;top:2px!important}
 [data-composer-placeholder]{font-size:0!important;line-height:0!important}
@@ -1350,6 +1383,7 @@ header[class*="_header"] .bt-head{flex:1 1 auto;width:100%}
   .bt-tools[data-stack]{flex-direction:column;gap:2px;padding:0}
   body[data-bt-layout=flat] .bt-msg,body[data-bt-layout=flat] .bt-astack[data-lead]>.bt-msg{box-sizing:border-box;padding-right:52px}
   .bt-tools::after{display:none}
+  .bt-tools::before{display:none}
   .bt-tool{width:36px;height:36px;border-radius:8px}
   .bt-menu button,.bt-menu [role=menuitem],.bt-react-strip button{min-height:44px}
   .bt-utools[data-open]{opacity:1;visibility:visible}

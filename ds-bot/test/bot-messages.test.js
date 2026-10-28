@@ -90,9 +90,9 @@ async function start(seed) {
   }
   apply(ctx, { home })
   let seq = 0
-  const emit = (id, type, data, time) => {
+  const emit = (id, type, data, extra) => {
     for (const listener of ctx.listeners.get('session/event') ?? []) {
-      if (listener.length >= 2) listener({ id }, { type, seq: ++seq, data, ...(time === undefined ? {} : { time }) })
+      if (listener.length >= 2) listener({ id }, { type, seq: ++seq, data, ...extra })
     }
   }
   // Runs every registered waterfall listener; `next` settles the chain.
@@ -195,6 +195,35 @@ test('a request steered into a running turn is recorded once and answered in a t
   assert.equal(textOf(reply.content), '[Reply from Writer]\n2025')
   assert.equal(reply.source.replyTo, steered.source.exchangeId)
   assert.deepEqual((await exchanges()).map(entry => entry.role), ['request', 'reply'])
+})
+
+// Issue #580: a queued message the user steers into the running turn restarts
+// the activity row's clock from when it landed, not from the turn's start.
+test('a user message steered into the running steps marks when it landed', async (t) => {
+  const { emit, call, stop } = await start(team())
+  t.after(stop)
+  const steered = async () => (await call('state', {})).value.work.steered ?? {}
+  const userMessage = id => ({ id, role: 'user', content: textBlock('还没好吗'), source: { kind: 'user' } })
+  const spliced = (target, inserted, time, extra = {}) => emit('b', 'agent/inbox/spliced', { target, start: 0, inserted, ...extra }, { time })
+
+  emit('b', 'turn/start', { turn: 1 })
+  // Queued for the next turn first; only moving it into the running steps steers.
+  spliced('next-turn', [userMessage('m1')], 2000)
+  assert.deepEqual(await steered(), {})
+  spliced('next-turn', [], 3000, { removedCount: 1, outcome: 'canceled' })
+  spliced('next-step', [userMessage('m1')], 3001)
+  assert.equal((await steered()).b, 3001)
+  // A Bot's request spliced into the same place is not the user's input.
+  spliced('next-step', [{ ...userMessage('m2'), source: replySource('request') }], 4000)
+  assert.equal((await steered()).b, 3001)
+  emit('b', 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+  assert.deepEqual(await steered(), {})
+
+  // A turn a part switch cut short may see turn/start without a turn/end.
+  emit('b', 'turn/start', { turn: 2 })
+  spliced('next-step', [userMessage('m3')], 5000)
+  emit('b', 'turn/start', { turn: 3 })
+  assert.deepEqual(await steered(), {})
 })
 
 test('a request from a name with brackets keeps its body when replayed after the current work', async (t) => {
@@ -330,7 +359,9 @@ function turnsHost(state = { exchangeTurns: {}, questions: {} }, { selfOf = id =
   }
   installTurns(rt)
   let seq = 0
-  const emit = (id, type, data, time) => listener({ id }, { type, seq: ++seq, data, ...(time === undefined ? {} : { time }) })
+  // The same extra-object form as emit() in start(), so call sites pass { time }: a plain
+  // number would be spread into nothing and the event would lose its time.
+  const emit = (id, type, data, extra) => listener({ id }, { type, seq: ++seq, data, ...extra })
   return { rt, emit, delivered }
 }
 
@@ -388,9 +419,9 @@ test('a message moves its Bot and the group it appeared in', () => {
   const state = { exchangeTurns: {}, questions: {}, bots: { b: { id: 'b', createdAt: 1 } }, rooms: { r1: { id: 'r1', createdAt: 2 } } }
   const groupOwners = new Map([['gb', { botId: 'b', roomId: 'r1' }]])
   const { rt, emit } = turnsHost(state, { selfOf: id => (id === 'gb' ? 'b' : id), groupOwners })
-  emit('b', 'user/message', { content: textBlock('hello'), source: { kind: 'user' } }, 100)
+  emit('b', 'user/message', { content: textBlock('hello'), source: { kind: 'user' } }, { time: 100 })
   assert.equal(rt.lastActivityOf('b'), 100)
-  emit('gb', 'assistant/message', { turn: 1, message: { content: textBlock('posted') } }, 200)
+  emit('gb', 'assistant/message', { turn: 1, message: { content: textBlock('posted') } }, { time: 200 })
   assert.deepEqual([rt.lastActivityOf('b'), rt.roomActivityOf('r1')], [200, 200])
   // A line DS Bot writes into the group itself counts too.
   rt.noteRoomActivity('r1', 300)
@@ -408,7 +439,7 @@ test('the team view dates each Bot and group for the activity order', async (t) 
   assert.deepEqual(view.bots.map(bot => [bot.id, bot.lastActivity]), [['a', 45], ['b', 45]])
   assert.equal(view.rooms[0].lastActivity, 3)
   // A message moves the Bot that read it.
-  emit('b', 'assistant/message', { turn: 1, message: { content: textBlock('later') } }, 200)
+  emit('b', 'assistant/message', { turn: 1, message: { content: textBlock('later') } }, { time: 200 })
   assert.equal((await call('state', {})).value.bots.find(bot => bot.id === 'b').lastActivity, 200)
 })
 

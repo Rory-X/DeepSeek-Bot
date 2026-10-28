@@ -16,6 +16,7 @@ import { turnReasoning, thinkingStep, opensReply } from './turn-reasoning.js'
 import { FOLD_AT, FOLD_HUGE, stripLongNote, useFold } from './fold.js'
 import { noHover, useViewport, viewBottom } from './motion.js'
 import { placeToolbar, rectOf, registerOpenToolbar, closeOtherToolbars } from './message-toolbar.js'
+import { createHoverLinger, HOVER_LINGER_MS } from './hover-linger.js'
 import { heldCardKey } from './sources.js'
 import { BtwCardView } from './btw.js'
 import { partIndexOf, withBtwRows } from './btw-model.js'
@@ -65,6 +66,12 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
   // closes them. Interactive targets keep their own meaning.
   const [toolsOpen, setToolsOpen] = useState(false)
   const [toolsHover, setToolsHover] = useState(false)
+  // The strip floats 6px beside the bubble: its hover has to survive the gap.
+  const linger = useRef(null)
+  if (linger.current === null) linger.current = createHoverLinger(value => setToolsHover(value), { ms: HOVER_LINGER_MS })
+  useEffect(() => () => linger.current?.dispose(), [])
+  const holdTools = () => linger.current?.hold()
+  const releaseTools = () => linger.current?.release()
   useDismiss(toolsOpen, () => setToolsOpen(false), [row])
   useEffect(() => {
     if (!toolsOpen) return undefined
@@ -78,15 +85,22 @@ function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, menti
   }
   // A pointer hovers; the strip is placed by the same clamp as a tap so a narrow window
   // cannot grow a horizontal scrollbar either.
-  const hoverTools = () => { if (!noHover()) setToolsHover(true) }
-  const leaveTools = () => { if (!noHover()) setToolsHover(false) }
-  return h('div', { ref: row, className: 'bt-msg', onClick: tapTools, onMouseEnter: hoverTools, onMouseLeave: leaveTools },
+  const hoverTools = () => { if (!noHover()) holdTools() }
+  const leaveTools = () => { if (!noHover()) releaseTools() }
+  // Keyboard focus reaches the same strip and keeps it while focus stays in the row.
+  const focusTools = () => holdTools()
+  const blurTools = (event) => {
+    const next = event.relatedTarget
+    if (next instanceof Node && event.currentTarget.contains(next)) return
+    releaseTools()
+  }
+  return h('div', { ref: row, className: 'bt-msg', onClick: tapTools, onMouseEnter: hoverTools, onMouseLeave: leaveTools, onFocus: focusTools, onBlur: blurTools },
     h('div', { className: 'bt-msg-line' },
       lead,
       h('div', { ref: bubble, className: 'bt-bubble', 'data-folded': folded || undefined },
         control ? h('div', { className: 'bt-fold-body' }, body) : body,
         control),
-      live ? null : h(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t('Bot'), bot: roster.byId[selfId], sessionId, react: key ? emoji => actions.toggleReaction(msgKey, index, emoji) : undefined, actions, open: toolsOpen, hovered: toolsHover, bubbleRef: bubble })),
+      live ? null : h(MessageTools, { text: folded ? text : shown, name: roster.byId[selfId]?.name ?? t('Bot'), bot: roster.byId[selfId], sessionId, react: key ? emoji => actions.toggleReaction(msgKey, index, emoji) : undefined, actions, open: toolsOpen, hovered: toolsHover, hold: holdTools, release: releaseTools, bubbleRef: bubble })),
     picked.length ? h('div', { className: 'bt-reacts' }, picked.map(emoji => h('button', {
       key: emoji, type: 'button', className: 'bt-react', 'aria-label': t('Remove reaction {emoji}', { emoji }), onClick: () => actions.toggleReaction(msgKey, index, emoji),
     }, emoji))) : null)
@@ -138,11 +152,13 @@ const hitsText = (rect, boxes) => boxes.some(box => rect.left < box.right && box
 
 // The hover toolbar beside a reply bubble: Add reaction, Reply, More. `open` is
 // the touch fallback: a tap on the bubble toggles it (see Bubble).
-function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, hovered = false, bubbleRef = null }) {
-  const active = tapped || hovered
+function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped, hovered = false, hold, release, bubbleRef = null }) {
+  const [panel, setPanel] = useState(null)
+  // A panel that is already open keeps the strip placed, even after the pointer left
+  // the row to reach into the panel.
+  const active = tapped || hovered || panel !== null
   // The anchor element is kept, not its rect: the visible viewport can move
   // (on-screen keyboard) while the popover is open.
-  const [panel, setPanel] = useState(null)
   const [copied, setCopied] = useState(false)
   const tools = useRef(null)
   const pop = useRef(null)
@@ -189,7 +205,13 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
       }
       const picked = candidates[0] ?? { spot: placeToolbar({ bubble, toolbar: stack, viewport }), stacked: true }
       const origin = line.getBoundingClientRect()
-      setPlaced({ side: picked.spot.side, left: picked.spot.left - origin.left, top: picked.spot.top - origin.top, stack: picked.stacked })
+      // The bridge that carries a hover across to the strip has to span the gap this
+      // placement leaves: 6px beside the bubble, more when the strip was pinned to the margin.
+      const size = picked.stacked ? stack : row
+      const bridge = picked.spot.side === 'right' ? Math.max(0, picked.spot.left - bubble.right)
+        : picked.spot.side === 'left' ? Math.max(0, bubble.left - picked.spot.left - size.width)
+          : null
+      setPlaced({ side: picked.spot.side, left: picked.spot.left - origin.left, top: picked.spot.top - origin.top, stack: picked.stacked, bridge })
     }
     const schedule = () => { if (frame === 0) frame = requestAnimationFrame(measure) }
     measure()
@@ -227,9 +249,18 @@ function MessageTools({ text, name, bot, sessionId, react, actions, open: tapped
   return h('div', {
     ref: tools, className: 'bt-tools',
     'data-open': panel !== null || tapped || undefined,
+    'data-hover': hovered || undefined,
     'data-side': active && placed !== null ? placed.side : undefined,
     'data-stack': active && placed?.stack === true ? '' : undefined,
-    style: active && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: 'none' } : undefined,
+    // The pointer is on its way from the bubble to a tool, or is working one: never
+    // hide under it. A press holds the strip until the click has run.
+    onMouseEnter: () => hold?.(),
+    onMouseLeave: () => release?.(),
+    onPointerDown: () => hold?.(),
+    onFocus: () => hold?.(),
+    // The measured spot already carries the gap: the stylesheet's own margin would add
+    // a second one, and the hover bridge below only spans the single gap.
+    style: active && placed !== null ? { left: `${placed.left}px`, top: `${placed.top}px`, transform: 'none', marginLeft: '0px', ...(placed.bridge === null ? {} : { '--bt-bridge-w': `${placed.bridge}px` }) } : undefined,
   },
     react ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Add reaction'), title: t('Add reaction'), 'aria-expanded': panel?.kind === 'react', onClick: event => open('react', event) }, h(SmileIcon)) : null,
     sessionId ? h('button', { type: 'button', className: 'bt-tool', 'aria-label': t('Reply'), title: t('Reply'), onClick: (event) => actions.quote(sessionId, text, bot, event.currentTarget.closest('.bt-msg-line')?.querySelector('.bt-bubble') ?? event.currentTarget.closest('.bt-msg-line')) }, h(ReplyIcon)) : null,
@@ -429,18 +460,69 @@ function GroupEvent({ prefix, room, name, roster, actions }) {
       : name ? h('span', null, name) : null)
 }
 
-// A change remember or forget made, which opens the memory it changed. Refusals and
-// entries already saved changed nothing and show no line.
-function MemoryEvent({ sessionId, scope, result, roster, actions, findBot }) {
-  if (!/^(Saved to|Updated in|Removed from) /.test(result)) return null
+// The results a memory write answers with when it changed the memory, and the
+// one that says the entry was there already.
+const MEMORY_SAVED = /^(Saved to|Updated in|Removed from) /
+const MEMORY_ALREADY = /^Already in /
+
+// The words the memory tools take for a scope.
+const MEMORY_TEAM = /^(team|团队|共享)$/i
+const MEMORY_OWN = /^(own|me|mine|self|yours?|自己|我)$/i
+const MEMORY_GROUP = /^(group|this group|群|本群|群聊)$/i
+
+// Why a memory write changed nothing, in the interface language. The host's own
+// words stay in the tool record: they can name the entries that were asked
+// about, and the notice does not repeat them.
+function memoryFailure(code) {
+  if (!code) return undefined
+  switch (code) {
+    case 'memory/empty': return t('Write something to save')
+    case 'memory/no-match': return t('No saved entry matched')
+    case 'memory/refused':
+    case 'memory/denied': return t('The memory refused this change')
+    // A write that broke, and any failure this interface does not know.
+    default: return t('The memory could not be changed')
+  }
+}
+
+// A change remember or forget made, which opens the memory it changed. A
+// refusal and a write that failed changed nothing, and say so, with the way
+// into the memory panel.
+function MemoryEvent({ sessionId, scope, tool, result, failed, code, roster, actions, findBot }) {
   const self = roster.byId[sessionId]
-  const team = /^(team|团队|共享)$/i.test(String(scope ?? '').trim())
-  const other = team || !scope ? undefined : findBot(scope)
+  const room = roster.roomsById[sessionId]
+  const named = String(scope ?? '').trim()
+  const team = MEMORY_TEAM.test(named)
+  const other = team || named === '' ? undefined : findBot(named)
   const target = other && other.id !== self?.id ? other : self
-  if (!target) return null
-  const label = team ? t('Team memory updated') : target === self ? t('Memory updated') : t("Updated {name}'s memory", { name: target.name })
-  return h('div', { className: 'bt-event' },
-    h('button', { type: 'button', title: result, onClick: () => actions.openMemory(target.id) }, h(MemoryIcon), label))
+  // The panel that shows the memory: the Bot's own, the group's in a group chat,
+  // or none when the scope names a Bot that is not there.
+  const panel = team ? self?.id
+    : MEMORY_OWN.test(named) ? self?.id
+      : MEMORY_GROUP.test(named) ? room?.id
+        : named === '' ? (room?.id ?? self?.id)
+          : other?.id
+  if (!failed && MEMORY_ALREADY.test(result)) {
+    // The entry was there already: a quiet line, and the panel shows it.
+    return h('div', { className: 'bt-event' },
+      panel === undefined ? h('span', null, h(MemoryIcon), t('Already saved')) : h('button', { type: 'button', onClick: () => actions.openMemory(panel) }, h(MemoryIcon), t('Already saved')))
+  }
+  if (!failed && MEMORY_SAVED.test(result)) {
+    if (!target) return null
+    const label = team ? t('Team memory updated') : target === self ? t('Memory updated') : t("Updated {name}'s memory", { name: target.name })
+    return h('div', { className: 'bt-event' },
+      h('button', { type: 'button', title: result, onClick: () => actions.openMemory(target.id) }, h(MemoryIcon), label))
+  }
+  // Nothing was saved. The reason is a short line of our own; what the host
+  // said stays in the tool record.
+  const reason = memoryFailure(code)
+  const label = failed
+    ? (tool === 'forget' ? t("Couldn't remove from memory") : t("Couldn't save to memory"))
+    : t('Memory not changed')
+  return h('div', { className: 'bt-event bt-event-error', role: 'status', title: code },
+    h('span', null, h(MemoryIcon), label),
+    reason ? h('span', null, ` · ${reason}`) : null,
+    panel === undefined ? null : h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => actions.openMemory(panel) }, t('Manage')))
 }
 
 function PartLine({ time }) {
@@ -1053,7 +1135,7 @@ function renderCall(call, { sessionId, roster, actions, useUi, useWork, findBot,
     }
     case 'remember':
     case 'forget':
-      return done && !call.isError ? h(MemoryEvent, { sessionId, scope: arg('scope'), result: contentText(call.content), roster, actions, findBot }) : null
+      return done ? h(MemoryEvent, { sessionId, scope: arg('scope'), tool, result: contentText(call.content), failed: call.isError === true, code: call.error?.code, roster, actions, findBot }) : null
     default:
       return null
   }
