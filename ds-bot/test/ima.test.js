@@ -424,14 +424,16 @@ test('imaError covers the notes table as well as the reference table', () => {
 test('capabilities describe the write batch without registering a tool', () => {
   assert.deepEqual(connector.capabilities, IMA_CAPABILITIES)
   assert.equal(connector.permissions, IMA_PERMISSIONS)
-  for (const item of IMA_CAPABILITIES.filter(entry => entry.risk === 'write')) assert.match(item.description, /cannot be undone/, item.key)
+  // Every write of this connector is irreversible, so its approval metadata makes it
+  // destructive rather than write.
+  for (const item of IMA_CAPABILITIES.filter(entry => entry.risk !== 'read')) assert.match(item.description, /cannot be undone/, item.key)
   const risks = new Set(IMA_CAPABILITIES.map(item => item.risk))
-  assert.deepEqual([...risks].sort(), ['read', 'write'])
+  assert.deepEqual([...risks].sort(), ['destructive', 'read'])
   for (const item of IMA_CAPABILITIES) {
     assert.equal(typeof item.key, 'string')
     assert.equal(typeof item.title, 'string')
     assert.equal(typeof item.description, 'string')
-    if (item.risk === 'write') {
+    if (item.risk !== 'read') {
       assert.equal(item.preview.reversible, false, item.key)
       assert.equal(typeof item.preview.change, 'string', item.key)
     }

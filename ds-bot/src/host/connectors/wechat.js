@@ -452,7 +452,7 @@ export default {
   normalizeSettings: normalizeWechatSettings,
   readiness: wechatReadiness,
   capabilities: [
-    { key: 'notify', title: 'Send messages through this channel', risk: 'write' },
+    { key: 'notify', title: 'Send messages through this channel', risk: 'destructive' },
   ],
   permissions: {
     summary: 'Sends a message through this channel when a Bot is asked to. Each channel is limited to 20 messages a minute, and every send is audited.',

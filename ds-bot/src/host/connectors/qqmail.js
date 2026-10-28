@@ -67,7 +67,8 @@ export default {
     { name: QQMAIL_SECRET, label: 'Authorization code' },
   ],
   accountField: 'account',
-  readOnly: true,
+  // The write level is declared through levels/capabilities; a top-level readOnly flag
+  // would tell older view consumers the opposite of what this connector can do.
   // The user picks the level; writing is never on by default and every write asks first.
   levels: ['read', 'write'],
   defaultLevel: 'read',
@@ -76,7 +77,7 @@ export default {
     { key: 'read', title: 'Read mail', description: 'List folders, search mail and read a message without marking it.', risk: 'read' },
     { key: 'read_attachments', title: 'Read attachments', description: "List a message's attachments and read one text attachment, up to 20000 characters; binary files are named by type and size only.", risk: 'read' },
     { key: 'mark_read', title: 'Mark read or unread', description: 'Change the read state of messages.', risk: 'write' },
-    { key: 'move_delete', title: 'Move or delete messages', description: 'Move messages between folders or to Trash.', risk: 'write' },
+    { key: 'move_delete', title: 'Move or delete messages', description: 'Move messages between folders or to Trash; a permanent delete cannot be undone.', risk: 'destructive' },
     { key: 'save_draft', title: 'Save a draft', description: 'Write a draft in the Drafts folder; nothing is sent.', risk: 'write' },
   ],
   permissions: { summary: 'IMAP read and write with the mailbox authorization code; sending mail is not part of this connector.' },

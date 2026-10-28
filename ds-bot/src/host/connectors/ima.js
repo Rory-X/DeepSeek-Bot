@@ -478,10 +478,10 @@ export const IMA_WRITE_TOOLS = [
 export const IMA_CAPABILITIES = [
   { key: 'read_notes', title: 'Read notes and knowledge bases', description: 'Search, list and read your notes, search inside knowledge bases, and list the ones you can add to.', risk: 'read' },
   { key: 'read_media', title: 'Read original files', description: 'Get the download entry for an item in a knowledge base.', risk: 'read' },
-  { key: 'create_note', title: 'Create a note', description: 'Write a new note from Markdown. It cannot be undone through the API.', risk: 'write', preview: { change: 'creates a new note', reversible: false } },
-  { key: 'append_note', title: 'Append to a note', description: 'Add text to the end of an existing note. It cannot be undone through the API.', risk: 'write', preview: { change: 'appends to an existing note', reversible: false } },
-  { key: 'add_note_to_kb', title: 'Add a note to a knowledge base', description: 'File one of your notes into a knowledge base. It cannot be undone through the API.', risk: 'write', preview: { change: 'adds a note to a knowledge base', reversible: false } },
-  { key: 'import_url', title: 'Import web pages', description: 'Save web pages or WeChat articles into a knowledge base. It cannot be undone through the API.', risk: 'write', preview: { change: 'imports web pages into a knowledge base', reversible: false } },
+  { key: 'create_note', title: 'Create a note', description: 'Write a new note from Markdown. It cannot be undone through the API.', risk: 'destructive', preview: { change: 'creates a new note', reversible: false } },
+  { key: 'append_note', title: 'Append to a note', description: 'Add text to the end of an existing note. It cannot be undone through the API.', risk: 'destructive', preview: { change: 'appends to an existing note', reversible: false } },
+  { key: 'add_note_to_kb', title: 'Add a note to a knowledge base', description: 'File one of your notes into a knowledge base. It cannot be undone through the API.', risk: 'destructive', preview: { change: 'adds a note to a knowledge base', reversible: false } },
+  { key: 'import_url', title: 'Import web pages', description: 'Save web pages or WeChat articles into a knowledge base. It cannot be undone through the API.', risk: 'destructive', preview: { change: 'imports web pages into a knowledge base', reversible: false } },
 ]
 
 export const IMA_PERMISSIONS = {

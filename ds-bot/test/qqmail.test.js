@@ -84,7 +84,9 @@ test('the connector is one read-only IMAP module the registry can load', async (
   assert.equal(qqmail.displayName, 'QQ Mail')
   assert.equal(qqmail.mode, 'imap')
   assert.equal(qqmail.accountField, 'account')
-  assert.equal(qqmail.readOnly, true)
+  // The write level is declared through levels/capabilities; a top-level readOnly flag
+  // would tell older consumers this connector never writes.
+  assert.equal(qqmail.readOnly, undefined)
   assert.equal(typeof qqmail.verify, 'function')
   assert.equal(typeof qqmail.mount, 'function')
   assert.deepEqual(qqmail.credentials.map(field => field.name), ['QQMAIL_ADDRESS', 'QQMAIL_AUTH_CODE'])
@@ -142,7 +144,7 @@ test('the framework registry loads the module and maps the card onto its two cre
   const loaded = registry.externalConnectors.qqmail
   assert.equal(loaded.displayName, 'QQ Mail')
   assert.equal(loaded.mode, 'imap')
-  assert.equal(loaded.readOnly, true)
+  assert.equal(loaded.readOnly, undefined)
   assert.deepEqual(credentialFields(loaded).map(field => field.name), ['QQMAIL_ADDRESS', 'QQMAIL_AUTH_CODE'])
   assert.deepEqual(credentialFields(loaded).map(field => field.label), ['QQ Mail address', 'Authorization code'])
   assert.deepEqual(connectValues(loaded, { values: { QQMAIL_ADDRESS: 'user@qq.com', QQMAIL_AUTH_CODE: 'abcdefghijklmnop' } }), { QQMAIL_ADDRESS: 'user@qq.com', QQMAIL_AUTH_CODE: 'abcdefghijklmnop' })

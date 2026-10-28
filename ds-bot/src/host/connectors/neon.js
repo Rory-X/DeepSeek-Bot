@@ -315,6 +315,19 @@ function neonDefinition(displayName, hooks, address) {
     accountTool: 'list_organizations',
     accountOf: neonAccount,
     card: NEON_CARD,
+    // Display only: the client draws this list by risk. The mounted tool list stays the real
+    // boundary, and the four writes only exist at the write level.
+    capabilities: [
+      { key: 'browse_projects', title: 'Browse projects and branches', description: 'List projects, branches, databases, roles and compute endpoints; nothing is changed.', risk: 'read' },
+      { key: 'inspect_schema', title: 'Inspect schemas and tables', description: "List the tables in a database and read one table's columns, types and constraints.", risk: 'read' },
+      { key: 'read_sql', title: 'Run read-only SQL', description: 'Run one SQL statement in a READ ONLY transaction, and ask for a query plan.', risk: 'read' },
+      { key: 'diagnose', title: 'Check slow queries and database health', description: 'List the slowest queries and run the predefined read-only database diagnostics.', risk: 'read' },
+      { key: 'create_branch', title: 'Create a branch', description: 'Copy the current state of a branch into a new branch on the pinned project.', risk: 'write', preview: { change: 'Creates a new branch; existing branches stay as they are', reversible: true } },
+      { key: 'create_snapshot', title: 'Create a snapshot', description: 'Save a snapshot of a branch that can be restored later.', risk: 'write', preview: { change: 'Adds a snapshot; nothing on the branch changes', reversible: true } },
+      { key: 'write_sql', title: 'Write SQL', description: 'Run one SQL statement as the pinned Postgres role, changing data on the pinned project.', risk: 'write', preview: { change: 'Changes data in the pinned project and branch', reversible: false } },
+      { key: 'delete_branch', title: 'Delete a branch', description: 'Delete a branch and all the data on it; this cannot be undone.', risk: 'destructive', preview: { change: 'Deletes the branch and all its data', reversible: false } },
+    ],
+    permissions: { summary: 'Lists projects, branches and schemas and runs read-only SQL. With full capabilities it can create branches and snapshots, write SQL as the pinned role, and delete a branch, which removes its data.' },
     instances: { ...NEON_INSTANCES },
   }
 }

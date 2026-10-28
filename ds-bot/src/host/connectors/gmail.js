@@ -104,7 +104,6 @@ export default {
   // still gated by the per-call approval card.
   levels: ['read', 'write'],
   defaultLevel: 'read',
-  readOnly: true,
   // The client draws a connector's card from `card` only: the same fields at the module's
   // top level are carried to the view but no longer read, so the card would show a name and
   // a Connect button with no explanation.
@@ -124,7 +123,7 @@ export default {
     { key: 'archive_mail', title: 'Archive mail', description: 'Remove up to 10 messages from the inbox and keep them in All Mail.', risk: 'write', preview: { change: 'Removes the inbox label', reversible: true } },
     { key: 'save_draft', title: 'Save drafts', description: 'Store a draft in Gmail without sending it.', risk: 'write', preview: { change: 'Creates a draft, sends nothing', reversible: true } },
     { key: 'move_mail', title: 'Move mail', description: 'Move up to 10 messages to another folder.', risk: 'write', preview: { change: 'Moves messages between folders', reversible: true } },
-    { key: 'delete_mail', title: 'Delete mail', description: 'Delete up to 10 messages per call, or permanently when the call asks for it.', risk: 'destructive', preview: { change: 'Deletes messages', reversible: true } },
+    { key: 'delete_mail', title: 'Delete mail', description: 'Move up to 10 messages to Trash per call; only a call that asks for a permanent delete cannot be undone.', risk: 'destructive', preview: { change: 'Moves messages to Trash', reversible: true } },
     { key: 'send_mail', title: 'Send, reply and forward', description: 'Send mail as you, to at most 20 recipients per message; a send cannot be undone.', risk: 'destructive', preview: { change: 'Sends a message from your account', reversible: false } },
   ],
   permissions: { summary: 'Reads your mail and attachments. With full capabilities it can mark, label, archive, move and trash mail, save drafts, and send from your address.' },

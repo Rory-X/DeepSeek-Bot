@@ -21,6 +21,12 @@ export default {
     readOnlyNote: 'The connector only sends the messages a Bot was asked to send.',
     levelChoice: false,
   },
+  // Display only: what this connector can do and what its grant is for. A send cannot be
+  // undone and the chat only exists after the user messages the bot first.
+  capabilities: [
+    { key: 'notify', title: 'Send messages through your bot', description: 'Send one message a Bot was asked for to the private chat that wrote to your bot first.', risk: 'destructive' },
+  ],
+  permissions: { summary: 'Sends the messages a Bot was asked to send to the Telegram chat that wrote to your bot; every send is audited, and no other chat is read.' },
   // The framework shows what this returns as the card's account; for Telegram that is the
   // bot's own username, the name the user knows it by in @BotFather.
   verify: async ({ token, api }) => {
