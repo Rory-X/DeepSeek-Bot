@@ -357,6 +357,7 @@ var ZH = {
   "Connected as {account}": "已连接：{account}",
   Connected: "已连接",
   Disconnect: "断开",
+  "Disconnecting…": "正在断开…",
   Connect: "连接",
   "GitHub token": "GitHub token",
   "Create a token on GitHub": "去 GitHub 生成 token",
@@ -472,6 +473,8 @@ var ZH = {
   "The name changes only this authorization; its connection and tools stay the same.": "名称只改这条项目授权，它的连接和工具都不变。",
   "Adding…": "正在添加…",
   "Removing…": "正在移除…",
+  "Each project authorization runs this same set, at the level you gave it.": "每个项目授权运行同一套能力，按你给出的级别开放。",
+  "Every channel sends the same way; a notice goes only to the chat that wrote first.": "每个通道的发送方式相同；通知只会发回最先给 Bot 发消息的那个会话。",
   "Waiting for the browser…": "正在浏览器里等待…",
   "Not connected": "未连接",
   "Could not connect": "连接失败",
@@ -18168,6 +18171,42 @@ function SettingField({ field, value, bots = [], disabled = false, onChange, onE
     }))
   );
 }
+var capabilityItem = (entry, index) => {
+  const risk = entry?.risk === "destructive" || entry?.danger === true ? "destructive" : entry?.risk === "write" || entry?.write === true ? "write" : "read";
+  return {
+    key: typeof entry?.key === "string" ? entry.key : `capability-${index}`,
+    title: typeof entry?.title === "string" ? entry.title : typeof entry?.name === "string" ? entry.name : String(entry?.key ?? ""),
+    description: typeof entry?.description === "string" && entry.description !== "" ? entry.description : null,
+    // What the write would change, when the module says: drawn under the description.
+    change: typeof entry?.preview?.change === "string" && entry.preview.change !== "" ? entry.preview.change : null,
+    risk,
+    available: entry?.available !== false
+  };
+};
+var CapabilityList = ({ capabilities, writesLocked = false, hint = null }) => {
+  const declared = Array.isArray(capabilities) ? capabilities.filter((entry) => entry !== null && typeof entry === "object") : [];
+  if (declared.length === 0) return null;
+  const items = declared.map((entry, index) => capabilityItem(entry, index));
+  return (0, import_react41.createElement)(
+    "div",
+    { className: "bt-connector-setting" },
+    (0, import_react41.createElement)("div", { className: "bt-connector-action-title" }, t("Capabilities")),
+    hint !== null ? (0, import_react41.createElement)("div", { className: "bt-connector-hint" }, hint) : null,
+    (0, import_react41.createElement)("ul", { className: "bt-connector-caps" }, items.map((item) => {
+      const locked = item.available === false || writesLocked && item.risk !== "read";
+      const badge = item.risk === "destructive" ? t("Destructive") : item.risk === "write" ? t("Write") : null;
+      return (0, import_react41.createElement)(
+        "li",
+        { key: item.key, className: "bt-connector-cap", "data-risk": item.risk, "data-locked": locked || void 0 },
+        (0, import_react41.createElement)("span", { className: "bt-connector-cap-title" }, item.title, badge !== null ? (0, import_react41.createElement)("span", { className: "bt-connector-cap-badge" }, badge) : null),
+        item.description !== null ? (0, import_react41.createElement)("span", { className: "bt-connector-cap-note" }, item.description) : null,
+        item.change !== null ? (0, import_react41.createElement)("span", { className: "bt-connector-cap-change" }, item.change) : null,
+        locked ? (0, import_react41.createElement)("span", { className: "bt-connector-cap-lock" }, t("Unavailable on this host.")) : null
+      );
+    }))
+  );
+};
+var disconnectLabel = (busy) => busy ? t("Disconnecting…") : t("Disconnect");
 
 // src/client/wechat-login.js
 var LOGIN_STATES = ["logged-out", "qr", "verified-needed", "blocked", "expired", "cancelled", "confirm-failed", "protocol-error", "logged-in", "login-expired"];
@@ -18644,7 +18683,7 @@ function WeChatChannel({ row, actions, readOnly = null, bots = [], expanded = fa
     headActions.push((0, import_react42.createElement)("button", { key: "disconnect", type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
       event.stopPropagation();
       disconnect();
-    } }, t("Disconnect")));
+    } }, disconnectLabel(busy)));
   } else {
     headActions.push((0, import_react42.createElement)("button", {
       key: "connect",
@@ -18818,6 +18857,12 @@ function WeChatCard({ rows: rows2, actions, readOnly = null, bots = [] }) {
           { className: "bt-wechat-docs" },
           (0, import_react42.createElement)("a", { className: "bt-connector-link", href: docsUrl, target: "_blank", rel: "noopener noreferrer" }, t("Documentation"))
         ) : null,
+        // A channel's capabilities are the module's, the same on every row: one list, once.
+        (0, import_react42.createElement)(CapabilityList, {
+          capabilities: first?.capabilities,
+          writesLocked: readOnly !== null,
+          hint: t("Every channel sends the same way; a notice goes only to the chat that wrote first.")
+        }),
         rows2.length === 0 ? (0, import_react42.createElement)("div", { className: "bt-connector-hint" }, t("No WeChat channels yet. Add one to send notices.")) : (0, import_react42.createElement)("div", { className: "bt-connector-project-list" }, rows2.map((row) => (0, import_react42.createElement)(WeChatChannel, {
           key: row.id,
           row,
@@ -18975,18 +19020,6 @@ var levelItem = (entry) => typeof entry === "string" ? { id: entry, title: level
   title: levelTitle(typeof entry?.id === "string" ? entry.id : String(entry?.id ?? ""), entry?.title ?? entry?.name),
   description: typeof entry?.description === "string" && entry.description !== "" ? entry.description : null,
   write: entry?.write === true || entry?.danger === true || entry?.id === "write"
-};
-var capabilityItem = (entry, index) => {
-  const risk = entry?.risk === "destructive" || entry?.danger === true ? "destructive" : entry?.risk === "write" || entry?.write === true ? "write" : "read";
-  return {
-    key: typeof entry?.key === "string" ? entry.key : `capability-${index}`,
-    title: typeof entry?.title === "string" ? entry.title : typeof entry?.name === "string" ? entry.name : String(entry?.key ?? ""),
-    description: typeof entry?.description === "string" && entry.description !== "" ? entry.description : null,
-    // What the write would change, when the module says: drawn under the description.
-    change: typeof entry?.preview?.change === "string" && entry.preview.change !== "" ? entry.preview.change : null,
-    risk,
-    available: entry?.available !== false
-  };
 };
 function statusText2(connector) {
   if (connector.state === "connecting") return connector.oauth === true ? t("Waiting for the browser…") : t("Connecting…");
@@ -19147,25 +19180,11 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   const Mark = CARD_GLYPHS[connector.card?.glyph] ?? CARD_GLYPHS[connector.id] ?? GenericMark;
   const docsUrl = typeof connector.card?.docsUrl === "string" && connector.card.docsUrl !== "" ? connector.card.docsUrl : TOKEN_URLS[connector.id];
   const permissionsNode = permissions !== null ? (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, permissions) : null;
-  const capabilitiesNode = capabilities.length > 0 ? (0, import_react43.createElement)(
-    "div",
-    { className: "bt-connector-setting" },
-    (0, import_react43.createElement)("div", { className: "bt-connector-action-title" }, t("Capabilities")),
-    capWrites && currentLevel === "read" && !writesLocked ? (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("Capabilities that write open after switching to Can write.")) : null,
-    (0, import_react43.createElement)("ul", { className: "bt-connector-caps" }, capabilities.map((entry, index) => {
-      const item = capabilityItem(entry, index);
-      const locked = item.available === false || writesLocked && item.risk !== "read";
-      const badge = item.risk === "destructive" ? t("Destructive") : item.risk === "write" ? t("Write") : null;
-      return (0, import_react43.createElement)(
-        "li",
-        { key: item.key, className: "bt-connector-cap", "data-risk": item.risk, "data-locked": locked || void 0 },
-        (0, import_react43.createElement)("span", { className: "bt-connector-cap-title" }, item.title, badge !== null ? (0, import_react43.createElement)("span", { className: "bt-connector-cap-badge" }, badge) : null),
-        item.description !== null ? (0, import_react43.createElement)("span", { className: "bt-connector-cap-note" }, item.description) : null,
-        item.change !== null ? (0, import_react43.createElement)("span", { className: "bt-connector-cap-change" }, item.change) : null,
-        locked ? (0, import_react43.createElement)("span", { className: "bt-connector-cap-lock" }, t("Unavailable on this host.")) : null
-      );
-    }))
-  ) : null;
+  const capabilitiesNode = (0, import_react43.createElement)(CapabilityList, {
+    capabilities,
+    writesLocked,
+    hint: capWrites && currentLevel === "read" && !writesLocked ? t("Capabilities that write open after switching to Can write.") : null
+  });
   const levelBlock = levelChoiceVisible(connector) ? (0, import_react43.createElement)(
     "div",
     { className: "bt-connector-setting" },
@@ -19200,7 +19219,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         );
       })
     ),
-    (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization."))
+    levels.length > 1 ? (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization.")) : null
   ) : null;
   const row = (0, import_react43.useRef)(null);
   useMorph(row, `${form}:${error !== null}:${connector.state}`);
@@ -19257,7 +19276,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         }, t("Connect again")) : on && connector.state !== "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
           event.stopPropagation();
           void run2(actions.connectorDisconnect(connector.id));
-        } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? manual && !configured && !appForm ? null : (0, import_react43.createElement)("button", {
+        } }, disconnectLabel(busy)) : connector.state === "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? manual && !configured && !appForm ? null : (0, import_react43.createElement)("button", {
           type: "button",
           className: "bt-soft bt-soft-sm",
           disabled: busy,
@@ -19589,7 +19608,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
         );
       })
     ),
-    (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization."))
+    levels.length > 1 ? (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("Switching the access level needs a new authorization.")) : null
   ) : null;
   const removeBlock = (0, import_react43.createElement)(
     "div",
@@ -19618,7 +19637,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
   } }, t("Connect again")) : on && connector.state !== "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
     event.stopPropagation();
     void run2(actions.connectorDisconnect(connector.id));
-  } }, t("Disconnect")) : connector.state === "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+  } }, disconnectLabel(busy)) : connector.state === "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
     event.stopPropagation();
     void startAuthorization();
   } }, t("Connect")) : null;
@@ -19845,7 +19864,7 @@ function GroupCard({ rows: rows2, actions, readOnly = null, bots = [] }) {
   } }, t("Connect again")) : on && base.state !== "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
     event.stopPropagation();
     void run2(actions.connectorDisconnect(base.id));
-  } }, t("Disconnect")) : base.state === "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
+  } }, disconnectLabel(busy)) : base.state === "connecting" ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: true }, t("Waiting for the browser…")) : oauth ? (0, import_react43.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", disabled: busy, onClick: (event) => {
     event.stopPropagation();
     void startAuthorization();
   } }, t("Connect")) : null;
@@ -19941,7 +19960,14 @@ function GroupCard({ rows: rows2, actions, readOnly = null, bots = [] }) {
             onClick: () => setAdding(true)
           }, plus, (0, import_react43.createElement)("span", null, t("Add a project"))),
           atCap ? (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("You can add up to {max} project authorizations.", { max: projectMax })) : null
-        )
+        ),
+        // One list for the module: every project authorization runs the same set, and the
+        // level decides which of them are open. Drawing it per row would repeat it.
+        (0, import_react43.createElement)(CapabilityList, {
+          capabilities: base.capabilities,
+          writesLocked: readOnly !== null,
+          hint: t("Each project authorization runs this same set, at the level you gave it.")
+        })
       )
     ) : null
   );

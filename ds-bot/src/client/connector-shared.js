@@ -118,3 +118,42 @@ export function SettingField({ field, value, bots = [], disabled = false, onChan
       onKeyDown: (event) => { if (event.key === 'Enter') onEnter?.() },
     })))
 }
+
+// What a connector can do, as its module declares it. One list for every card that draws it:
+// a single connector, a module's project authorizations, a channel card. The module sends the
+// risk; the badge and the colour follow it, and nothing here switches a capability on.
+export const capabilityItem = (entry, index) => {
+  const risk = entry?.risk === 'destructive' || entry?.danger === true
+    ? 'destructive'
+    : entry?.risk === 'write' || entry?.write === true ? 'write' : 'read'
+  return {
+    key: typeof entry?.key === 'string' ? entry.key : `capability-${index}`,
+    title: typeof entry?.title === 'string' ? entry.title : typeof entry?.name === 'string' ? entry.name : String(entry?.key ?? ''),
+    description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
+    // What the write would change, when the module says: drawn under the description.
+    change: typeof entry?.preview?.change === 'string' && entry.preview.change !== '' ? entry.preview.change : null,
+    risk,
+    available: entry?.available !== false,
+  }
+}
+
+export const CapabilityList = ({ capabilities, writesLocked = false, hint = null }) => {
+  const declared = Array.isArray(capabilities) ? capabilities.filter(entry => entry !== null && typeof entry === 'object') : []
+  if (declared.length === 0) return null
+  const items = declared.map((entry, index) => capabilityItem(entry, index))
+  return h('div', { className: 'bt-connector-setting' },
+    h('div', { className: 'bt-connector-action-title' }, t('Capabilities')),
+    hint !== null ? h('div', { className: 'bt-connector-hint' }, hint) : null,
+    h('ul', { className: 'bt-connector-caps' }, items.map((item) => {
+      const locked = item.available === false || (writesLocked && item.risk !== 'read')
+      const badge = item.risk === 'destructive' ? t('Destructive') : item.risk === 'write' ? t('Write') : null
+      return h('li', { key: item.key, className: 'bt-connector-cap', 'data-risk': item.risk, 'data-locked': locked || undefined },
+        h('span', { className: 'bt-connector-cap-title' }, item.title, badge !== null ? h('span', { className: 'bt-connector-cap-badge' }, badge) : null),
+        item.description !== null ? h('span', { className: 'bt-connector-cap-note' }, item.description) : null,
+        item.change !== null ? h('span', { className: 'bt-connector-cap-change' }, item.change) : null,
+        locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
+    })))
+}
+
+// A Disconnect press says what it is doing while the host works, like Remove and Add do.
+export const disconnectLabel = (busy) => (busy ? t('Disconnecting…') : t('Disconnect'))

@@ -5,7 +5,7 @@
 import { createElement as h, useEffect, useRef, useState } from 'react'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
-import { SettingField, declaredSettingsOf, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
+import { CapabilityList, SettingField, declaredSettingsOf, disconnectLabel, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf, settingOptionsOf } from './connector-shared.js'
 import { CONSENT_POINTS, POLL_LIMIT_MS, connectBlocked, consentGate, loginActions, loginDetail, loginOf, loginStateOf, loginText, pollLoginSerially, qrSourceOf, shouldPoll } from './wechat-login.js'
 
 // Two chat bubbles of our own drawing, one weight throughout: a larger one at the upper
@@ -326,7 +326,7 @@ export function WeChatChannel({ row, actions, readOnly = null, bots = [], expand
   } else if (row.state === 'connecting') {
     headActions.push(h('button', { key: 'waiting', type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…')))
   } else if (row.state === 'ready') {
-    headActions.push(h('button', { key: 'disconnect', type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); disconnect() } }, t('Disconnect')))
+    headActions.push(h('button', { key: 'disconnect', type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); disconnect() } }, disconnectLabel(busy)))
   } else {
     headActions.push(h('button', {
       key: 'connect', type: 'button', className: 'bt-soft bt-soft-sm',
@@ -447,6 +447,12 @@ export function WeChatCard({ rows, actions, readOnly = null, bots = [] }) {
             ? h('div', { className: 'bt-wechat-docs' },
               h('a', { className: 'bt-connector-link', href: docsUrl, target: '_blank', rel: 'noopener noreferrer' }, t('Documentation')))
             : null,
+          // A channel's capabilities are the module's, the same on every row: one list, once.
+          h(CapabilityList, {
+            capabilities: first?.capabilities,
+            writesLocked: readOnly !== null,
+            hint: t('Every channel sends the same way; a notice goes only to the chat that wrote first.'),
+          }),
           rows.length === 0
             ? h('div', { className: 'bt-connector-hint' }, t('No WeChat channels yet. Add one to send notices.'))
             : h('div', { className: 'bt-connector-project-list' }, rows.map(row => h(WeChatChannel, {

@@ -3,7 +3,7 @@ import { useMorph } from './motion.js'
 import { MaskedInput } from './secret-card.js'
 import { language, t } from './i18n.js'
 import { ChevronRightIcon } from './icons.js'
-import { SettingField, declaredSettingsOf, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf } from './connector-shared.js'
+import { CapabilityList, SettingField, capabilityItem, declaredSettingsOf, disconnectLabel, instanceOf, levelChoiceVisible, levelsOfConnector, settingKindOf } from './connector-shared.js'
 import { WeChatCard, WeChatMark } from './wechat-card.js'
 
 export const GitHubMark = () => h('svg', { width: 20, height: 20, viewBox: '0 0 16 16', fill: 'currentColor', 'aria-hidden': true },
@@ -124,20 +124,6 @@ const levelItem = entry => (typeof entry === 'string'
       description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
       write: entry?.write === true || entry?.danger === true || entry?.id === 'write',
     })
-const capabilityItem = (entry, index) => {
-  const risk = entry?.risk === 'destructive' || entry?.danger === true
-    ? 'destructive'
-    : entry?.risk === 'write' || entry?.write === true ? 'write' : 'read'
-  return {
-    key: typeof entry?.key === 'string' ? entry.key : `capability-${index}`,
-    title: typeof entry?.title === 'string' ? entry.title : typeof entry?.name === 'string' ? entry.name : String(entry?.key ?? ''),
-    description: typeof entry?.description === 'string' && entry.description !== '' ? entry.description : null,
-    // What the write would change, when the module says: drawn under the description.
-    change: typeof entry?.preview?.change === 'string' && entry.preview.change !== '' ? entry.preview.change : null,
-    risk,
-    available: entry?.available !== false,
-  }
-}
 function statusText(connector) {
   if (connector.state === 'connecting') return connector.oauth === true ? t('Waiting for the browser…') : t('Connecting…')
   // The host writes an OAuth failure as a sentence; it is shown as it came.
@@ -327,23 +313,13 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   // What the connector says about itself: its docs and the words on its token field.
   const docsUrl = typeof connector.card?.docsUrl === 'string' && connector.card.docsUrl !== '' ? connector.card.docsUrl : TOKEN_URLS[connector.id]
   const permissionsNode = permissions !== null ? h('div', { className: 'bt-connector-hint' }, permissions) : null
-  const capabilitiesNode = capabilities.length > 0
-    ? h('div', { className: 'bt-connector-setting' },
-      h('div', { className: 'bt-connector-action-title' }, t('Capabilities')),
-      capWrites && currentLevel === 'read' && !writesLocked
-        ? h('div', { className: 'bt-connector-hint' }, t('Capabilities that write open after switching to Can write.'))
-        : null,
-      h('ul', { className: 'bt-connector-caps' }, capabilities.map((entry, index) => {
-        const item = capabilityItem(entry, index)
-        const locked = item.available === false || (writesLocked && item.risk !== 'read')
-        const badge = item.risk === 'destructive' ? t('Destructive') : item.risk === 'write' ? t('Write') : null
-        return h('li', { key: item.key, className: 'bt-connector-cap', 'data-risk': item.risk, 'data-locked': locked || undefined },
-          h('span', { className: 'bt-connector-cap-title' }, item.title, badge !== null ? h('span', { className: 'bt-connector-cap-badge' }, badge) : null),
-          item.description !== null ? h('span', { className: 'bt-connector-cap-note' }, item.description) : null,
-          item.change !== null ? h('span', { className: 'bt-connector-cap-change' }, item.change) : null,
-          locked ? h('span', { className: 'bt-connector-cap-lock' }, t('Unavailable on this host.')) : null)
-      })))
-    : null
+  const capabilitiesNode = h(CapabilityList, {
+    capabilities,
+    writesLocked,
+    hint: capWrites && currentLevel === 'read' && !writesLocked
+      ? t('Capabilities that write open after switching to Can write.')
+      : null,
+  })
   const levelBlock = levelChoiceVisible(connector)
     ? h('div', { className: 'bt-connector-setting' },
       h('div', { className: 'bt-connector-action-title' }, t('Access level')),
@@ -363,7 +339,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
             item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null),
             blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
         })),
-      h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')))
+      levels.length > 1 ? h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')) : null)
     : null
   const row = useRef(null)
   useMorph(row, `${form}:${error !== null}:${connector.state}`)
@@ -394,7 +370,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
           onClick: (event) => { event.stopPropagation(); void startAuthorization() },
         }, t('Connect again'))
           : on && connector.state !== 'connecting'
-          ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(connector.id)) } }, t('Disconnect'))
+          ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(connector.id)) } }, disconnectLabel(busy))
           : connector.state === 'connecting'
             ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
             : oauth
@@ -643,7 +619,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
             item.description !== null ? h('span', { className: 'bt-connector-level-note' }, item.description) : null),
             blocked !== null ? h('span', { className: 'bt-connector-level-blocked' }, blocked) : null)
         })),
-      h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')))
+      levels.length > 1 ? h('div', { className: 'bt-connector-hint' }, t('Switching the access level needs a new authorization.')) : null)
     : null
   const removeBlock = h('div', { className: 'bt-connector-setting bt-connector-remove' },
     removeAsk
@@ -661,7 +637,7 @@ function ProjectAuthorizationRow({ connector, actions, readOnly = null, expanded
   const connectAction = oauth && connector.state === 'error'
     ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void startAuthorization() } }, t('Connect again'))
     : on && connector.state !== 'connecting'
-      ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(connector.id)) } }, t('Disconnect'))
+      ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(connector.id)) } }, disconnectLabel(busy))
       : connector.state === 'connecting'
         ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
         : oauth
@@ -839,7 +815,7 @@ function GroupCard({ rows, actions, readOnly = null, bots = [] }) {
   const connectAction = oauth && base.state === 'error'
     ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void startAuthorization() } }, t('Connect again'))
     : on && base.state !== 'connecting'
-      ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(base.id)) } }, t('Disconnect'))
+      ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: busy, onClick: (event) => { event.stopPropagation(); void run(actions.connectorDisconnect(base.id)) } }, disconnectLabel(busy))
       : base.state === 'connecting'
         ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', disabled: true }, t('Waiting for the browser…'))
         : oauth
@@ -903,7 +879,14 @@ function GroupCard({ rows, actions, readOnly = null, bots = [] }) {
               : h('button', {
                 type: 'button', className: 'bt-connector-add-btn', disabled: atCap, onClick: () => setAdding(true),
               }, plus, h('span', null, t('Add a project'))),
-            atCap ? h('div', { className: 'bt-connector-hint' }, t('You can add up to {max} project authorizations.', { max: projectMax })) : null)))
+            atCap ? h('div', { className: 'bt-connector-hint' }, t('You can add up to {max} project authorizations.', { max: projectMax })) : null),
+          // One list for the module: every project authorization runs the same set, and the
+          // level decides which of them are open. Drawing it per row would repeat it.
+          h(CapabilityList, {
+            capabilities: base.capabilities,
+            writesLocked: readOnly !== null,
+            hint: t('Each project authorization runs this same set, at the level you gave it.'),
+          })))
       : null)
 }
 
