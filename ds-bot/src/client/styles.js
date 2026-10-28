@@ -655,6 +655,14 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* A host that forbids changes grey out a destructive row like any other locked one. */
 .bt-connector-cap[data-locked] .bt-connector-cap-title,.bt-connector-cap[data-locked] .bt-connector-cap-badge{color:var(--bt-ink-3)}
 .bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
+/* The automatic-sends switch is two radios, so the chosen one has to look chosen and not
+   only tell a screen reader: the level buttons' accent tint, plus a ring and a heavier
+   label, keeps On and Off apart at a glance without a new control. */
+.bt-connector-auto-push [role=radio][aria-checked=true]{background:color-mix(in srgb,var(--bt-accent) 18%,transparent);color:var(--bt-ink);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--bt-accent) 60%,transparent);font-weight:600}
+.bt-connector-auto-push [role=radio][aria-checked=true]:hover{background:color-mix(in srgb,var(--bt-accent) 20%,transparent)}
+.bt-connector-auto-push [role=radio][aria-checked=false]{color:var(--bt-ink-2)}
+/* A finger has no hover to look at: the two radios keep a 36px target of their own. */
+@media (hover:none){.bt-connector-auto-push [role=radio]{height:36px;padding:0 16px}}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}

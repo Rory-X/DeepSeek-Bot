@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -90,4 +91,25 @@ test('the switch belongs to notification connectors only', () => {
 test('a connector that is not connected yet has no switch to flip', () => {
   const tree = page([telegram({ state: 'off' })])
   assert.equal(switchNode(tree), undefined)
+})
+
+test('the chosen automatic-send radio is painted, so On and Off differ without a screen reader', () => {
+  // The card draws role=radio buttons; the stylesheet is what makes the chosen one visible.
+  const styles = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const bundle = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  const chosen = /\.bt-connector-auto-push \[role=radio\]\[aria-checked=true\]\{[^}]*background:color-mix\([^}]*\)[^}]*box-shadow:inset[^}]*font-weight:600/
+  const other = /\.bt-connector-auto-push \[role=radio\]\[aria-checked=false\]\{color:var\(--bt-ink-2\)\}/
+  assert.match(styles, chosen, 'the chosen radio gets a fill, a ring and a heavier label')
+  assert.match(styles, other, 'the other radio stays quiet')
+  // The shipped bundle carries the same rules: this is what a reader actually loads.
+  assert.ok(bundle.includes('.bt-connector-auto-push [role=radio][aria-checked=true]{'), 'the built client paints the chosen radio')
+  assert.ok(bundle.includes('.bt-connector-auto-push [role=radio][aria-checked=false]{'), 'the built client quiets the other one')
+  // A touch screen has no hover: the same two radios keep a 36px target there.
+  assert.match(styles, /@media \(hover:none\)\{\.bt-connector-auto-push \[role=radio\]\{height:36px;padding:0 16px\}\}/, 'the phone keeps a 36px target')
+  assert.ok(bundle.includes('.bt-connector-auto-push [role=radio]{height:36px'), 'the built client keeps the 36px target')
+  // And the two states cannot look the same: only the checked rule sets a fill and a ring.
+  const tree = page([telegram()])
+  const [off, on] = choices(tree)
+  assert.equal(off.props['aria-checked'], false)
+  assert.equal(on.props['aria-checked'], true)
 })
