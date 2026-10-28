@@ -498,12 +498,42 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
     timer.unref?.()
   }
 
-  const unmount = async (id) => {
+  // A module's `close` may return a promise (a long poll aborting, a socket draining): the
+  // host waits for it so a shutdown or reload never returns while the module still runs. A
+  // module that aborts synchronously stays exactly as fast as before. One deadline covers a
+  // whole unmount batch, so the wait is not multiplied by the number of mounts.
+  const CLOSE_WAIT_MS = 2_000
+
+  const closeWithin = async (id, mounted, { phase, deadline }) => {
+    if (typeof mounted?.close !== 'function') return
+    const closed = Promise.resolve()
+      .then(() => mounted.close())
+      .catch(error => rt.warn('ds-bot: connector %s failed to close during %s: %s', id, phase, reason(error)))
+    const left = deadline - Date.now()
+    if (left <= 0) {
+      rt.warn('ds-bot: connector %s did not finish closing during %s; carrying on', id, phase)
+      return
+    }
+    let timer
+    const spent = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        rt.warn('ds-bot: connector %s did not finish closing within %dms during %s; carrying on', id, CLOSE_WAIT_MS, phase)
+        resolve()
+      }, left)
+    })
+    try {
+      await Promise.race([closed, spent])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  const unmount = async (id, { phase = 'unmount', deadline = Date.now() + CLOSE_WAIT_MS } = {}) => {
     const mounted = mounts.get(id)
     mounts.delete(id)
     for (const [callName, box] of toolboxes) if (box.id === id) toolboxes.delete(callName)
     if (mounted?.dispose !== undefined) for (const dispose of mounted.dispose) dispose()
-    mounted?.close?.()
+    await closeWithin(id, mounted, { phase, deadline })
     mounted?.client?.close()
     const fiber = mounted?.fiber
     if (fiber !== undefined) await Promise.resolve().then(() => fiber.dispose()).catch(() => {})
@@ -1908,11 +1938,16 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       for (const id of ids()) void sync(id)
       booted = true
     })
-    return () => {
+    return async () => {
       stopped = true
       approval.dispose()
       oauth?.dispose()
-      for (const id of ids()) void unmount(id)
+      // A reload and a shutdown both run this cleanup: one deadline for the batch, so a
+      // module that never finishes closing cannot hold the process, and one slow close is
+      // not paid once per mounted connector.
+      const deadline = Date.now() + CLOSE_WAIT_MS
+      await Promise.all(ids().map(id => unmount(id, { phase: 'shutdown', deadline })
+        .catch(error => rt.warn('ds-bot: connector %s did not unmount during shutdown: %s', id, reason(error)))))
     }
   }, 'ds-bot: connectors')
 
