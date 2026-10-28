@@ -10,11 +10,18 @@
 // the outcome of an admission is not known, the request is not sent again.
 //
 // Accepted identities stay with the team: expiring one would permit an old retry to
-// repeat side effects. Removing receipts needs a separate, explicit retention policy.
+// repeat side effects. A delivered request's receipt is the only part that may go, and only
+// under the retention below: the record stays as a name-taking tombstone without it, so a
+// late retry of that name is answered `expired` instead of being delivered a second time.
+// A request whose outcome is not known (`uncertain`) is never touched.
 import { createHash, randomUUID } from 'node:crypto'
 
 // A request name this long is a mistake, not an identity.
 export const NAME_MAX = 200
+// Retention: a delivered receipt is kept for at most this many records and this long, whichever
+// goes first. Both are internal: a bigger team file is not a user-visible setting.
+export const REQUESTS_KEPT = 200
+export const REQUESTS_KEEP_MS = 7 * 24 * 60 * 60 * 1000
 
 export function install(rt) {
   const { state } = rt
@@ -23,6 +30,24 @@ export function install(rt) {
   const receipts = () => (state.requests ??= {})
   // Requests being admitted now, so that two at once admit one.
   const inflight = new Map()
+
+  // One pass drops the receipt of a delivered request that outlived the retention. The
+  // record keeps its fingerprint, outcome and time, so the name stays taken and a late retry
+  // is answered `expired`; an `uncertain` record is never touched, and a request still in
+  // flight is skipped.
+  const prune = () => {
+    const now = Date.now()
+    const delivered = Object.entries(receipts())
+      .filter(([key, record]) => record?.outcome === 'delivered' && record.receipt !== undefined && !inflight.has(key))
+      .sort((left, right) => (right[1].at ?? 0) - (left[1].at ?? 0))
+    let pruned = 0
+    for (const [index, [, record]] of delivered.entries()) {
+      if (index < REQUESTS_KEPT && now - (record.at ?? 0) <= REQUESTS_KEEP_MS) continue
+      delete record.receipt
+      pruned += 1
+    }
+    return pruned
+  }
 
   // What the request asked for, as a short hash: the same name with the same content is
   // the same request, and the same name with other content is a mistake.
@@ -138,4 +163,15 @@ export function install(rt) {
   }
 
   Object.assign(rt, { requestIdentity: identity, knownRequest: known, admitRequest: admit })
+
+  // One pass after the team file loads, never on a normal save: a pruned receipt has to reach
+  // the file, so the shrink is saved once here.
+  if (typeof rt.load === 'function') {
+    void rt.load().then(() => {
+      const pruned = prune()
+      if (pruned === 0) return undefined
+      rt.diagnostics?.record?.({ source: 'requests', text: `requests pruned: ${pruned}` })
+      return rt.save().catch(() => {})
+    }).catch(() => {})
+  }
 }
