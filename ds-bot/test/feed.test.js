@@ -343,3 +343,29 @@ test('a closed feed leaves nothing behind, including one aborted before it start
   assert.equal(await reader(response)(), undefined)
   assert.deepEqual(rt.feedStats(), { clients: 0, roster: 0 })
 })
+
+test('disposing the plugin closes the feeds that are still open', { timeout: 10_000 }, async (t) => {
+  const { call, ctx, routes, rt, stop } = start()
+  t.after(stop)
+  await call('state')
+  const open = async scope => {
+    const abort = new AbortController()
+    const path = scope === undefined ? '/api/bot/feed' : `/api/bot/feed?scope=${scope}`
+    const next = reader(await routes['/api/bot/feed'].fetch(new Request(`http://localhost${path}`, { signal: abort.signal })))
+    assert.equal((await next()).event, 'hello')
+    t.after(() => abort.abort())
+    return next
+  }
+  const full = await open()
+  const scoped = await open('roster')
+  assert.deepEqual(rt.feedStats(), { clients: 2, roster: 1 })
+
+  // Shutdown has no abort to wait for: the cleanup itself has to end every open stream.
+  await ctx.dispose()
+  assert.deepEqual(rt.feedStats(), { clients: 0, roster: 0 })
+  let timer
+  const timeout = new Promise(resolve => { timer = setTimeout(() => resolve('still open'), 1_000) })
+  const closed = await Promise.race([Promise.all([full(), scoped()]), timeout])
+  clearTimeout(timer)
+  assert.deepEqual(closed, [undefined, undefined])
+})

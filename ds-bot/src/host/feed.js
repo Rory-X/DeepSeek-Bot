@@ -130,7 +130,8 @@ export function install(rt) {
     return () => {
       clearInterval(keepalive)
       clearTimeout(liveTimer)
-      for (const controller of clients) leave(controller)
+      // Each entry is a `[controller, signal]` pair, so take the keys: `leave` needs the controller.
+      for (const controller of clients.keys()) leave(controller)
     }
   }, 'ds-bot: live feed')
 
