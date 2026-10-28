@@ -2005,7 +2005,7 @@ test('the shipped connectors still settle after the async mount path', async (t)
   t.after(async () => { await ctx.dispose() })
   await new Promise(resolve => setTimeout(resolve, 150))
   const rows = (await call(ctx, 'state')).value.connectors
-  assert.equal(rows.length, 10)
+  assert.equal(rows.length, 11)
   assert.deepEqual(rows.filter(row => row.state === 'error'), [])
   assert.deepEqual(rows.filter(row => row.state === 'ready'), [])
 })
