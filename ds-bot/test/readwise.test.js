@@ -116,10 +116,14 @@ test('one named document is returned whole, because the reader asked for it', as
   assert.equal(result.includes('the note I wrote'), true)
 })
 
-test('tags are listed from their own endpoint', async () => {
-  const { result, sent } = await run('list_tags', {}, () => answer(200, { count: 3, results: [{ id: 't1', name: 'work' }] }))
+test('tags are listed from its own endpoint, and only its fields come back', async () => {
+  const { result, sent } = await run('list_tags', {}, () => answer(200, { count: 1, results: [{ id: 't1', name: 'work', color: '#fff', extra: 'not ours' }] }))
   assert.equal(sent.url, 'https://readwise.io/api/v3/tags/')
-  assert.equal(JSON.parse(result).count, 3)
+  const parsed = JSON.parse(result)
+  assert.equal(parsed.count, 1)
+  assert.deepEqual(Object.keys(parsed).sort(), ['count', 'results'])
+  assert.deepEqual(Object.keys(parsed.results[0]).sort(), ['id', 'name'])
+  assert.equal(result.includes('not ours'), false)
 })
 
 test('an empty library is an empty answer, not a failure', async () => {

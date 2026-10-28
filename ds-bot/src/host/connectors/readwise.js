@@ -40,6 +40,14 @@ const listAnswer = fields => ({ body }) => ({
   })),
 })
 
+// Tags carry only a name and an id; the projection keeps the rule that every answer this
+// connector returns names its fields, rather than trusting a service's extra keys.
+const TAG_FIELDS = ['id', 'name']
+const tagsAnswer = ({ body }) => ({
+  count: typeof body?.count === 'number' ? body.count : undefined,
+  results: (Array.isArray(body?.results) ? body.results : []).map(tag => pick(tag, TAG_FIELDS)),
+})
+
 const CURSOR = { type: 'string', description: 'Page cursor from the previous answer; omit it for the first page.' }
 const LIMIT = { type: 'integer', minimum: 1, maximum: 100, description: 'How many documents to return (1-100). Defaults to 25 here, not the API default of 100.' }
 const UPDATED_AFTER = { type: 'string', description: 'ISO 8601 date; only documents updated after it.' }
@@ -129,9 +137,10 @@ export default {
     },
     {
       name: 'list_tags',
-      description: 'The tags on saved documents, to narrow a browse. Tags only; no document content.',
+      description: 'The tags on saved documents, to narrow a browse. Tags only: each id and name, no document content.',
       method: 'GET',
       path: TAGS,
+      answer: tagsAnswer,
       parameters: { type: 'object', properties: {} },
     },
   ],
