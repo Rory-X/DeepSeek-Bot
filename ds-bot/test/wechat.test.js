@@ -1120,6 +1120,49 @@ test('CB-17 a remount during the token write still persists the account and fini
   assert.equal(loginViewOfHost(host, { WECHAT_ILINK_TOKEN: 'ilink-token' }).state, 'logged-in')
 })
 
+test('CB-18 a failed turn is one send audit plus one turn diagnostic, never a second send', async (t) => {
+  const mock = await startIlinkMock({
+    statuses: ['confirmed'],
+    updates: (() => {
+      let served = false
+      return () => {
+        if (served) return { ret: 0, get_updates_buf: 'cursor-2' }
+        served = true
+        return {
+          ret: 0,
+          get_updates_buf: 'cursor-1',
+          msgs: [{ message_id: 51, message_type: 1, message_state: 0, from_user_id: 'ilink_user_123456', context_token: 'ctx-fail', item_list: [{ type: 1, text_item: { text: 'fail this turn' } }] }],
+        }
+      }
+    })(),
+  })
+  t.after(() => mock.close())
+  const { ctx, rt, home, sessionAgents, emitSession } = setup({ session: true, config: { wechat: { listenPort: 0, ilinkBase: mock.base } } })
+  t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
+  const audited = []
+  rt.diagnostics.record = entry => audited.push(entry)
+  await connectClawbot(ctx)
+  await loginClawbot(ctx)
+  const agent = await until(() => [...sessionAgents.values()].find(entry => entry.calls.length === 1), 'the inbound delivery')
+  const message = agent.calls[0]
+  emitSession(agent.session.id, 'user/message', { source: { exchangeId: message.source.exchangeId } })
+  emitSession(agent.session.id, 'turn/end', { turn: 1, reason: { kind: 'error', error: { message: 'the model failed' } } })
+  const sent = await until(() => mock.calls.filter(entry => entry.url.startsWith('/ilink/bot/sendmessage')).at(-1), 'the failure reply')
+  const reply = sent.json.msg.item_list[0].text_item.text
+  assert.match(reply, /not available right now/)
+  // One send is one wechat-notify line carrying its real result, not a pre-audit plus the send.
+  const notify = audited.filter(entry => entry.source === 'wechat-notify')
+  assert.equal(notify.length, 1, `one send must be one audit line: ${JSON.stringify(notify)}`)
+  assert.match(notify[0].text, new RegExp(`^wechat sent ${reply.length} chars, result ok$`))
+  // The failed turn has its own line: the code and a length, never the words.
+  const turn = audited.filter(entry => entry.source === 'wechat-inbound')
+  assert.equal(turn.length, 1, `one turn diagnostic expected: ${JSON.stringify(turn)}`)
+  assert.match(turn[0].text, /^wechat turn result bot-unavailable, \d+ chars$/)
+  assert.equal(JSON.stringify(audited).includes('fail this turn'), false)
+})
+
+// ---- P2: inbound listener and its gate ----
+
 test('CB-19 the Bot API follows the baseurl from the confirmed login, not the QR host', async (t) => {
   // Two servers: the QR host confirms the login and names a different Bot API host.
   const botApi = await startIlinkMock({ statuses: ['wait'] })

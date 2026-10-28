@@ -127,7 +127,11 @@ test('Telegram connects, finds the one private chat and sends from the tool and 
   assert.ok(!savedText.includes(TELEGRAM_TOKEN))
   assert.ok(!JSON.stringify(await call(ctx, 'state', {})).includes(TELEGRAM_TOKEN))
 
-  // A send is a write: the card names the chat and the message first.
+  // A send is a write: the card names the chat and the message first. Automatic sends are
+  // the default now, so turn them off for this connector to see that card.
+  assert.equal(cardOf(connected).autoPush, true)
+  const manual = await call(ctx, 'connector-set-auto-push', { id: 'telegram', enabled: false })
+  assert.equal(cardOf(manual).autoPush, false)
   const sending = ctx.registeredTools.get('notify_telegram').execute({ text: ' deploy done ' }, { agent: { id: 'm1' } })
   const card = await until(async () => (await call(ctx, 'state', {})).value.questions.m1, 'the send approval card')
   assert.equal(card.kind, 'connector-approval')
@@ -145,10 +149,12 @@ test('Telegram connects, finds the one private chat and sends from the tool and 
 
   const disconnected = await call(ctx, 'connector-disconnect', { id: 'telegram' })
   assert.deepEqual([cardOf(disconnected).state, cardOf(disconnected).chatId, cardOf(disconnected).canTest, cardOf(disconnected).account], ['off', null, false, null])
-  assert.deepEqual(disposed.filter(name => name === 'notify_telegram'), ['notify_telegram'])
+  // The auto-push switch remounted once, so connect, that remount and Disconnect each took
+  // the tool away.
+  assert.deepEqual(disposed.filter(name => name === 'notify_telegram'), ['notify_telegram', 'notify_telegram'])
 })
 
-test('automatic sends skip the card and leave one audit entry, never the message', async (t) => {
+test('automatic sends are the default: no card, one audit entry, never the message', async (t) => {
   const realFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = realFetch })
   const bench = telegramBench({ chats: [4242] })
@@ -158,12 +164,10 @@ test('automatic sends skip the card and leave one audit entry, never the message
 
   const connected = await call(ctx, 'connector-connect', { id: 'telegram', token: TELEGRAM_TOKEN })
   assert.equal(connected.ok, true)
-  assert.equal(cardOf(connected).autoPush, false)
-  const enabled = await call(ctx, 'connector-set-auto-push', { id: 'telegram', enabled: true })
-  assert.equal(enabled.ok, true, JSON.stringify(enabled))
-  assert.equal(cardOf(enabled).autoPush, true)
+  // Unset means automatic; the card reports the value in force.
+  assert.equal(cardOf(connected).autoPush, true)
 
-  // No session and no card: the user allowed automatic sends for this connector.
+  // No session and no card: this connector sends without asking.
   assert.equal(await ctx.registeredTools.get('notify_telegram').execute({ text: 'auto done' }, {}), 'Sent.')
   assert.equal(bench.calls.at(-1).body.text, 'auto done')
   const saved = await until(async () => {
@@ -173,8 +177,16 @@ test('automatic sends skip the card and leave one audit entry, never the message
   assert.deepEqual(saved.audit.map(entry => entry.result), ['sent'])
   assert.ok(!JSON.stringify(saved.audit).includes('auto done'))
 
+  // Turning automatic sends off brings the card back; a refused card sends nothing.
   const disabled = await call(ctx, 'connector-set-auto-push', { id: 'telegram', enabled: false })
   assert.equal(cardOf(disabled).autoPush, false)
+  const sending = ctx.registeredTools.get('notify_telegram').execute({ text: 'card done' }, { agent: { id: 'm1' } })
+  const card = await until(async () => (await call(ctx, 'state', {})).value.questions.m1, 'the send approval card')
+  assert.equal(card.kind, 'connector-approval')
+  assert.match(card.detail, /card done/)
+  assert.equal((await call(ctx, 'answer-question', { sessionId: 'm1', questionId: card.id, answer: { selected: ['Deny'] } })).ok, true)
+  await assert.rejects(sending, /denied/)
+  assert.ok(bench.calls.every(call => call.body?.text !== 'card done'))
 })
 
 test('Telegram without a chat says what to do, and Test looks again after the user writes the bot', async (t) => {

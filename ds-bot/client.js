@@ -422,6 +422,8 @@ var ZH = {
   "Not logged in — this channel cannot send or receive yet.": "未登录，该通道暂时无法收发消息",
   "Incoming messages from this channel only answer you.": "该通道只回应你的消息",
   "Log in to link this channel first.": "请先登录再连接此通道",
+  "Automatic sends": "自动发送",
+  "Send messages as they happen. Turn this off to approve each one first.": "消息到达即发送；关闭后每条都先征求你的批准。",
   "Sign in first to send a test message.": "请先登录，才能发送测试消息。",
   "Beta": "Beta",
   "Scanning login is beta and has not been tested on a real device. A failure does not affect the Webhook channel.": "扫码登录为 beta，尚未真机验证；失败不影响 Webhook 通道",
@@ -2363,6 +2365,8 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     // a Test message found or the reader typed.
     connectorTest: (id) => after(call2("connector-test", { id })),
     connectorSetChat: (id, chatId) => after(call2("connector-set-chat", { id, chatId })),
+    // One notification connector sends without an approval card until the user turns this off.
+    connectorSetAutoPush: (id, enabled) => after(call2("connector-set-auto-push", { id, enabled })),
     // A connector whose card declares several credential fields sends them together, by the
     // secret name the host named each field with.
     connectorConnectValues: (id, values) => after(call2("connector-connect", { id, values })),
@@ -3723,6 +3727,14 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 /* A host that forbids changes grey out a destructive row like any other locked one. */
 .bt-connector-cap[data-locked] .bt-connector-cap-title,.bt-connector-cap[data-locked] .bt-connector-cap-badge{color:var(--bt-ink-3)}
 .bt-connector-setting[data-locked] .bt-connector-action-title,.bt-connector-setting[data-locked] .bt-connector-action-note{color:var(--bt-ink-3)}
+/* The automatic-sends switch is two radios, so the chosen one has to look chosen and not
+   only tell a screen reader: the level buttons' accent tint, plus a ring and a heavier
+   label, keeps On and Off apart at a glance without a new control. */
+.bt-connector-auto-push [role=radio][aria-checked=true]{background:color-mix(in srgb,var(--bt-accent) 18%,transparent);color:var(--bt-ink);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--bt-accent) 60%,transparent);font-weight:600}
+.bt-connector-auto-push [role=radio][aria-checked=true]:hover{background:color-mix(in srgb,var(--bt-accent) 20%,transparent)}
+.bt-connector-auto-push [role=radio][aria-checked=false]{color:var(--bt-ink-2)}
+/* A finger has no hover to look at: the two radios keep a 36px target of their own. */
+@media (hover:none){.bt-connector-auto-push [role=radio]{height:36px;padding:0 16px}}
 .bt-connector-form{display:flex;flex-direction:column;gap:8px;padding-left:48px;animation:bt-q-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},bt-veil-in .2s ease-out}
 .bt-connector-form-row{display:flex;align-items:center;gap:6px}
 .bt-connector-link{flex:1;font-size:12px;color:var(--bt-ink-2)}
@@ -19065,6 +19077,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
   })) : [{ name: "token", label: tokenFieldLabel, required: true }];
   const given = (field) => (values[field.name] ?? "").trim();
   const notify = connector.mode === "notify";
+  const autoPush = connector.autoPush === true;
   const [chatDraft, setChatDraft] = (0, import_react43.useState)(null);
   const chatValue = chatDraft ?? (typeof connector.chatId === "string" ? connector.chatId : "");
   const configured = typeof connector.clientId === "string" && connector.clientId !== "";
@@ -19321,6 +19334,42 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         }, t("Save"))
       ),
       typeof connector.chatId === "string" && connector.chatId !== "" ? null : (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("Send the bot a message first, then press Test."))
+    ) : null,
+    // One notification connector can send without an approval card. The host decides the
+    // default; this switch only reports it and flips it.
+    notify && connector.state === "ready" ? (0, import_react43.createElement)(
+      "div",
+      { className: "bt-connector-setting bt-connector-auto-push", "data-auto-push": autoPush === true ? "on" : "off" },
+      (0, import_react43.createElement)("div", { className: "bt-connector-action-title" }, t("Automatic sends")),
+      (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("Send messages as they happen. Turn this off to approve each one first.")),
+      (0, import_react43.createElement)(
+        "div",
+        { className: "bt-connector-form-row", role: "radiogroup", "aria-label": t("Automatic sends") },
+        (0, import_react43.createElement)("button", {
+          type: "button",
+          role: "radio",
+          "aria-checked": autoPush !== true,
+          className: "bt-soft bt-soft-sm",
+          disabled: busy,
+          "data-auto-push-choice": "off",
+          onClick: (event) => {
+            event.stopPropagation();
+            if (autoPush === true) void run2(actions.connectorSetAutoPush(connector.id, false));
+          }
+        }, t("Off")),
+        (0, import_react43.createElement)("button", {
+          type: "button",
+          role: "radio",
+          "aria-checked": autoPush === true,
+          className: "bt-soft bt-soft-sm",
+          disabled: busy,
+          "data-auto-push-choice": "on",
+          onClick: (event) => {
+            event.stopPropagation();
+            if (autoPush !== true) void run2(actions.connectorSetAutoPush(connector.id, true));
+          }
+        }, t("On"))
+      )
     ) : null,
     levelNote !== null ? (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, levelNote) : null,
     needsReauth ? (0, import_react43.createElement)("div", { className: "bt-connector-hint" }, t("Click Connect to authorize with this access level again.")) : null,
