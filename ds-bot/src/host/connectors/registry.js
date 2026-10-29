@@ -3,6 +3,12 @@
 // else, so six lines never edit one registry and never conflict. The shape is checked once
 // here: a module that cannot load, a missing or bad id, a duplicate id, or a connector
 // without a display name or a known mode fails loudly at plugin load, naming the file.
+//
+// A module that declares `levels` must also declare `capabilities`: the card draws its
+// capability list from them, and a missing list leaves that block empty. The toolbox
+// connectors (Vercel, Cloudflare) are exempt — their capability list is the vendor toolbox.
+// A capability's `risk` must match the approval metadata of the tools it names: a write whose
+// approval says `reversible: false` is `destructive`, never `write`.
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'

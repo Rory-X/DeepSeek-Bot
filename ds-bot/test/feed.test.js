@@ -3,7 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { apply } from '../index.js'
+import v8 from 'node:v8'
+import vm from 'node:vm'
+import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
 
 const TEAM = {
@@ -40,7 +42,7 @@ function start({ pages = {}, services = {} } = {}) {
     routes[options.path] = options
     return register(options)
   }
-  apply(ctx, { home })
+  const rt = createRuntime(ctx, { home })
   const call = async (endpoint, payload) => {
     const response = await routes['/api/bot'].fetch(new Request('http://localhost/api/bot', { method: 'POST', body: JSON.stringify({ endpoint, payload }) }))
     return response.json()
@@ -49,7 +51,7 @@ function start({ pages = {}, services = {} } = {}) {
     await ctx.dispose()
     rmSync(home, { recursive: true, force: true, maxRetries: 5 })
   }
-  return { ctx, call, stop, routes }
+  return { ctx, call, stop, routes, rt }
 }
 
 // Reads Server-Sent Events off a response, one `{ event, data }` per call.
@@ -285,4 +287,85 @@ test('without DSH\'s session projections the run-stats endpoint has nothing to s
   t.after(stop)
   await call('state')
   assert.deepEqual(await call('run-stats', { botId: 'm1' }), { ok: true, value: null })
+})
+
+// Forces a collection without the test process being started with --expose-gc.
+function collect() {
+  let gc = collect.gc
+  if (gc === undefined) {
+    v8.setFlagsFromString('--expose-gc')
+    gc = vm.runInNewContext('gc')
+    collect.gc = gc
+  }
+  gc()
+}
+
+test('a collected signal cannot leave the feed open after an abort', async (t) => {
+  const { call, routes, stop } = start()
+  t.after(stop)
+  await call('state')
+  const abort = new AbortController()
+  // The request is deliberately not kept: only the route may keep its signal reachable.
+  const response = await routes['/api/bot/feed'].fetch(new Request('http://localhost/api/bot/feed', { signal: abort.signal }))
+  const next = reader(response)
+  assert.equal((await next()).event, 'hello')
+
+  collect()
+  collect()
+  abort.abort()
+  const closed = await Promise.race([
+    next(),
+    new Promise(resolve => setTimeout(() => resolve('still open'), 1_000)),
+  ])
+  assert.equal(closed, undefined)
+})
+
+test('a closed feed leaves nothing behind, including one aborted before it started', async (t) => {
+  const { call, routes, stop, rt } = start()
+  t.after(stop)
+  await call('state')
+  assert.deepEqual(rt.feedStats(), { clients: 0, roster: 0 })
+
+  for (let index = 0; index < 100; index += 1) {
+    const abort = new AbortController()
+    const response = await routes['/api/bot/feed'].fetch(new Request('http://localhost/api/bot/feed', { signal: abort.signal }))
+    const next = reader(response)
+    assert.equal((await next()).event, 'hello')
+    abort.abort()
+    assert.equal(await next(), undefined)
+  }
+  assert.deepEqual(rt.feedStats(), { clients: 0, roster: 0 })
+
+  // A window that was gone before its route ran is closed at once and leaves nothing behind.
+  const gone = new AbortController()
+  gone.abort()
+  const response = await routes['/api/bot/feed'].fetch(new Request('http://localhost/api/bot/feed', { signal: gone.signal }))
+  assert.equal(await reader(response)(), undefined)
+  assert.deepEqual(rt.feedStats(), { clients: 0, roster: 0 })
+})
+
+test('disposing the plugin closes the feeds that are still open', { timeout: 10_000 }, async (t) => {
+  const { call, ctx, routes, rt, stop } = start()
+  t.after(stop)
+  await call('state')
+  const open = async scope => {
+    const abort = new AbortController()
+    const path = scope === undefined ? '/api/bot/feed' : `/api/bot/feed?scope=${scope}`
+    const next = reader(await routes['/api/bot/feed'].fetch(new Request(`http://localhost${path}`, { signal: abort.signal })))
+    assert.equal((await next()).event, 'hello')
+    t.after(() => abort.abort())
+    return next
+  }
+  const full = await open()
+  const scoped = await open('roster')
+  assert.deepEqual(rt.feedStats(), { clients: 2, roster: 1 })
+
+  // Shutdown has no abort to wait for: the cleanup itself has to end every open stream.
+  await ctx.dispose()
+  assert.deepEqual(rt.feedStats(), { clients: 0, roster: 0 })
+  let timer
+  const timeout = new Promise(resolve => { timer = setTimeout(() => resolve('still open'), 1_000) })
+  const closed = await Promise.race([Promise.all([full(), scoped()]), timeout])
+  clearTimeout(timer)
+  assert.deepEqual(closed, [undefined, undefined])
 })

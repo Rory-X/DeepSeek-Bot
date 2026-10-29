@@ -81,6 +81,15 @@ export default {
   },
   mode: 'rest-tools',
   api: ORIGIN,
+  // Display only: the client draws this list by risk. Every tool of this connector reads;
+  // the mounted tool list is the real boundary.
+  capabilities: [
+    { key: 'browse_shelf', title: 'Browse the shelf and the store', description: "Read the reader's shelf, search the store, and open a book's details, table of contents, progress and similar or recommended titles.", risk: 'read' },
+    { key: 'read_notes', title: 'Read notes and highlights', description: "Read the notebooks overview, a book's highlights and own notes and reviews, and the most-highlighted passages of a book or chapter.", risk: 'read' },
+    { key: 'read_reviews', title: 'Read public reviews', description: "Read the public reviews of a book and one review's comments and likes.", risk: 'read' },
+    { key: 'read_stats', title: 'Read reading statistics', description: "Read the reader's reading statistics.", risk: 'read' },
+  ],
+  permissions: { summary: "Reads the reader's WeRead shelf, notes, highlights, book details and reading statistics; nothing in the account is ever changed." },
   // One key is the whole credential; the label is what the card's single input says.
   credentials: [{ name: 'WEREAD_API_KEY', label: 'WeRead API key' }],
   tokenSecret: 'WEREAD_API_KEY',

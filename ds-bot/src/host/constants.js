@@ -64,7 +64,7 @@ export const AGENT_SESSION_TITLE_MAX = 80
 export const TEAM_TOOLS = [
   'reconcile_requirement_work',
   'read_project_board', 'create_requirement', 'assign_requirement_bots', 'plan_requirement', 'update_requirement_step', 'resume_requirement_step', 'ask_requirement_user', 'submit_requirement',
-  'list_bots', 'message_bot', 'stop_bot', 'create_bot', 'update_bot', 'list_models',
+  'list_bots', 'message_bot', 'stop_bot', 'create_bot', 'update_bot', 'list_bot_models',
   'list_bot_folders', 'organize_bots',
   'create_group', 'update_group', 'delete_group', 'post_to_group', 'ask_user', 'show_view',
   'request_secret', 'list_secrets', 'group_relay', 'read_own_chat',

@@ -18,19 +18,28 @@ const MAX_QUEUED = 512
 export function install(rt) {
   const { ctx, state } = rt
   const encoder = new TextEncoder()
-  /** @type {Set<ReadableStreamDefaultController<Uint8Array>>} */
-  const clients = new Set()
+  // Open streams, with the request signal that closes them: the listener on that signal is
+  // the only thing that ends a stream when its window goes, and a signal nothing else points
+  // at may be collected together with the listener before the abort arrives. One entry per
+  // open stream, removed at `leave`, which is the only place a stream is taken away.
+  /** @type {Map<ReadableStreamDefaultController<Uint8Array>, AbortSignal>} */
+  const clients = new Map()
   const rosterClients = new Set()
   const send = (controller, chunk) => {
     if ((controller.desiredSize ?? 0) < -MAX_QUEUED) {
       leave(controller)
       return
     }
-    try { controller.enqueue(chunk) } catch { clients.delete(controller); rosterClients.delete(controller) }
+    try {
+      controller.enqueue(chunk)
+    } catch {
+      // A window that cannot take the chunk is gone; taking it away here is the same exit.
+      leave(controller)
+    }
   }
   const publish = (event, data) => {
     const chunk = encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-    for (const controller of clients) {
+    for (const controller of clients.keys()) {
       if (!rosterClients.has(controller) || event === 'revision') send(controller, chunk)
     }
   }
@@ -97,26 +106,36 @@ export function install(rt) {
       const body = new ReadableStream({
         start(own) {
           controller = own
-          clients.add(own)
+          clients.set(own, request.signal)
           if (rosterOnly) rosterClients.add(own)
+          // A window that is already gone cannot be told about an abort that already happened.
+          if (request.signal.aborted) {
+            leave(own)
+            return
+          }
+          request.signal.addEventListener('abort', () => leave(own), { once: true })
           send(own, encoder.encode(`event: hello\ndata: ${JSON.stringify({ revision: state.revision })}\n\n`))
         },
         cancel() { leave(controller) },
       })
-      request.signal.addEventListener('abort', () => leave(controller), { once: true })
       return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' } })
     },
   }), 'ds-bot: live feed route')
 
   ctx.effect(() => {
     const keepalive = setInterval(() => {
-      if (clients.size > 0) for (const controller of clients) send(controller, encoder.encode(': keepalive\n\n'))
+      if (clients.size > 0) for (const controller of clients.keys()) send(controller, encoder.encode(': keepalive\n\n'))
     }, KEEPALIVE_MS)
     keepalive.unref?.()
     return () => {
       clearInterval(keepalive)
       clearTimeout(liveTimer)
-      for (const controller of clients) leave(controller)
+      // Each entry is a `[controller, signal]` pair, so take the keys: `leave` needs the controller.
+      for (const controller of clients.keys()) leave(controller)
     }
   }, 'ds-bot: live feed')
+
+  // Read-only bookkeeping for the tests: how many streams are open, and how many of them only
+  // want roster news.
+  Object.assign(rt, { feedStats: () => ({ clients: clients.size, roster: rosterClients.size }) })
 }

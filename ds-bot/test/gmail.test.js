@@ -86,7 +86,9 @@ test('the connector is one read-only IMAP module the registry can load', async (
   assert.equal(gmail.displayName, 'Gmail')
   assert.equal(gmail.mode, 'imap')
   assert.equal(gmail.accountField, 'account')
-  assert.equal(gmail.readOnly, true)
+  // The write level is declared through levels/capabilities; a top-level readOnly flag
+  // would tell older consumers this connector never writes.
+  assert.equal(gmail.readOnly, undefined)
   assert.equal(gmail.card.glyph, 'gmail')
   assert.equal(GMAIL_HOST, 'imap.gmail.com')
   assert.match(gmail.card.docsUrl, /apppasswords/)
@@ -116,7 +118,7 @@ test('the framework registry loads the module and maps the card onto its two cre
   const loaded = externalConnectors.gmail
   assert.equal(loaded.displayName, 'Gmail')
   assert.equal(loaded.mode, 'imap')
-  assert.equal(loaded.readOnly, true)
+  assert.equal(loaded.readOnly, undefined)
   // The registry hands the card through as it is; the client reads it from there.
   assert.equal(loaded.card.glyph, 'gmail')
   assert.match(loaded.card.about, /Gmail/)
@@ -400,6 +402,9 @@ test('the module declares a read default and the capabilities the write level ad
   const deletion = gmail.capabilities.find(capability => capability.key === 'delete_mail')
   assert.equal(deletion.risk, 'destructive')
   assert.equal(deletion.preview.reversible, true)
+  // The line names what the default call does (Trash) and the exception (a permanent delete).
+  assert.match(deletion.description, /Trash/i)
+  assert.match(deletion.description, /permanent/i)
   // Permanent delete, batch delete and settings are not capabilities this connector offers.
   assert.equal(keys.some(key => /permanent|batch|settings|filter|forward|signature/.test(key)), false)
   // Every capability names a mounted tool family, and nothing the round did not wire.
@@ -421,7 +426,7 @@ test('the module declares a read default and the capabilities the write level ad
   }
   // The summary tells the reader what the mounted tools do, and nothing else.
   const declarationText = [gmail.permissions.summary, ...gmail.capabilities.flatMap(capability => [capability.title, capability.description])].join(' ')
-  assert.doesNotMatch(declarationText, /save_attachment|permanent delete|batch delete|filter|signature/i)
+  assert.doesNotMatch(declarationText, /save_attachment|batch delete|filter|signature/i)
   assert.match(gmail.permissions.summary, /attachment/i)
   assert.match(gmail.permissions.summary, /mark/i)
   assert.match(gmail.permissions.summary, /label/i)

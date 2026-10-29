@@ -10,11 +10,49 @@
 // the outcome of an admission is not known, the request is not sent again.
 //
 // Accepted identities stay with the team: expiring one would permit an old retry to
-// repeat side effects. Removing receipts needs a separate, explicit retention policy.
+// repeat side effects. A delivered request's receipt is the only part that may go, and only
+// under the retention below: the record stays as a name-taking tombstone without it, so a
+// late retry of that name is answered `expired` instead of being delivered a second time.
+// A request whose outcome is not known (`uncertain`) is never touched.
 import { createHash, randomUUID } from 'node:crypto'
 
 // A request name this long is a mistake, not an identity.
 export const NAME_MAX = 200
+// How long a delivered receipt is kept: at most this many of them and this old, whichever goes
+// first. Both are internal: a bigger team file is not a user-visible setting.
+export const REQUESTS_RECEIPTS_KEPT = 200
+export const REQUESTS_RECEIPTS_KEEP_MS = 7 * 24 * 60 * 60 * 1000
+// A tombstone is one tiny record per delivered request whose receipt went; the names have to
+// stay taken, but the table still needs a bound. Past this many the oldest tombstones are
+// dropped completely, which is the one case where a very old retry could be delivered again:
+// that takes more than this many requests before it with the same request_id still in hand,
+// which does not happen in practice.
+export const REQUESTS_TOMBSTONES = 2_000
+
+// The by-time order both passes use: newest first, so the first `kept` entries survive.
+const byTimeDesc = table => Object.entries(table).sort((left, right) => (right[1].at ?? 0) - (left[1].at ?? 0))
+
+// One pass over the request table. Delivered receipts beyond the retention lose only their
+// receipt; tombstones beyond their bound lose the whole record. A key still in flight is
+// skipped in both passes. Returns how many of each were pruned.
+export function pruneRequests(table, { now = Date.now(), inflight } = {}) {
+  const busy = inflight ?? new Set()
+  let receiptsPruned = 0
+  let tombstonesPruned = 0
+  const receipts = byTimeDesc(table).filter(([key, record]) => record?.outcome === 'delivered' && record.receipt !== undefined && !busy.has(key))
+  for (const [index, [, record]] of receipts.entries()) {
+    if (index < REQUESTS_RECEIPTS_KEPT && now - (record.at ?? 0) <= REQUESTS_RECEIPTS_KEEP_MS) continue
+    delete record.receipt
+    receiptsPruned += 1
+  }
+  const tombstones = byTimeDesc(table).filter(([key, record]) => record?.outcome === 'delivered' && record.receipt === undefined && !busy.has(key))
+  for (const [index, [key]] of tombstones.entries()) {
+    if (index < REQUESTS_TOMBSTONES) continue
+    delete table[key]
+    tombstonesPruned += 1
+  }
+  return { receipts: receiptsPruned, tombstones: tombstonesPruned }
+}
 
 export function install(rt) {
   const { state } = rt
@@ -23,6 +61,7 @@ export function install(rt) {
   const receipts = () => (state.requests ??= {})
   // Requests being admitted now, so that two at once admit one.
   const inflight = new Map()
+
 
   // What the request asked for, as a short hash: the same name with the same content is
   // the same request, and the same name with other content is a mistake.
@@ -138,4 +177,16 @@ export function install(rt) {
   }
 
   Object.assign(rt, { requestIdentity: identity, knownRequest: known, admitRequest: admit })
+
+  // One pass after the team file loads, never on a normal save: what was pruned has to reach
+  // the file, so the smaller table is saved once here.
+  if (typeof rt.load === 'function') {
+    void rt.load().then(() => {
+      const pruned = pruneRequests(receipts(), { inflight: new Set(inflight.keys()) })
+      if (pruned.receipts > 0) rt.diagnostics?.record?.({ source: 'requests', text: `receipts pruned: ${pruned.receipts}` })
+      if (pruned.tombstones > 0) rt.diagnostics?.record?.({ source: 'requests', text: `tombstones pruned: ${pruned.tombstones}` })
+      if (pruned.receipts + pruned.tombstones === 0) return undefined
+      return rt.save().catch(() => {})
+    }).catch(() => {})
+  }
 }
