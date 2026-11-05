@@ -16,7 +16,7 @@ const { JSDOM } = createRequire(join(process.env.DSH_HARNESS ?? join(PLUGIN, '..
 // fixtures retain refs across commits and run their layout effects after each render.
 const { outputFiles } = await build({
   stdin: {
-    contents: "export { SHELL_CSS } from './src/client/styles.js'\nexport { SIDEBAR_CSS, TeamSidebar } from './src/client/sidebar.js'",
+    contents: "export { SHELL_CSS } from './src/client/styles.js'\nexport { SIDEBAR_CSS, TeamSidebar, columnPref } from './src/client/sidebar.js'",
     resolveDir: PLUGIN,
   },
   bundle: true, format: 'cjs', platform: 'browser', write: false, logLevel: 'silent',
@@ -54,7 +54,7 @@ const sandbox = {
   require: name => (name === 'react' ? react : name === 'react-dom' ? { createPortal: node => node } : {}),
 }
 runInNewContext(outputFiles[0].text, sandbox)
-const { SHELL_CSS, SIDEBAR_CSS, TeamSidebar } = module.exports
+const { SHELL_CSS, SIDEBAR_CSS, TeamSidebar, columnPref } = module.exports
 
 function navigationSidebar(wide, { leftDrawer = false } = {}) {
   const calls = []
@@ -606,4 +606,13 @@ test('after a snap the spring stops and the drag follows the cursor', async () =
     assert.equal(leftColumn().width, 330)
     assert.equal(column.style.width, '330px')
   })
+})
+
+test('a phone hides the column whatever the saved preference says', () => {
+  // A rail on a phone would keep its 88px and push the chat sideways; the phone's own list
+  // page replaces the column, so the frame layout gets `hidden`.
+  assert.equal(columnPref(true, 'open'), 'hidden')
+  assert.equal(columnPref(true, 'rail'), 'hidden')
+  assert.equal(columnPref(false, 'rail'), 'rail')
+  assert.equal(columnPref(false, 'open'), 'open')
 })

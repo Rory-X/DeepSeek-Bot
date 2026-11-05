@@ -296,6 +296,10 @@ function TitleToggle({ hidden, onToggle }) {
 // diagnostics request needs the same API. What still works in this state is
 // the last error this window recorded, and the engine's own startup output —
 // its console, or the app's startup error box (#516).
+// A phone shows the list as a page of its own, so the column is hidden there whatever the
+// saved preference says: a `rail` would keep its 88px under the chat and push it sideways.
+export const columnPref = (onPhone, pref) => (onPhone ? 'hidden' : pref)
+
 export function TeamSidebar(props) {
   const { wide, useRoster, useUi, useSessions, actions } = props
   const listRef = useRef(null)
@@ -304,7 +308,11 @@ export function TeamSidebar(props) {
   const uiNow = useUi(value => value)
   props.useRegistry(value => value)
   const frameSnap = props.useFrame ? props.useFrame(value => value) : { viewport: typeof window === 'undefined' ? 0 : window.innerWidth, sidebarWidth: FALLBACK_SIDEBAR_WIDTH, collapsedWidth: 0 }
-  const pref = props.useSidebarPref ? props.useSidebarPref(value => value) : 'open'
+  // On a phone the list is a page of its own and the column never shows, so it must not
+  // keep the rail's width: handing `hidden` to the frame layout keeps the chat on the
+  // whole width instead of pushing it 88px to the right behind a column that is not there.
+  const onPhone = props.useMobileNav?.(value => value) ?? false
+  const pref = columnPref(onPhone, props.useSidebarPref ? props.useSidebarPref(value => value) : 'open')
   const layout = frameLayout({
     viewport: frameSnap.viewport, sidebarWidth: frameSnap.sidebarWidth,
     pref, drawer: uiNow.leftDrawer === true,
@@ -343,7 +351,6 @@ export function TeamSidebar(props) {
   const mains = useMemo(() => (roster.mainBotIds ?? []).map(id => roster.byId[id]).filter(Boolean), [roster])
   // On a phone the list is a page of its own: the sidebar hands over to it instead of
   // showing the rail, so only one copy of the list is ever mounted.
-  const onPhone = props.useMobileNav?.(value => value) ?? false
   const atList = props.useNavLevel?.(value => value === 'list') ?? false
   useListGlide(listRef, wideContent, order.map(entry => entry.item.id).join(','))
   useLandOnMainBot(roster, useSessions, actions)

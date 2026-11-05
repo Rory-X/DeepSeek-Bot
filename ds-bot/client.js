@@ -15781,6 +15781,7 @@ function TitleToggle({ hidden, onToggle }) {
     onClick: onToggle
   }, (0, import_react36.createElement)(SidebarIcon)), document.body);
 }
+var columnPref = (onPhone, pref) => onPhone ? "hidden" : pref;
 function TeamSidebar(props) {
   const { wide, useRoster, useUi, useSessions, actions } = props;
   const listRef = (0, import_react36.useRef)(null);
@@ -15789,7 +15790,8 @@ function TeamSidebar(props) {
   const uiNow = useUi((value) => value);
   props.useRegistry((value) => value);
   const frameSnap = props.useFrame ? props.useFrame((value) => value) : { viewport: typeof window === "undefined" ? 0 : window.innerWidth, sidebarWidth: FALLBACK_SIDEBAR_WIDTH, collapsedWidth: 0 };
-  const pref = props.useSidebarPref ? props.useSidebarPref((value) => value) : "open";
+  const onPhone = props.useMobileNav?.((value) => value) ?? false;
+  const pref = columnPref(onPhone, props.useSidebarPref ? props.useSidebarPref((value) => value) : "open");
   const layout = frameLayout({
     viewport: frameSnap.viewport,
     sidebarWidth: frameSnap.sidebarWidth,
@@ -15822,7 +15824,6 @@ function TeamSidebar(props) {
     return entries2.sort((a, b) => Number(Boolean(b.item.pinned)) - Number(Boolean(a.item.pinned)) || b.at - a.at);
   }, [roster, updated]);
   const mains = (0, import_react36.useMemo)(() => (roster.mainBotIds ?? []).map((id) => roster.byId[id]).filter(Boolean), [roster]);
-  const onPhone = props.useMobileNav?.((value) => value) ?? false;
   const atList = props.useNavLevel?.((value) => value === "list") ?? false;
   useListGlide(listRef, wideContent, order.map((entry) => entry.item.id).join(","));
   useLandOnMainBot(roster, useSessions, actions);
