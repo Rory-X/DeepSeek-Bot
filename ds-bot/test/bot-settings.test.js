@@ -71,7 +71,7 @@ test('BOT_SETTINGS_CSS keeps a settings row on one line and shares a narrow pane
   const panel = BOT_SETTINGS_CSS.slice(BOT_SETTINGS_CSS.indexOf('@container (max-width:520px)'), BOT_SETTINGS_CSS.lastIndexOf('@media (max-width:640px)'))
   assert.doesNotMatch(panel, /flex-direction/, 'a narrow panel never stacks the row')
   assert.match(panel, /\.bt-bs-input\{flex:1 1 auto;width:auto;max-width:56%/)
-  assert.match(panel, /\.bt-bs-row \.bt-model-trigger\{flex:0 0 auto;max-width:66%/)
+  assert.match(panel, /\.bt-bs-row \.bt-model-trigger\{flex:0 0 auto;max-width:68%/)
   assert.match(panel, /\.bt-bs-area\{[^}]*min-height:140px/)
   // Same specificity means source order decides: the shares must come after the base rule.
   assert.ok(BOT_SETTINGS_CSS.indexOf('.bt-bs-input{flex:0 1 220px') < BOT_SETTINGS_CSS.indexOf('@container (max-width:520px)'))

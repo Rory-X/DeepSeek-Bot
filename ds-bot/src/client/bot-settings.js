@@ -302,7 +302,7 @@ label.bt-bs-row{cursor:text}
   .bt-bs-input{flex:1 1 auto;width:auto;max-width:56%;min-width:0;text-align:right;margin:-4px 0}
   .bt-bs-input:focus{text-align:left}
   .bt-bs-area{flex:0 0 auto;width:100%;max-width:none;min-height:140px;margin:0;text-align:left}
-  .bt-bs-row .bt-model-trigger{flex:0 0 auto;max-width:66%;min-width:0}
+  .bt-bs-row .bt-model-trigger{flex:0 0 auto;max-width:68%;min-width:0}
 }
 @media (max-width:640px){
   .bt-bs-row{flex-direction:row;align-items:center;gap:10px}
