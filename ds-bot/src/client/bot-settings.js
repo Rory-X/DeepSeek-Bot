@@ -260,7 +260,7 @@ export function BotSettingsForm({ bot, roster, actions, run }) {
 }
 
 export const BOT_SETTINGS_CSS = `
-.bt-bs{display:flex;flex-direction:column;gap:18px}
+.bt-bs{display:flex;flex-direction:column;gap:18px;container-type:inline-size}
 .bt-bs-hero{display:flex;align-items:center;gap:14px;padding:2px 4px}
 .bt-bs-who{display:flex;flex-direction:column;min-width:0;gap:2px}
 .bt-bs-name{font-size:17px;line-height:24px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -293,4 +293,16 @@ label.bt-bs-row{cursor:text}
 .bt-switch[aria-checked=true]:active:not(:disabled) .bt-switch-knob{transform:translateX(11px)}
 .bt-avedit :is(.bt-shapes,.bt-colors,.bt-dropzone){animation:bt-veil-in .18s ease-out}
 @media (prefers-reduced-motion:reduce){.bt-switch,.bt-switch-knob{transition:none}.bt-avedit :is(.bt-shapes,.bt-colors,.bt-dropzone){animation:none}}
+/* The settings panel is a narrow column even when the window is wide: stack a row
+   when the form itself is narrow, so the copy keeps its lines and the control gets
+   the whole width. The 640px viewport rule in SHELL_CSS covers a phone; this covers
+   a narrow panel on a wide window, which a viewport query cannot see. */
+@container (max-width:520px){
+  .bt-bs-row{flex-direction:column;align-items:stretch;gap:8px}
+  .bt-bs-row>.bt-set-copy{flex:0 0 auto;width:100%}
+  .bt-bs-input{flex:0 0 auto;width:100%;min-width:0;height:32px;margin:0;text-align:left}
+  .bt-bs-area{flex:0 0 auto;width:100%;min-height:140px;margin:0}
+  .bt-bs-row .bt-model-trigger{flex:0 0 auto;max-width:none;width:100%}
+  .bt-bs-row .bt-switch{align-self:flex-start}
+}
 `

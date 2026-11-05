@@ -61,3 +61,15 @@ test('a private Bot can always turn privacy off, and cannot become Main or be du
   assert.equal(tree.find(node => node.props?.label === 'Main Bot').props.disabled, true)
   assert.equal(tree.some(node => node.props?.onClick && node.props.className === 'bt-set-row bt-bs-row' && JSON.stringify(node).includes('Duplicate')), false)
 })
+
+test('BOT_SETTINGS_CSS stacks a narrow panel and keeps the rule after the base rules', async () => {
+  const { BOT_SETTINGS_CSS } = module.exports
+  const container = BOT_SETTINGS_CSS.indexOf('@container (max-width:520px)')
+  assert.ok(container > 0, 'the narrow-panel container query is in the sheet')
+  assert.ok(BOT_SETTINGS_CSS.includes('.bt-bs{display:flex;flex-direction:column;gap:18px;container-type:inline-size}'), '.bt-bs is the query container')
+  // Source order decides the cascade here: the base `.bt-bs-input{width:0;min-width:96px}`
+  // rule would otherwise win and leave a 96px input inside a stacked row.
+  assert.ok(BOT_SETTINGS_CSS.indexOf('.bt-bs-input{') < container, 'the narrow rule comes after the base input rule')
+  assert.match(BOT_SETTINGS_CSS.slice(container), /\.bt-bs-input\{[^}]*width:100%/)
+  assert.match(BOT_SETTINGS_CSS.slice(container), /\.bt-bs-row\{flex-direction:column;/)
+})
