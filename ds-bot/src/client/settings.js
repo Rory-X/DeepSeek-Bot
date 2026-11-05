@@ -257,6 +257,13 @@ export function SettingsDialog({ page, id, roster, actions, useUpdate, leaving =
   const label = t(pages.find(([key]) => key === shown)[1])
   const back = bot ? t('Back to Bots') : room ? t('Back to group chats') : usageFocus ? t('All usage') : null
   const nav = useGlide(shown, { axis: 'y' })
+  // The page tabs scroll sideways on a phone and the shell adds new ones (Models): keep the
+  // page that is open in sight, so the active tab is never the one cut off the edge.
+  useEffect(() => {
+    const box = nav.box.current
+    const item = box?.querySelector('[aria-current="page"]')
+    item?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [shown])
   // A page enters from the right when it is one level in, from the left when it comes
   // back out, and from below beside it. Usage keeps its own entrance and its data
   // across its own levels, so they share one page.
