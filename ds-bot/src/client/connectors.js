@@ -164,6 +164,25 @@ function groupStatusText(base, count) {
     : t('Connected · {count} project authorizations', { count })
 }
 
+// A notification connector's send policy: automatic until the reader says otherwise. The
+// switch lives in the card's panel, with the rest of the settings.
+export function AutoPushControl({ connector, actions, autoPush, busy = false, run }) {
+  return h('div', { className: 'bt-connector-setting bt-connector-auto-push', 'data-auto-push': autoPush === true ? 'on' : 'off' },
+    h('div', { className: 'bt-connector-action-title' }, t('Automatic sends')),
+    h('div', { className: 'bt-connector-hint' }, t('Send messages as they happen. Turn this off to approve each one first.')),
+    h('div', { className: 'bt-connector-form-row', role: 'radiogroup', 'aria-label': t('Automatic sends') },
+      h('button', {
+        type: 'button', role: 'radio', 'aria-checked': autoPush !== true, className: 'bt-soft bt-soft-sm',
+        disabled: busy, 'data-auto-push-choice': 'off',
+        onClick: (event) => { event.stopPropagation(); if (autoPush === true) void run(actions.connectorSetAutoPush(connector.id, false)) },
+      }, t('Off')),
+      h('button', {
+        type: 'button', role: 'radio', 'aria-checked': autoPush === true, className: 'bt-soft bt-soft-sm',
+        disabled: busy, 'data-auto-push-choice': 'on',
+        onClick: (event) => { event.stopPropagation(); if (autoPush !== true) void run(actions.connectorSetAutoPush(connector.id, true)) },
+      }, t('On'))))
+}
+
 function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = useState(false)
   // The credential values, by the secret name the host declared; a form with one field is
@@ -305,6 +324,11 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       setBusy(false)
     }
   }
+  // One notification connector can send without an approval card. The host decides the
+  // default; this switch only reports it and flips it.
+  const autoPushNode = notify && connector.state === 'ready'
+    ? h(AutoPushControl, { connector, actions, autoPush, busy, run })
+    : null
   // A connector with a level or capabilities opens its panel; settings and instances live on
   // the module's grouped card instead.
   const hasOptions = levelChoiceVisible(connector) || (on && (capabilities.length > 0 || permissions !== null))
@@ -404,24 +428,9 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
         ? null
         : h('div', { className: 'bt-connector-hint' }, t('Send the bot a message first, then press Test.')))
       : null,
-    // One notification connector can send without an approval card. The host decides the
-    // default; this switch only reports it and flips it.
-    notify && connector.state === 'ready'
-      ? h('div', { className: 'bt-connector-setting bt-connector-auto-push', 'data-auto-push': autoPush === true ? 'on' : 'off' },
-        h('div', { className: 'bt-connector-action-title' }, t('Automatic sends')),
-        h('div', { className: 'bt-connector-hint' }, t('Send messages as they happen. Turn this off to approve each one first.')),
-        h('div', { className: 'bt-connector-form-row', role: 'radiogroup', 'aria-label': t('Automatic sends') },
-          h('button', {
-            type: 'button', role: 'radio', 'aria-checked': autoPush !== true, className: 'bt-soft bt-soft-sm',
-            disabled: busy, 'data-auto-push-choice': 'off',
-            onClick: (event) => { event.stopPropagation(); if (autoPush === true) void run(actions.connectorSetAutoPush(connector.id, false)) },
-          }, t('Off')),
-          h('button', {
-            type: 'button', role: 'radio', 'aria-checked': autoPush === true, className: 'bt-soft bt-soft-sm',
-            disabled: busy, 'data-auto-push-choice': 'on',
-            onClick: (event) => { event.stopPropagation(); if (autoPush !== true) void run(actions.connectorSetAutoPush(connector.id, true)) },
-          }, t('On'))))
-      : null,
+    // The card shows only the connection; the send policy is a setting, so it opens with
+    // the rest of them. A card that cannot open a panel keeps the switch where it was.
+    !hasOptions ? autoPushNode : null,
     levelNote !== null ? h('div', { className: 'bt-connector-hint' }, levelNote) : null,
     needsReauth ? h('div', { className: 'bt-connector-hint' }, t('Click Connect to authorize with this access level again.')) : null,
     oauth && docsUrl !== undefined ? h('div', { className: 'bt-connector-docs' },
@@ -429,6 +438,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
     hasOptions && details
       ? h('div', { className: 'bt-connector-panel', id: panelId, role: 'group', 'aria-label': t('Connector settings') },
         h('div', { className: 'bt-connector-panel-inner' },
+          autoPushNode,
           levelBlock,
           permissionsNode,
           capabilitiesNode))

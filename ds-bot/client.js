@@ -21868,6 +21868,42 @@ function groupStatusText(base, count) {
   if (count === 0) return t("Connected · Read-only (all projects)");
   return count === 1 ? t("Connected · 1 project authorization") : t("Connected · {count} project authorizations", { count });
 }
+function AutoPushControl({ connector, actions, autoPush, busy = false, run: run2 }) {
+  return (0, import_react52.createElement)(
+    "div",
+    { className: "bt-connector-setting bt-connector-auto-push", "data-auto-push": autoPush === true ? "on" : "off" },
+    (0, import_react52.createElement)("div", { className: "bt-connector-action-title" }, t("Automatic sends")),
+    (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, t("Send messages as they happen. Turn this off to approve each one first.")),
+    (0, import_react52.createElement)(
+      "div",
+      { className: "bt-connector-form-row", role: "radiogroup", "aria-label": t("Automatic sends") },
+      (0, import_react52.createElement)("button", {
+        type: "button",
+        role: "radio",
+        "aria-checked": autoPush !== true,
+        className: "bt-soft bt-soft-sm",
+        disabled: busy,
+        "data-auto-push-choice": "off",
+        onClick: (event) => {
+          event.stopPropagation();
+          if (autoPush === true) void run2(actions.connectorSetAutoPush(connector.id, false));
+        }
+      }, t("Off")),
+      (0, import_react52.createElement)("button", {
+        type: "button",
+        role: "radio",
+        "aria-checked": autoPush === true,
+        className: "bt-soft bt-soft-sm",
+        disabled: busy,
+        "data-auto-push-choice": "on",
+        onClick: (event) => {
+          event.stopPropagation();
+          if (autoPush !== true) void run2(actions.connectorSetAutoPush(connector.id, true));
+        }
+      }, t("On"))
+    )
+  );
+}
 function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = (0, import_react52.useState)(false);
   const [values, setValues] = (0, import_react52.useState)({});
@@ -21996,6 +22032,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       setBusy(false);
     }
   };
+  const autoPushNode = notify && connector.state === "ready" ? (0, import_react52.createElement)(AutoPushControl, { connector, actions, autoPush, busy, run: run2 }) : null;
   const hasOptions = levelChoiceVisible(connector) || on && (capabilities.length > 0 || permissions !== null);
   const [details, setDetails] = (0, import_react52.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
@@ -22144,42 +22181,9 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       ),
       typeof connector.chatId === "string" && connector.chatId !== "" ? null : (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, t("Send the bot a message first, then press Test."))
     ) : null,
-    // One notification connector can send without an approval card. The host decides the
-    // default; this switch only reports it and flips it.
-    notify && connector.state === "ready" ? (0, import_react52.createElement)(
-      "div",
-      { className: "bt-connector-setting bt-connector-auto-push", "data-auto-push": autoPush === true ? "on" : "off" },
-      (0, import_react52.createElement)("div", { className: "bt-connector-action-title" }, t("Automatic sends")),
-      (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, t("Send messages as they happen. Turn this off to approve each one first.")),
-      (0, import_react52.createElement)(
-        "div",
-        { className: "bt-connector-form-row", role: "radiogroup", "aria-label": t("Automatic sends") },
-        (0, import_react52.createElement)("button", {
-          type: "button",
-          role: "radio",
-          "aria-checked": autoPush !== true,
-          className: "bt-soft bt-soft-sm",
-          disabled: busy,
-          "data-auto-push-choice": "off",
-          onClick: (event) => {
-            event.stopPropagation();
-            if (autoPush === true) void run2(actions.connectorSetAutoPush(connector.id, false));
-          }
-        }, t("Off")),
-        (0, import_react52.createElement)("button", {
-          type: "button",
-          role: "radio",
-          "aria-checked": autoPush === true,
-          className: "bt-soft bt-soft-sm",
-          disabled: busy,
-          "data-auto-push-choice": "on",
-          onClick: (event) => {
-            event.stopPropagation();
-            if (autoPush !== true) void run2(actions.connectorSetAutoPush(connector.id, true));
-          }
-        }, t("On"))
-      )
-    ) : null,
+    // The card shows only the connection; the send policy is a setting, so it opens with
+    // the rest of them. A card that cannot open a panel keeps the switch where it was.
+    !hasOptions ? autoPushNode : null,
     levelNote !== null ? (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, levelNote) : null,
     needsReauth ? (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, t("Click Connect to authorize with this access level again.")) : null,
     oauth && docsUrl !== void 0 ? (0, import_react52.createElement)(
@@ -22193,6 +22197,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       (0, import_react52.createElement)(
         "div",
         { className: "bt-connector-panel-inner" },
+        autoPushNode,
         levelBlock,
         permissionsNode,
         capabilitiesNode
