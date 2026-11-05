@@ -14042,7 +14042,7 @@ function BotSettingsForm({ bot, roster, actions, run: run2 }) {
   );
 }
 var BOT_SETTINGS_CSS = `
-.bt-bs{display:flex;flex-direction:column;gap:18px;container-type:inline-size}
+.bt-bs{display:flex;flex-direction:column;gap:18px}
 .bt-bs-hero{display:flex;align-items:center;gap:14px;padding:2px 4px}
 .bt-bs-who{display:flex;flex-direction:column;min-width:0;gap:2px}
 .bt-bs-name{font-size:17px;line-height:24px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -14075,17 +14075,19 @@ label.bt-bs-row{cursor:text}
 .bt-switch[aria-checked=true]:active:not(:disabled) .bt-switch-knob{transform:translateX(11px)}
 .bt-avedit :is(.bt-shapes,.bt-colors,.bt-dropzone){animation:bt-veil-in .18s ease-out}
 @media (prefers-reduced-motion:reduce){.bt-switch,.bt-switch-knob{transition:none}.bt-avedit :is(.bt-shapes,.bt-colors,.bt-dropzone){animation:none}}
-/* The settings panel is a narrow column even when the window is wide: stack a row
-   when the form itself is narrow, so the copy keeps its lines and the control gets
-   the whole width. The 640px viewport rule in SHELL_CSS covers a phone; this covers
-   a narrow panel on a wide window, which a viewport query cannot see. */
-@container (max-width:520px){
-  .bt-bs-row{flex-direction:column;align-items:stretch;gap:8px}
-  .bt-bs-row>.bt-set-copy{flex:0 0 auto;width:100%}
-  .bt-bs-input{flex:0 0 auto;width:100%;min-width:0;height:32px;margin:0;text-align:left}
-  .bt-bs-area{flex:0 0 auto;width:100%;min-height:140px;margin:0}
-  .bt-bs-row .bt-model-trigger{flex:0 0 auto;max-width:none;width:100%}
-  .bt-bs-row .bt-switch{align-self:flex-start}
+/* A phone keeps a settings row's label beside its control — the same pair as on a
+   desktop, not a second stacked layout. The copy gives up the hint's second line and
+   the control takes a fixed share, so the row stays readable down to 320. */
+@media (max-width:640px){
+  .bt-bs-row{flex-direction:row;align-items:center;gap:10px}
+  .bt-bs-row.bt-bs-stack{flex-direction:column;align-items:stretch}
+  .bt-bs-row>.bt-set-copy{flex:1 1 auto;width:auto;min-width:0}
+  .bt-bs-row .bt-set-hint{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal}
+  .bt-bs-input{flex:1 1 auto;width:auto;max-width:56%;min-width:0;text-align:right;margin:-4px 0}
+  .bt-bs-input:focus{text-align:left}
+  .bt-bs-area{flex:0 0 auto;width:100%;max-width:none;min-height:96px;margin:0;text-align:left}
+  .bt-bs-row .bt-model-trigger{flex:0 1 auto;max-width:56%;min-width:0}
+  .bt-bs-row .bt-switch{align-self:center}
 }
 `;
 
