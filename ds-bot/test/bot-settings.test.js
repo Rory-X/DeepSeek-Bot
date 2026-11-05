@@ -62,14 +62,17 @@ test('a private Bot can always turn privacy off, and cannot become Main or be du
   assert.equal(tree.some(node => node.props?.onClick && node.props.className === 'bt-set-row bt-bs-row' && JSON.stringify(node).includes('Duplicate')), false)
 })
 
-test('BOT_SETTINGS_CSS keeps a settings row on one line on a phone', async () => {
+test('BOT_SETTINGS_CSS keeps a settings row on one line and shares a narrow panel', async () => {
   const { BOT_SETTINGS_CSS } = module.exports
-  const phone = BOT_SETTINGS_CSS.slice(BOT_SETTINGS_CSS.indexOf('@media (max-width:640px)'))
-  // The stacked layout belongs to a wide settings card; a phone keeps the pair side by side.
+  const phone = BOT_SETTINGS_CSS.slice(BOT_SETTINGS_CSS.lastIndexOf('@media (max-width:640px)'))
+  // The direction is pinned for a phone; the panel query only changes shares.
   assert.match(phone, /\.bt-bs-row\{flex-direction:row;align-items:center/)
   assert.match(phone, /\.bt-bs-row\.bt-bs-stack\{flex-direction:column/)
-  assert.match(phone, /\.bt-bs-row>\.bt-set-copy\{flex:1 1 auto;width:auto;min-width:0\}/)
-  // A one-line hint keeps it from pushing the control off the row.
-  assert.match(phone, /\.bt-bs-row \.bt-set-hint\{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal\}/)
-  assert.equal(BOT_SETTINGS_CSS.includes('@container'), false, 'no container query: the phone rule owns this')
+  const panel = BOT_SETTINGS_CSS.slice(BOT_SETTINGS_CSS.indexOf('@container (max-width:520px)'), BOT_SETTINGS_CSS.lastIndexOf('@media (max-width:640px)'))
+  assert.doesNotMatch(panel, /flex-direction/, 'a narrow panel never stacks the row')
+  assert.match(panel, /\.bt-bs-input\{flex:1 1 auto;width:auto;max-width:56%/)
+  assert.match(panel, /\.bt-bs-row \.bt-model-trigger\{flex:0 0 auto;max-width:66%/)
+  assert.match(panel, /\.bt-bs-area\{[^}]*min-height:140px/)
+  // Same specificity means source order decides: the shares must come after the base rule.
+  assert.ok(BOT_SETTINGS_CSS.indexOf('.bt-bs-input{flex:0 1 220px') < BOT_SETTINGS_CSS.indexOf('@container (max-width:520px)'))
 })
