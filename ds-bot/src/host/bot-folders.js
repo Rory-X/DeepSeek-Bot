@@ -23,6 +23,8 @@ export function folderView(state) {
 }
 
 export function install(rt) {
+  // A test may hand install a bare runtime; registration keeps working there too.
+  if (!Array.isArray(rt.teamTools)) rt.teamTools = []
   let writing = Promise.resolve()
   const mutate = (kind, body, actor) => {
     const operation = writing.then(async () => {
@@ -93,7 +95,7 @@ export function install(rt) {
   rt.botFoldersView = () => folderView(rt.state)
   rt.botFolderMutate = mutate
   const output = { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] }
-  rt.ctx.tools.register(defineTool({
+  rt.teamTools.push(defineTool({
     name: 'list_bot_folders',
     description: 'Read sidebar Bot folders, their pinned status and members. These organize the Bot list; they are separate from group chats and projects. Use list_bots for each Bot’s role and work before deciding how to group them.',
     parameters: {}, output,
@@ -102,7 +104,7 @@ export function install(rt) {
       return JSON.stringify(rt.botFoldersView().map(folder => ({ ...folder, pinned: Boolean(folder.pinned), bots: folder.botIds.map(id => rt.state.bots[id].name) })))
     },
   }))
-  rt.ctx.tools.register(defineTool({
+  rt.teamTools.push(defineTool({
     name: 'organize_bots',
     description: 'Main Bot only. Organize existing Bots in sidebar folders based on their roles and work. assign creates or reuses a named folder and moves all specified Bots into it atomically; folder "" moves them out. A Bot belongs to at most one folder. rename changes a folder name; pin and unpin change its priority among folders; dissolve removes a folder even when populated, returning its Bots to normal list order; delete removes only an empty folder. These actions retain Bots, chats and their work. This never starts, stops, deletes, or messages a Bot and never creates a group chat.',
     parameters: {

@@ -10,7 +10,7 @@ import { fakeContext } from './fake-ctx.js'
 function fixture() {
   const bots = Object.fromEntries(['chief', 'auth', 'gmail', 'slack', 'drive', 'calendar', 'design'].map(id => [id, { id, name: id, role: id === 'design' ? 'Design' : 'Connectors' }]))
   const ctx = fakeContext()
-  const rt = { ctx, state: { bots, mainBotIds: ['chief'], botFolders: {} }, load: async () => {}, refresh: async () => {}, save: async () => {}, readOnly: () => undefined,
+  const rt = { ctx, teamTools: [], state: { bots, mainBotIds: ['chief'], botFolders: {} }, load: async () => {}, refresh: async () => {}, save: async () => {}, readOnly: () => undefined,
     isMain: id => id === 'chief', selfOf: id => id === 'chief-part' ? 'chief' : id,
     findBot: name => Object.values(bots).find(bot => bot.name === name || bot.id === name) }
   install(rt)
@@ -87,13 +87,13 @@ test('failed persistence and read-only teams leave no phantom changes', async ()
 
 test('Main Bot tools accept name batches and reject ordinary Bots before any changes', async () => {
   const rt = fixture()
-  const tool = rt.ctx.registeredTools.get('organize_bots')
+  const tool = rt.teamTools.find(tool => tool.name === 'organize_bots')
   const args = { action: 'assign', folder: 'connector', bots: five }
   for (const id of ['auth', 'unknown', undefined]) await assert.rejects(tool.execute(args, { agent: { id } }), /Only a Main Bot/)
   assert.deepEqual(rt.botFoldersView(), [])
   await assert.rejects(tool.execute({ ...args, bots: ['auth', 'unknown'] }, { agent: { id: 'chief' } }), /No Bot named/)
   await tool.execute(args, { agent: { id: 'chief-part' } })
-  const read = JSON.parse(await rt.ctx.registeredTools.get('list_bot_folders').execute({}, {}))
+  const read = JSON.parse(await rt.teamTools.find(tool => tool.name === 'list_bot_folders').execute({}, {}))
   assert.deepEqual(read[0].bots, five)
   await tool.execute({ action: 'rename', folder: 'connector', new_name: 'integrations' }, { agent: { id: 'chief' } })
   assert.equal(rt.botFoldersView()[0].name, 'integrations')
@@ -110,7 +110,7 @@ test('deleted Bots and a promoted primary Bot leave no ghost folder members', as
 
 test('Main Bot tools pin, unpin and dissolve populated folders without changing Bots', async () => {
   const rt = fixture()
-  const tool = rt.ctx.registeredTools.get('organize_bots')
+  const tool = rt.teamTools.find(tool => tool.name === 'organize_bots')
   const actor = { agent: { id: 'chief-part' } }
   rt.state.bots.auth.pinned = true
   const bots = structuredClone(rt.state.bots)
@@ -120,7 +120,7 @@ test('Main Bot tools pin, unpin and dissolve populated folders without changing 
   for (const action of ['pin', 'unpin']) {
     const result = JSON.parse(await tool.execute({ action, folder: 'CONNECTOR' }, actor))
     assert.equal(result.folder.pinned, action === 'pin')
-    const read = JSON.parse(await rt.ctx.registeredTools.get('list_bot_folders').execute({}, {}))
+    const read = JSON.parse(await rt.teamTools.find(tool => tool.name === 'list_bot_folders').execute({}, {}))
     assert.equal(read.find(folder => folder.name === 'connector').pinned, action === 'pin')
   }
   await assert.rejects(tool.execute({ action: 'delete', folder: 'connector' }, actor), /Move the Bots out/)
@@ -132,7 +132,7 @@ test('Main Bot tools pin, unpin and dissolve populated folders without changing 
 test('folder priority and dissolve tools enforce Main Bot rights and retain state on failures', async () => {
   const rt = fixture()
   await rt.botFolderMutate('assign', { name: 'connector', botIds: five })
-  const tool = rt.ctx.registeredTools.get('organize_bots')
+  const tool = rt.teamTools.find(tool => tool.name === 'organize_bots')
   const actor = { agent: { id: 'chief' } }
   const before = structuredClone(rt.state)
   for (const action of ['pin', 'unpin', 'dissolve']) {

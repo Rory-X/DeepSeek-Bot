@@ -10,6 +10,12 @@ const bundle = await build({
   external: ['react', 'react-dom', '@deepseek-ai/dsh-client-ui-primitives'],
 })
 const react = {
+  createContext: (initial) => { const ctx = { value: initial }; ctx.Provider = ({ value, children }) => { ctx.value = value; return children }; return ctx },
+  useContext: ctx => ctx.value,
+  useMemo: make => make(),
+  useCallback: fn => fn,
+  useId: () => 'dv-id',
+  useSyncExternalStore: (subscribe, getSnapshot) => getSnapshot(),
   createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
   Fragment: 'fragment',
   useState: initial => [initial, () => {}],
@@ -76,7 +82,7 @@ test('the six app update states set the DS Bot row\'s hint and button', () => {
 test('without an app update state the row keeps today\'s text and no button', () => {
   for (const ownApp of [undefined, null, 'checking', {}]) {
     const view = page({ source: 'app', ownApp })
-    assert.equal(view.hint, 'Updates come with the DeepSeek Bot app.')
+    assert.equal(view.hint, 'Updates come with the DS Bot app.')
     assert.deepEqual(view.buttons, [])
   }
 })

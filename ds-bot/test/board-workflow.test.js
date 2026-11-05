@@ -147,16 +147,16 @@ test('clarification preserves the work phase and rejection recalls the lead for 
 test('tool mutations require the assigned task conversation, including for a Main Bot', async t => {
   const ctx = fakeContext()
   const card = start().cards.card
-  const rt = { ctx, state: { board: { cards: { card } } }, load: async () => {}, own: (obj, key) => Object.hasOwn(obj, key) ? obj[key] : undefined,
+  const rt = { ctx, teamTools: [], state: { board: { cards: { card } } }, load: async () => {}, own: (obj, key) => Object.hasOwn(obj, key) ? obj[key] : undefined,
     botOf: id => bots[id], selfOf: session => session === 'lead-chat' || session === 'task' ? 'lead' : undefined,
     roomOf: id => id === 'room' ? { boardCardId: 'card' } : undefined, groupOwners: new Map([['task', { botId: 'lead', roomId: 'room' }]]),
     boardMutate: async () => ({ updated: true }), warn() {} }
   install(rt); t.after(() => ctx.dispose())
   rt.boardExecution = sessionId => sessionId === 'task' ? { card, job: { id: 'job' } } : undefined
-  const tool = ctx.registeredTools.get('plan_requirement')
+  const tool = rt.teamTools.find(tool => tool.name === 'plan_requirement')
   assert.equal(BOARD_TOOLS.length, 9)
-  assert.ok(BOARD_TOOLS.every(name => ctx.registeredTools.has(name)))
-  const assign = ctx.registeredTools.get('assign_requirement_bots')
+  assert.ok(BOARD_TOOLS.every(name => rt.teamTools.some(tool => tool.name === name)))
+  const assign = rt.teamTools.find(tool => tool.name === 'assign_requirement_bots')
   assert.match(await assign.execute({ id: 'card', version: 2, collaboratorIds: [], summary: 'Solo' }, { agent: { id: 'lead-chat' } }), /task conversation/)
   assert.deepEqual(JSON.parse(await assign.execute({ id: 'card', version: 2, collaboratorIds: [], summary: 'Solo' }, { agent: { id: 'task' } })), { updated: true })
   assert.match(await tool.execute({ id: 'card', version: 2, ...plan }, { agent: { id: 'lead-chat' } }), /task conversation/)
@@ -200,7 +200,8 @@ test('a task can create its first member session before any group relay ran', as
   const room = { id: 'room', members: ['lead'], boardCardId: 'card' }
   const rt = { ctx, home: '/unused', groupOwners: new Map(), roomOf: () => room, botOf: () => bots.lead,
     workDirOf: () => '/project', createSession: async (_title, options) => { assert.equal(options.strictDir, true); return 'task' },
-    desiredModel: async () => undefined, applyPermission: async () => {}, save: async () => {}, ensureCapabilities: async () => {}, ownChatBrief: async () => undefined }
+    desiredModel: async () => undefined, applyPermission: async () => {}, save: async () => {}, ensureCapabilities: async () => {}, ownChatBrief: async () => undefined,
+    resolveAgent: async () => {} }
   installGroups(rt); t.after(() => ctx.dispose())
   assert.deepEqual(await rt.groupSessionFor(room, { ...bots.lead, name: 'Lead' }), { id: 'task', brief: undefined })
   assert.deepEqual(room.seen, {})

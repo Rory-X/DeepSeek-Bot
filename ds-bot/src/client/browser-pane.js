@@ -8,7 +8,8 @@ import { createElement as h, useEffect, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom'
 import { BotMark } from './mark.js'
 import { STORAGE } from './storage.js'
-import { installStyles } from './styles.js'
+import { MIN_CHAT } from './frame-layout.js'
+import { chatRoom } from './frame-watch.js'
 import { SPRING_SHAPE, springEasing } from './motion.js'
 import { DetailsDrawer } from './details-drawer.js'
 import { SideChatView } from './side-chat.js'
@@ -26,12 +27,6 @@ const DEFAULT_WIDTH = 520
 const DETAILS_WIDTH = 320
 const DETAILS_MAX = 520
 const MIN_WIDTH = 360
-// The conversation keeps at least this much room beside the panel.
-const MIN_CHAT = 420
-const PANEL_MIN = { details: DETAILS_WIDTH, browser: MIN_WIDTH, side: DETAILS_WIDTH }
-// Below this viewport width the panel cannot leave the conversation its room:
-// it covers the conversation instead of pushing it aside.
-const overlayAt = (view, viewport) => viewport < MIN_CHAT + PANEL_MIN[view]
 // How long the Bot's mark shows that it read the page.
 const READ_FLASH_MS = 2400
 const EMPTY_PAGE = { url: '', title: '', favicon: null, loading: false, canGoBack: false, canGoForward: false, error: null, excerpt: '' }
@@ -72,52 +67,14 @@ const savedWidth = () => {
     return Number.isFinite(value) && value >= DETAILS_WIDTH ? value : null
   } catch { return null }
 }
-const widthRange = (view, viewport) => (view === 'browser'
-  ? [MIN_WIDTH, viewport - MIN_CHAT]
-  : [DETAILS_WIDTH, Math.min(DETAILS_MAX, viewport - MIN_CHAT)])
+// `room` is what the panel and the conversation share: the viewport minus the
+// left column's footprint (frame-layout.js). The panel never takes the last
+// MIN_CHAT px of it; below that it covers the conversation instead.
+const widthRange = (view, room) => (view === 'browser'
+  ? [MIN_WIDTH, room - MIN_CHAT]
+  : [DETAILS_WIDTH, Math.min(DETAILS_MAX, room - MIN_CHAT)])
 const fitWidth = (width, [low, high]) => Math.round(Math.max(low, Math.min(width, high)))
-// The layout viewport, without a scrollbar: window.innerWidth counts one, and a panel as
-// wide as that overhangs the window by the scrollbar's width.
-const layoutWidth = () => document.documentElement.clientWidth
-// The conversation column's right margin lives in one rule of our own, matched on the
-// column's exact class. A custom property on <body> would restyle the whole page, tens
-// of milliseconds a write. A changed rule still restyles the column's subtree, so a drag
-// writes the column's own inline style each frame and the rule once, on release.
-const room = { rule: null, selector: '' }
-const roomRule = () => {
-  const live = room.rule?.parentStyleSheet?.ownerNode?.isConnected
-  if (live && room.selector) return room.rule
-  const column = document.querySelector('[class*="_centerCol"]')
-  const selector = column ? [...column.classList].filter(name => name.includes('_centerCol')).map(name => `.${CSS.escape(name)}`).join(',') : ''
-  if (live && !selector) return room.rule
-  const declarations = room.rule?.style.cssText ?? ''
-  room.rule?.parentStyleSheet?.ownerNode?.remove()
-  const style = installStyles(`${selector || '[class*="_centerCol"]'}{${declarations}}`, 'chat-room')
-  room.rule = style.sheet.cssRules[0]
-  room.selector = selector
-  return room.rule
-}
-let roomHold = 0
-const chatRoom = {
-  /** The column's right margin in px, or null for the shell's own. */
-  set(width) {
-    const { style } = roomRule()
-    if (width === null) style.removeProperty('margin-right')
-    else style.setProperty('margin-right', `${width}px`, 'important')
-  },
-  /** While on, a margin change lands at once instead of gliding. */
-  hold(on) {
-    cancelAnimationFrame(roomHold)
-    if (on) { roomRule().style.setProperty('transition', 'none', 'important'); return }
-    // Two frames, so the last held write is on screen before the glide comes back.
-    roomHold = requestAnimationFrame(() => { roomHold = requestAnimationFrame(() => roomRule().style.removeProperty('transition')) })
-  },
-  /** The columns themselves, for a drag's per-frame writes. */
-  columns() {
-    roomRule()
-    return room.selector ? [...document.querySelectorAll(room.selector)] : []
-  },
-}
+
 // The address as the bar shows it while not editing: no scheme, no trailing slash.
 const shortAddress = url => String(url ?? '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '')
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -565,7 +522,7 @@ function ImportCard({ flow, page, busy, onApply, onCancel, onCloseAndImport, onD
  * Session id the panel follows and `side` the open chat's id. Without the
  * Desktop bridge the browser view never shows; side chats need no bridge.
  */
-export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages, useBrowserHolds }) {
+export function BotPanel({ pane, leaving, room, overlay, roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages, useBrowserHolds }) {
   const bot = roster.byId[pane.id]
   const canBrowse = Boolean(bot && roster.browser === true && actions.browserShow)
   const sideChats = bot ? sideChatsOf(roster, bot.id) : []
@@ -580,15 +537,14 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
   const [landed, setLanded] = useState(false)
   const [settling, setSettling] = useState(false)
   const [width, setWidth] = useState(savedWidth)
-  const [viewport, setViewport] = useState(() => layoutWidth())
+
   // While dragging or while the window resizes, width changes land at once.
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
   const instant = dragging || resizing
   const [reading, setReading] = useState(false)
 
-  const overlay = overlayAt(view, viewport)
-  const panelWidth = fitWidth(width ?? (view === 'browser' ? DEFAULT_WIDTH : DETAILS_WIDTH), widthRange(view, viewport))
+  const panelWidth = fitWidth(width ?? (view === 'browser' ? DEFAULT_WIDTH : DETAILS_WIDTH), widthRange(view, room))
   // Once the browser has shown, the Bot page keeps its width (up to DETAILS_MAX).
   useLayoutEffect(() => { if (view === 'browser' && width === null) setWidth(DEFAULT_WIDTH) }, [view, width])
   useLayoutEffect(() => { chatRoom.hold(instant) }, [instant])
@@ -608,21 +564,18 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     const switched = settling && shownView.current !== view
     shownView.current = view
     if (switched) chatRoom.hold(true)
-    chatRoom.set(leaving || overlay ? null : panelWidth)
+    chatRoom.setRight(leaving || overlay ? null : panelWidth)
     if (switched) chatRoom.hold(false)
   }, [view, panelWidth, leaving, overlay])
-  useEffect(() => () => { chatRoom.set(null); chatRoom.hold(false) }, [])
+  useEffect(() => () => { chatRoom.setRight(null); chatRoom.hold(false) }, [])
+  // A `room` change (window resize, the left column moving) lands at once.
+  const mounted = useRef(false)
   useEffect(() => {
-    let timer
-    const onResize = () => {
-      setResizing(true)
-      setViewport(layoutWidth())
-      clearTimeout(timer)
-      timer = setTimeout(() => setResizing(false), 160)
-    }
-    window.addEventListener('resize', onResize)
-    return () => { clearTimeout(timer); window.removeEventListener('resize', onResize) }
-  }, [])
+    if (!mounted.current) { mounted.current = true; return undefined }
+    setResizing(true)
+    const timer = setTimeout(() => setResizing(false), 160)
+    return () => clearTimeout(timer)
+  }, [room])
   useEffect(() => {
     if (!settling) return undefined
     const timer = setTimeout(() => setSettling(false), SPRING_SHAPE.duration + 40)
@@ -661,21 +614,27 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
   const beginSwitch = (next) => {
     if (reducedMotion()) return
     const panel = root.current
+    // The mark flies between the drawer avatar (details view) and the strip's Bot tab:
+    // up into the tab when the details view is left, back down when it returns. A switch
+    // between the browser and a side chat has no drawer avatar and nothing to fly.
+    const source = next === 'details'
+      ? panel?.querySelector('.bt-ptab-bot .bt-mark')
+      : panel?.querySelector('.bt-drawer-id .bt-mark')
     const outgoing = panel?.querySelector('.bt-panel-view')
     if (outgoing) {
       const ghostEl = document.createElement('div')
       ghostEl.className = 'bt-panel-ghost'
       ghostEl.style.width = `${outgoing.offsetWidth}px`
       ghostEl.append(outgoing.cloneNode(true))
+      // The flying clone stands in for the drawer's mark; the fading copy must not
+      // show it a second time.
+      if (source && next !== 'details') for (const mark of ghostEl.querySelectorAll('.bt-drawer-id .bt-mark')) mark.style.visibility = 'hidden'
       outgoing.parentElement.append(ghostEl)
       void ghostEl.animate([
         { opacity: 1, transform: 'scale(1)' },
         { opacity: 0, transform: 'scale(0.985)' },
       ], { duration: 160, easing: 'ease-out', fill: 'forwards' }).finished.catch(() => {}).finally(() => ghostEl.remove())
     }
-    const source = next === 'browser'
-      ? panel?.querySelector('.bt-drawer-id .bt-mark')
-      : panel?.querySelector('.bt-ptab-bot .bt-mark')
     if (source) fly.current = { node: source.cloneNode(true), from: source.getBoundingClientRect() }
   }
   const switchView = (next) => {
@@ -695,9 +654,9 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     const move = fly.current
     if (!move) return
     fly.current = null
-    const target = view === 'browser'
-      ? root.current?.querySelector('.bt-ptab-bot .bt-mark')
-      : root.current?.querySelector('.bt-drawer-id .bt-mark')
+    const target = view === 'details'
+      ? root.current?.querySelector('.bt-drawer-id .bt-mark')
+      : root.current?.querySelector('.bt-ptab-bot .bt-mark')
     if (!target || move.from.width === 0) return
     // A strip that has just appeared still grows from zero height; the target is
     // measured where it stands once the strip is full height.
@@ -730,7 +689,7 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     const panel = root.current
     const grip = event.currentTarget
     grip.setPointerCapture?.(event.pointerId)
-    const range = widthRange(view, layoutWidth())
+    const range = widthRange(view, room)
     const from = { x: event.clientX, width: panelWidth }
     let next = panelWidth
     setDragging(true)
@@ -741,7 +700,7 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     const onMove = (move) => {
       next = fitWidth(from.width + from.x - move.clientX, range)
       panel.style.width = `${next}px`
-      if (columns.length === 0) chatRoom.set(next)
+      if (columns.length === 0) chatRoom.setRight(next)
       for (const column of columns) column.style.setProperty('margin-right', `${next}px`, 'important')
     }
     const ends = ['pointerup', 'pointercancel', 'lostpointercapture']
@@ -750,7 +709,7 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
       grip.removeEventListener('pointermove', onMove)
       for (const name of ends) grip.removeEventListener(name, onEnd)
       // Hand the width back to the rule and the panel's variable in the same frame.
-      chatRoom.set(next)
+      chatRoom.setRight(next)
       for (const column of columns) { column.style.removeProperty('margin-right'); column.style.removeProperty('transition') }
       panel.style.setProperty('--bt-panel-w', `${next}px`)
       panel.style.removeProperty('width')
@@ -779,7 +738,7 @@ export function BotPanel({ pane, leaving, roster, actions, useSessions, useSessi
     view === 'browser' && bot
       ? h(BrowserView, { key: `browser:${active}`, bot, tabId: active, leaving, landed: landed && !settling, actions, useBrowserPages, hold })
       : view === 'side' && sideChat
-        ? h('div', { key: `side:${sideChat.id}`, className: 'bt-panel-view' }, h(SideChatView, { subject: pane.id, chat: sideChat, actions: panelActions }))
+        ? h('div', { key: `side:${sideChat.id}`, className: 'bt-panel-view' }, h(SideChatView, { subject: pane.id, chat: sideChat, roster, actions: panelActions }))
         : h('div', { key: `details:${pane.id}:${pane.renaming ? 'rename' : ''}:${pane.tab ?? ''}`, className: 'bt-panel-view' },
             h(DetailsDrawer, {
               sessionId: pane.id, startRenaming: pane.renaming, startTab: pane.tab, hasStrip,
@@ -850,7 +809,8 @@ export const BROWSER_CSS = `
 .bt-bcard{position:relative;border:.5px solid var(--bt-line-2);border-radius:12px;overflow:hidden;background:var(--bt-main);animation:bt-bcard-in .24s cubic-bezier(.16,1,.3,1) both;transition:border-color .12s ease,box-shadow .12s ease}
 @keyframes bt-bcard-in{from{opacity:0;filter:blur(4px);transform:translateY(4px)}}
 .bt-bcard[data-active]{border-color:var(--bt-accent,#4D6BFE);box-shadow:0 0 0 1px var(--bt-accent,#4D6BFE)}
-.bt-bcard-shot{position:relative;display:block;width:100%;aspect-ratio:16/10;border:0;background:var(--bt-hover);padding:0;cursor:pointer}
+.bt-bcard-shot{position:relative;display:block;width:100%;aspect-ratio:16/10;border:0;border-radius:12px 12px 0 0;background:var(--bt-hover);padding:0;cursor:pointer}
+.bt-bcard-shot:focus-visible{outline:2px solid var(--bt-accent);outline-offset:-2px}
 .bt-bcard-blank{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--bt-ink-3);font-size:12px}
 .bt-bcard-blank svg{width:20px;height:20px}
 .bt-bcard-preview{position:absolute;inset:0;display:flex;flex-direction:column;gap:6px;padding:14px 16px;text-align:left;background:linear-gradient(to bottom,var(--bt-main),var(--bt-hover));overflow:hidden}

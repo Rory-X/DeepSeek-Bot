@@ -187,6 +187,9 @@ export function BotSettingsForm({ bot, roster, actions, run }) {
   const isMainBot = isMainOf(roster, bot.id)
   const onlyMain = isMainBot && (roster.mainBotIds ?? []).length === 1
   const isTile = roster.mainBotId === bot.id
+  const inGroup = (roster.rooms ?? []).some(room => room.members?.includes(bot.id))
+  const privateHint = t('Other Bots cannot read its folder, memory or chats, and you approve what it shares with them.')
+  const privacyHint = bot.private === true ? privateHint : isMainBot ? t('A Main Bot cannot be private.') : inGroup ? t('Leave its group chats before making it private.') : !bot.workDir ? t('Choose a working folder of its own first.') : privateHint
   const save = patch => run(actions.updateBot(bot.id, patch))
   const duplicate = () => run(actions.duplicateBot(bot.id).then(copy => actions.openSession(copy.id)))
   const remove = () => { if (confirming) void run(actions.deleteBot(bot.id)); else setConfirming(true) }
@@ -213,6 +216,14 @@ export function BotSettingsForm({ bot, roster, actions, run }) {
       h('div', { className: 'bt-set-row bt-bs-row' },
         h('span', { className: 'bt-set-copy' }, h('span', { className: 'bt-bs-label' }, t('Folder'))),
         h(FolderMenu, { value: bot.workDir, actions, run, onPick: workDir => save({ workDir }) }))),
+    h(Card, { title: t('Privacy') },
+      h(SwitchRow, {
+        label: t('Private'),
+        hint: privacyHint,
+        on: bot.private === true,
+        disabled: bot.private !== true && (isMainBot || inGroup || !bot.workDir),
+        onChange: value => save({ private: value }),
+      })),
     h(Card, { title: t('Instructions') },
       h(Row, { label: t('What this Bot does'), hint: t('Its job on the team. Part of the Bot\'s system prompt.'), stack: true },
         h(InlineText, { label: t('Instructions'), value: bot.instructions, multiline: true, placeholder: t('What this Bot is responsible for…'), onSave: instructions => save({ instructions }) }))),
@@ -226,13 +237,19 @@ export function BotSettingsForm({ bot, roster, actions, run }) {
               h('span', { className: 'bt-bs-label' }, t('Main Bot')),
               h('span', { className: 'bt-set-hint' }, t('The only Main Bot. To hand the role to another Bot, use Main Bot on the Bots page.'))),
             h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => actions.openSettings('bots') }, t('Change')))
-        : h(SwitchRow, { label: t('Main Bot'), hint: t('Can create and change Bots, and runs every group chat.'), on: isMainBot, onChange: on => run(actions.setMain(bot.id, on)) })),
+        : h(SwitchRow, {
+          label: t('Main Bot'),
+          hint: bot.private === true ? t('A private Bot cannot be a Main Bot.') : t('Can create and change Bots, and runs every group chat.'),
+          on: isMainBot,
+          disabled: bot.private === true,
+          onChange: on => run(actions.setMain(bot.id, on)),
+        })),
     // The Main Bot tile is always first and always shown, like in the context menu.
     isTile ? null : h(Card, { title: t('Sidebar') },
       h(SwitchRow, { label: t('Pin'), hint: t('Kept above the other chats.'), on: bot.pinned === true, onChange: pinned => run(actions.setFlags(bot.id, { pinned })) }),
       isMainBot ? null : h(SwitchRow, { label: t('Hide from sidebar'), hint: t('Search still finds it.'), on: bot.hidden === true, onChange: hidden => run(actions.setFlags(bot.id, { hidden })) })),
     h(Card, { title: t('Manage') },
-      h('button', { type: 'button', className: 'bt-set-row bt-bs-row', onClick: duplicate },
+      bot.private === true ? null : h('button', { type: 'button', className: 'bt-set-row bt-bs-row', onClick: duplicate },
         h('span', { className: 'bt-set-copy' }, h('span', { className: 'bt-bs-label' }, t('Duplicate')), h('span', { className: 'bt-set-hint' }, t('A copy with the same job and model, and fresh memory.'))),
         h('span', { className: 'bt-chevron' }, h(ChevronRightIcon))),
       isMainBot ? null : h('button', { type: 'button', className: 'bt-set-row bt-bs-row bt-bs-danger', 'data-confirm': confirming || undefined, onClick: remove },
@@ -248,10 +265,9 @@ export const BOT_SETTINGS_CSS = `
 .bt-bs-who{display:flex;flex-direction:column;min-width:0;gap:2px}
 .bt-bs-name{font-size:17px;line-height:24px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-bs-sub{font-size:13px;line-height:18px;color:var(--bt-ink-2)}
-.bt-bs .bt-avedit{left:0;transform:none}
-/* A 300px popover overflows a phone. Cap it to the window and put it back on its anchor,
-   which sits in the middle of the pane. */
-@media (max-width:640px){.bt-avedit{width:min(300px,calc(100vw - 32px))}.bt-bs .bt-avedit{left:50%;transform:translateX(-50%)}}
+.bt-bs .bt-avedit{left:0;transform:none;width:min(284px,calc(100vw - 32px))}
+/* A popover over a phone goes back on its anchor, which sits in the middle of the pane. */
+@media (max-width:640px){.bt-bs .bt-avedit{left:50%;transform:translateX(-50%)}}
 .bt-bs-row{min-height:48px}
 label.bt-bs-row{cursor:text}
 .bt-bs-row>.bt-set-copy{flex:1 1 auto}
@@ -261,7 +277,6 @@ label.bt-bs-row{cursor:text}
 .bt-bs-input:hover{background:var(--bt-hover)}
 .bt-bs-input:focus{background:var(--bt-main);border-color:var(--bt-line-2);text-align:left}
 .bt-bs-input::placeholder{color:var(--bt-ink-3)}
-.bt-bs-input.bt-bs-num{flex:0 0 72px;min-width:0}
 .bt-bs-stack{flex-direction:column;align-items:stretch;gap:8px}
 .bt-bs-area{flex:none;width:auto;min-height:112px;height:auto;margin:0 -6px -4px;padding:8px;line-height:19px;text-align:left;resize:vertical;background:var(--bt-hover)}
 .bt-bs-area:hover{background:var(--bt-active)}

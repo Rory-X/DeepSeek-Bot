@@ -39,6 +39,8 @@ const jobPrompt = (card, job) => [
 ].filter(Boolean).join('\n\n')
 
 export function install(rt) {
+  // A test may hand install a bare runtime; registration keeps working there too.
+  if (!Array.isArray(rt.teamTools)) rt.teamTools = []
   const { ctx } = rt
   const contextOf = sessionId => {
     const owner = rt.groupOwners.get(sessionId) ?? rt.pastOwners?.get(sessionId)
@@ -61,7 +63,7 @@ export function install(rt) {
     if (execution.job.outcome) return 'This attempt already reported its result. Wait for the next assigned step before starting more work.'
     if (execution.job.recovery && !execution.job.reconciled && !['reconcile_requirement_work', 'ask_requirement_user', 'update_requirement_step'].includes(exec.name)) return 'Inspect the saved progress and call reconcile_requirement_work before making changes.'
   })
-  const register = (name, description, parameters, action) => ctx.tools.register(defineTool({
+  const register = (name, description, parameters, action) => rt.teamTools.push(defineTool({
     name, description, parameters, output,
     async execute(args, exec) {
       try {

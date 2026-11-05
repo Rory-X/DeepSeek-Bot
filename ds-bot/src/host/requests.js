@@ -179,14 +179,15 @@ export function install(rt) {
   Object.assign(rt, { requestIdentity: identity, knownRequest: known, admitRequest: admit })
 
   // One pass after the team file loads, never on a normal save: what was pruned has to reach
-  // the file, so the smaller table is saved once here.
+  // the file, so the smaller table is saved once here. Deferred past the installs: the store
+  // reads the team file synchronously now, and its adopt needs the modules installed later.
   if (typeof rt.load === 'function') {
-    void rt.load().then(() => {
+    queueMicrotask(() => { void rt.load().then(() => {
       const pruned = pruneRequests(receipts(), { inflight: new Set(inflight.keys()) })
       if (pruned.receipts > 0) rt.diagnostics?.record?.({ source: 'requests', text: `receipts pruned: ${pruned.receipts}` })
       if (pruned.tombstones > 0) rt.diagnostics?.record?.({ source: 'requests', text: `tombstones pruned: ${pruned.tombstones}` })
       if (pruned.receipts + pruned.tombstones === 0) return undefined
       return rt.save().catch(() => {})
-    }).catch(() => {})
+    }).catch(() => {}) })
   }
 }

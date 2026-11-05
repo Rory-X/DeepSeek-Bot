@@ -1,10 +1,11 @@
 import { createElement as h, Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { currentPart, latestMemoryChange } from './text.js'
-import { ArrowUpIcon, ChevronLeftIcon, CloseIcon, ArrowDownIcon, MemoryIcon } from './icons.js'
+import { ArrowUpIcon, ChevronLeftIcon, CloseIcon, ArrowDownIcon, GoalIcon, MemoryIcon } from './icons.js'
 import { botState, BotAvatar, RoomAvatar } from './mark.js'
 import { ActivityIndicator } from './activity-row.js'
 import { clockLabel, openingTurn, unseenSince } from './cells.js'
+import { GoalIsland, goalView } from './goal.js'
 import { viewBottom } from './motion.js'
 import { t } from './i18n.js'
 
@@ -43,7 +44,7 @@ function MemoryNotice({ shown }) {
     h('span', { className: 'bt-pill-mem-in', ref: inner }, h('span', { className: 'bt-pill-mem-ico' }, h(MemoryIcon)), label))
 }
 
-export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSession, useActivity, useMemoryNews, useTurnClock, useUi, useLive, useWork, useStore, useConversationViews, selectView, useMobileNav, useNavLevel, actions }) {
+export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus, useSession, useActivity, useMemoryNews, useTurnClock, useUi, useLive, useWork, useStore, useConversationViews, selectView, useMobileNav = pick => pick(false), useNavLevel = pick => pick('list'), actions }) {
   const roster = useRoster(value => value)
   const selectedView = useStore?.(state => state.view)
   const away = useConversationViews?.(views => views.some(view => view.id === selectedView && view.id !== 'chat')) === true
@@ -71,6 +72,15 @@ export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus
   const doing = useActivity(map => map[owner])
   const bot = roster.byId[sessionId]
   const room = roster.roomsById[sessionId]
+  const goal = room?.goal
+  const goalCompose = useUi(state => state.goalCompose === sessionId)
+  const goalOpen = useUi(state => state.goalOpen === sessionId)
+  // The island's live faces: who is at work in this group right now. Non-group
+  // chats subscribe to a constant so their header does not redraw on work.
+  const roomWorkKey = useWork?.(work => (room ? JSON.stringify(work.rooms?.[sessionId] ?? []) : '')) ?? '[]'
+  const roomWork = room ? JSON.parse(roomWorkKey || '[]') : []
+  const view = goal ? goalView(goal, { roster, roomWork }) : null
+  const goalShown = room !== undefined && !away && goal !== undefined
   const detailsOpen = useUi(state => state.details === sessionId)
   const name = bot?.name ?? room?.name ?? ''
   const useNews = useMemoryNews ?? noNews
@@ -100,21 +110,34 @@ export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus
   // On a phone the conversation is the second level: the back control leaves it for the
   // list page. Its hook is what the test bench reads.
   const onNavChat = useMobileNav(value => value) && useNavLevel(value => value === 'chat')
+  const showGoal = room !== undefined && !away && (goal !== undefined || goalCompose)
+  // The goal island pads the transcript so its pod does not cover the first message.
+  useEffect(() => {
+    if (showGoal) document.body.dataset.btGoal = ''
+    else delete document.body.dataset.btGoal
+    return () => { delete document.body.dataset.btGoal }
+  }, [showGoal])
+  const pill = h('button', {
+    type: 'button', className: 'bt-pill', 'aria-expanded': away ? undefined : detailsOpen, 'data-memory': memoryNotice ? 'updated' : undefined,
+    'aria-label': away ? t('Back to chat') : memoryNotice ? t('Memory updated. Open {name}\'s memory', { name: roster.byId[changed]?.name ?? name }) : t('View conversation details'),
+    title: away ? name : undefined,
+    onClick: () => (away ? selectView('chat') : memoryNotice ? actions.openMemory(changed) : actions.toggleDetails(sessionId)),
+  },
+    bot ? h(BotAvatar, { bot, size: 24, state: botState(running, doing, roster.questions?.[currentPart(bot)] !== undefined), badge: false })
+      : room ? h(RoomAvatar, { room, roster, size: 24 }) : null,
+    goalShown
+      ? h('span', { className: 'bt-pill-swap' },
+        h('span', { className: 'bt-pill-goal' }, h('span', { className: 'bt-pill-ico', 'aria-hidden': true }, h(GoalIcon)), h('span', { className: 'bt-pill-title' }, view.title)),
+        h('span', { className: 'bt-pill-name' }, name))
+      : h('span', { className: 'bt-pill-name' }, away ? t('Back to chat') : bot?.name ?? room?.name ?? (title || t('New chat'))),
+    goalShown && view?.number !== undefined ? h('span', { className: 'bt-pill-count' }, `${view.number}/${view.count}`) : null,
+    h(MemoryNotice, { shown: memoryNotice }),
+    h('span', { className: 'bt-pill-go', 'aria-hidden': true }, h(GoArrow)))
   return h('div', { className: 'bt-head' },
     onNavChat
       ? h('button', { type: 'button', className: 'bt-icon-btn bt-back', 'data-bt-nav-back': '', 'aria-label': t('Back to Bot list'), title: t('Back to Bot list'), onClick: () => actions.showBotList() }, h(ChevronLeftIcon))
       : null,
-    h('button', {
-      type: 'button', className: 'bt-pill', 'aria-expanded': away ? undefined : detailsOpen, 'data-memory': memoryNotice ? 'updated' : undefined,
-      'aria-label': away ? t('Back to chat') : memoryNotice ? t('Memory updated. Open {name}\'s memory', { name: roster.byId[changed]?.name ?? name }) : t('View conversation details'),
-      title: away ? name : undefined,
-      onClick: () => (away ? selectView('chat') : memoryNotice ? actions.openMemory(changed) : actions.toggleDetails(sessionId)),
-    },
-    bot ? h(BotAvatar, { bot, size: 24, state: botState(running, doing, roster.questions?.[currentPart(bot)] !== undefined), badge: false })
-      : room ? h(RoomAvatar, { room, roster, size: 24 }) : null,
-    h('span', { className: 'bt-pill-name' }, away ? t('Back to chat') : bot?.name ?? room?.name ?? (title || t('New chat'))),
-    h(MemoryNotice, { shown: memoryNotice }),
-    h('span', { className: 'bt-pill-go', 'aria-hidden': true }, h(GoArrow))),
+    showGoal ? h(GoalIsland, { room, goal, view, open: goalOpen, composing: goalCompose, roomWork, roster, actions, pill }) : pill,
     h('span', { className: 'bt-sr', role: 'status' }, memoryNotice ? t('Memory updated') : ''),
     h(NewMessagePills, { key: sessionId, sessionId, useSessions, useUi, useTurnClock }),
     h(ActivityIndicator, { key: `activity:${sessionId}`, sessionId, useRoster, useSessionStatus, useSession, useLive, useWork, actions }))
@@ -124,7 +147,7 @@ export function HeaderPill({ sessionId, useRoster, useSessions, useSessionStatus
 // pill replaces is the shell's again and the reader is left with no way back to the list on a
 // phone. The way back takes the shell's own empty leading seat, and only there: a Bot
 // conversation has its own back control, and classic Agent mode has no Bot list to return to.
-export function PlainBack({ useMobileNav, useSurface, useNavLevel, actions }) {
+export function PlainBack({ useMobileNav = pick => pick(false), useSurface, useNavLevel = pick => pick('list'), actions }) {
   const onPhone = useMobileNav(value => value)
   const plain = useSurface(state => state.plain && state.mode === 'bot')
   const atChat = useNavLevel(value => value === 'chat')
