@@ -10,7 +10,7 @@ import { build } from 'esbuild'
 // can be checked against the host's own autoPush value without a browser.
 const bundle = await build({
   stdin: {
-    contents: "export { ConnectorsPage } from './src/client/connectors.js'",
+    contents: "export { ConnectorsPage, AutoPushControl } from './src/client/connectors.js'",
     resolveDir: dirname(dirname(fileURLToPath(import.meta.url))),
   },
   bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
@@ -37,7 +37,7 @@ runInNewContext(bundle.outputFiles[0].text, {
   navigator: { clipboard: { writeText: async () => {} }, language: 'en' },
   localStorage: { getItem: () => null, setItem: () => {} },
 })
-const { ConnectorsPage } = module.exports
+const { ConnectorsPage, AutoPushControl } = module.exports
 const actions = new Proxy({}, { get: () => async () => {} })
 
 function flat(node, depth = 0) {
@@ -63,23 +63,70 @@ const texts = nodes => nodes.flatMap(node => node.children).filter(child => type
 const switchNode = nodes => nodes.find(node => node.props?.['data-auto-push'] !== undefined)
 const choices = nodes => nodes.filter(node => node.props?.['data-auto-push-choice'] !== undefined)
 
-test('a notification connector shows the automatic-send switch on when the host says so', () => {
+// The switch is a setting now: folded, the card shows only the connection.
+test('a folded notification card keeps the automatic-send switch out of sight', () => {
   const tree = page([telegram()])
-  const block = switchNode(tree)
-  assert.ok(block, 'the switch is drawn')
-  assert.equal(block.props['data-auto-push'], 'on')
-  assert.ok(texts(tree).includes('Automatic sends'))
-  const [off, on] = choices(tree)
-  assert.equal(off.props['aria-checked'], false)
-  assert.equal(on.props['aria-checked'], true)
+  assert.equal(switchNode(tree), undefined, 'no switch on the folded card')
+  assert.equal(texts(tree).includes('Automatic sends'), false)
 })
 
-test('an explicit autoPush:false draws the switch off', () => {
-  const tree = page([telegram({ autoPush: false })])
-  assert.equal(switchNode(tree).props['data-auto-push'], 'off')
-  const [off, on] = choices(tree)
-  assert.equal(off.props['aria-checked'], true)
-  assert.equal(on.props['aria-checked'], false)
+const autoPushActions = () => {
+  const calls = []
+  const actions = { connectorSetAutoPush: (id, value) => { calls.push([id, value]); return Promise.resolve() } }
+  return { calls, actions }
+}
+const renderSwitch = ({ autoPush = true, busy = false, actions = new Proxy({}, { get: () => async () => {} }), run = () => {} } = {}) =>
+  flat(AutoPushControl({ connector: telegram(), actions, autoPush, busy, run }))
+const press = (nodes, choice) => {
+  const button = nodes.find(n => n.props?.['data-auto-push-choice'] === choice)
+  let stopped = false
+  button.props.onClick({ stopPropagation: () => { stopped = true } })
+  return stopped
+}
+
+test('the switch it draws reports the host value and flips it', () => {
+  const on = renderSwitch({ autoPush: true })
+  const block = switchNode(on)
+  assert.equal(block.props['data-auto-push'], 'on')
+  assert.ok(texts(on).includes('Automatic sends'))
+  assert.equal(choices(on).find(c => c.props['data-auto-push-choice'] === 'off').props['aria-checked'], false)
+  assert.equal(choices(on).find(c => c.props['data-auto-push-choice'] === 'on').props['aria-checked'], true)
+
+  const off = renderSwitch({ autoPush: false })
+  assert.equal(switchNode(off).props['data-auto-push'], 'off')
+  assert.equal(choices(off).find(c => c.props['data-auto-push-choice'] === 'off').props['aria-checked'], true)
+  assert.equal(choices(off).find(c => c.props['data-auto-push-choice'] === 'on').props['aria-checked'], false)
+})
+
+test('choosing On or Off asks the host, and only for a change', () => {
+  const first = autoPushActions()
+  let ran = 0
+  const onNodes = flat(AutoPushControl({ connector: telegram(), actions: first.actions, autoPush: true, busy: false, run: () => { ran += 1 } }))
+  assert.equal(press(onNodes, 'off'), true, 'the press does not reach the card')
+  assert.deepEqual(first.calls, [['telegram', false]])
+  assert.equal(ran, 1, 'the host action runs through the card')
+  press(onNodes, 'on')
+  assert.deepEqual(first.calls, [['telegram', false]], 'choosing the value it already has asks nothing')
+
+  const second = autoPushActions()
+  const offNodes = flat(AutoPushControl({ connector: telegram(), actions: second.actions, autoPush: false, busy: false, run: () => {} }))
+  press(offNodes, 'on')
+  assert.deepEqual(second.calls, [['telegram', true]])
+})
+
+// The panel is the only place the switch can appear, and a card without one keeps it outside.
+test('the switch sits first inside the card panel, and stays on the card when there is no panel', () => {
+  const source = readFileSync(new URL('../src/client/connectors.js', import.meta.url), 'utf8')
+  const panelStart = source.indexOf("className: 'bt-connector-panel-inner'")
+  const switchAt = source.indexOf('autoPushNode,', panelStart)
+  const levelAt = source.indexOf('levelBlock,', panelStart)
+  assert.ok(panelStart >= 0 && switchAt > panelStart && switchAt < levelAt, 'the panel draws it before the level choice')
+  assert.match(source, /!hasOptions \? autoPushNode : null/, 'a card without a panel keeps it on the card')
+  // A notification card that cannot open a panel still shows the switch.
+  const noPanel = telegram({ levels: [], card: { glyph: 'telegram', levelChoice: false } })
+  const tree = page([noPanel])
+  assert.ok(switchNode(tree), 'the fallback keeps the control on the card')
+  assert.equal(texts(tree).includes('Automatic sends'), true)
 })
 
 test('the switch belongs to notification connectors only', () => {
@@ -108,8 +155,7 @@ test('the chosen automatic-send radio is painted, so On and Off differ without a
   assert.match(styles, /@media \(hover:none\)\{\.bt-connector-auto-push \[role=radio\]\{height:36px;padding:0 16px\}\}/, 'the phone keeps a 36px target')
   assert.ok(bundle.includes('.bt-connector-auto-push [role=radio]{height:36px'), 'the built client keeps the 36px target')
   // And the two states cannot look the same: only the checked rule sets a fill and a ring.
-  const tree = page([telegram()])
-  const [off, on] = choices(tree)
-  assert.equal(off.props['aria-checked'], false)
-  assert.equal(on.props['aria-checked'], true)
+  const on = renderSwitch({ autoPush: true })
+  assert.equal(choices(on).find(c => c.props['data-auto-push-choice'] === 'off').props['aria-checked'], false)
+  assert.equal(choices(on).find(c => c.props['data-auto-push-choice'] === 'on').props['aria-checked'], true)
 })

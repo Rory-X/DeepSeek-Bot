@@ -4087,6 +4087,15 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 [data-wechat-channel] .bt-connector-project-name,[data-wechat-channel] .bt-connector-project-status{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 [data-wechat-channel] .bt-connector-project-head>.bt-connector-actions{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap}
 }
+
+/* A connector card whose head carries two buttons (a ready or failed notify row) has the
+   same squeeze on a phone: the chevron and the buttons leave the name about 40px, so it
+   ends in an ellipsis. The same wrap the channel rows use keeps the name readable. */
+@media (max-width:640px){
+.bt-connector-head:has(>.bt-connector-actions>button:nth-child(2)){flex-wrap:wrap;row-gap:8px}
+.bt-connector-head:has(>.bt-connector-actions>button:nth-child(2))>.bt-connector-main{flex:1 1 100%}
+.bt-connector-head:has(>.bt-connector-actions>button:nth-child(2))>.bt-connector-actions{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap}
+}
 /* A wide settings panel lays the instance fields out two by two; a phone keeps one column. */
 @media (min-width:900px){
 .bt-connector-instance-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
@@ -21875,6 +21884,42 @@ function groupStatusText(base, count) {
   if (count === 0) return t("Connected · Read-only (all projects)");
   return count === 1 ? t("Connected · 1 project authorization") : t("Connected · {count} project authorizations", { count });
 }
+function AutoPushControl({ connector, actions, autoPush, busy = false, run: run2 }) {
+  return (0, import_react52.createElement)(
+    "div",
+    { className: "bt-connector-setting bt-connector-auto-push", "data-auto-push": autoPush === true ? "on" : "off" },
+    (0, import_react52.createElement)("div", { className: "bt-connector-action-title" }, t("Automatic sends")),
+    (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, t("Send messages as they happen. Turn this off to approve each one first.")),
+    (0, import_react52.createElement)(
+      "div",
+      { className: "bt-connector-form-row", role: "radiogroup", "aria-label": t("Automatic sends") },
+      (0, import_react52.createElement)("button", {
+        type: "button",
+        role: "radio",
+        "aria-checked": autoPush !== true,
+        className: "bt-soft bt-soft-sm",
+        disabled: busy,
+        "data-auto-push-choice": "off",
+        onClick: (event) => {
+          event.stopPropagation();
+          if (autoPush === true) void run2(actions.connectorSetAutoPush(connector.id, false));
+        }
+      }, t("Off")),
+      (0, import_react52.createElement)("button", {
+        type: "button",
+        role: "radio",
+        "aria-checked": autoPush === true,
+        className: "bt-soft bt-soft-sm",
+        disabled: busy,
+        "data-auto-push-choice": "on",
+        onClick: (event) => {
+          event.stopPropagation();
+          if (autoPush !== true) void run2(actions.connectorSetAutoPush(connector.id, true));
+        }
+      }, t("On"))
+    )
+  );
+}
 function ConnectorRow({ connector, actions, readOnly = null }) {
   const [form, setForm] = (0, import_react52.useState)(false);
   const [values, setValues] = (0, import_react52.useState)({});
@@ -22003,6 +22048,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       setBusy(false);
     }
   };
+  const autoPushNode = notify && connector.state === "ready" ? (0, import_react52.createElement)(AutoPushControl, { connector, actions, autoPush, busy, run: run2 }) : null;
   const hasOptions = levelChoiceVisible(connector) || on && (capabilities.length > 0 || permissions !== null);
   const [details, setDetails] = (0, import_react52.useState)(false);
   const panelId = hasOptions ? `bt-connector-${connector.id}-panel` : void 0;
@@ -22151,42 +22197,9 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       ),
       typeof connector.chatId === "string" && connector.chatId !== "" ? null : (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, t("Send the bot a message first, then press Test."))
     ) : null,
-    // One notification connector can send without an approval card. The host decides the
-    // default; this switch only reports it and flips it.
-    notify && connector.state === "ready" ? (0, import_react52.createElement)(
-      "div",
-      { className: "bt-connector-setting bt-connector-auto-push", "data-auto-push": autoPush === true ? "on" : "off" },
-      (0, import_react52.createElement)("div", { className: "bt-connector-action-title" }, t("Automatic sends")),
-      (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, t("Send messages as they happen. Turn this off to approve each one first.")),
-      (0, import_react52.createElement)(
-        "div",
-        { className: "bt-connector-form-row", role: "radiogroup", "aria-label": t("Automatic sends") },
-        (0, import_react52.createElement)("button", {
-          type: "button",
-          role: "radio",
-          "aria-checked": autoPush !== true,
-          className: "bt-soft bt-soft-sm",
-          disabled: busy,
-          "data-auto-push-choice": "off",
-          onClick: (event) => {
-            event.stopPropagation();
-            if (autoPush === true) void run2(actions.connectorSetAutoPush(connector.id, false));
-          }
-        }, t("Off")),
-        (0, import_react52.createElement)("button", {
-          type: "button",
-          role: "radio",
-          "aria-checked": autoPush === true,
-          className: "bt-soft bt-soft-sm",
-          disabled: busy,
-          "data-auto-push-choice": "on",
-          onClick: (event) => {
-            event.stopPropagation();
-            if (autoPush !== true) void run2(actions.connectorSetAutoPush(connector.id, true));
-          }
-        }, t("On"))
-      )
-    ) : null,
+    // The card shows only the connection; the send policy is a setting, so it opens with
+    // the rest of them. A card that cannot open a panel keeps the switch where it was.
+    !hasOptions ? autoPushNode : null,
     levelNote !== null ? (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, levelNote) : null,
     needsReauth ? (0, import_react52.createElement)("div", { className: "bt-connector-hint" }, t("Click Connect to authorize with this access level again.")) : null,
     oauth && docsUrl !== void 0 ? (0, import_react52.createElement)(
@@ -22200,6 +22213,7 @@ function ConnectorRow({ connector, actions, readOnly = null }) {
       (0, import_react52.createElement)(
         "div",
         { className: "bt-connector-panel-inner" },
+        autoPushNode,
         levelBlock,
         permissionsNode,
         capabilitiesNode
@@ -24028,6 +24042,11 @@ function SettingsDialog({ page, id, roster, actions, useUpdate, leaving = false 
   const label = t(pages.find(([key]) => key === shown)[1]);
   const back = bot ? t("Back to Bots") : room2 ? t("Back to group chats") : usageFocus ? t("All usage") : null;
   const nav = useGlide(shown, { axis: "y" });
+  (0, import_react57.useEffect)(() => {
+    const box = nav.box.current;
+    const item = box?.querySelector('[aria-current="page"]');
+    item?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [shown]);
   const pageKey = `${shown}:${bot?.id ?? room2?.id ?? ""}`;
   const depth = bot || room2 ? 1 : 0;
   const last = (0, import_react57.useRef)({ key: pageKey, depth, move: "up" });

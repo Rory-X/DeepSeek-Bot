@@ -815,6 +815,15 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 [data-wechat-channel] .bt-connector-project-name,[data-wechat-channel] .bt-connector-project-status{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 [data-wechat-channel] .bt-connector-project-head>.bt-connector-actions{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap}
 }
+
+/* A connector card whose head carries two buttons (a ready or failed notify row) has the
+   same squeeze on a phone: the chevron and the buttons leave the name about 40px, so it
+   ends in an ellipsis. The same wrap the channel rows use keeps the name readable. */
+@media (max-width:640px){
+.bt-connector-head:has(>.bt-connector-actions>button:nth-child(2)){flex-wrap:wrap;row-gap:8px}
+.bt-connector-head:has(>.bt-connector-actions>button:nth-child(2))>.bt-connector-main{flex:1 1 100%}
+.bt-connector-head:has(>.bt-connector-actions>button:nth-child(2))>.bt-connector-actions{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap}
+}
 /* A wide settings panel lays the instance fields out two by two; a phone keeps one column. */
 @media (min-width:900px){
 .bt-connector-instance-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
