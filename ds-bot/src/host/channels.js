@@ -1,4 +1,4 @@
-// Channels: external conversations (a WeChat channel, a webhook peer) answered by one Bot.
+// Channels: external conversations (a webhook peer, another service's chat) answered by one Bot.
 // Each channel conversation gets its own Session, owned by the Bot the channel was bound to
 // when the conversation started. It is not a Bot's own chat and not a group: no roster row,
 // no memory review or memory prompt, no checkpoint, and only the tools this channel allows
@@ -30,7 +30,7 @@ export function install(rt) {
   const remember = (channel, entry) => {
     channel.history = [entry, ...channel.history].slice(0, HISTORY_MAX)
   }
-  const sessionFolder = instance => join(rt.home, 'wechat', 'sessions', instance)
+  const sessionFolder = instance => join(rt.home, 'channels', 'sessions', instance)
 
   // A channel Session is frozen on the tools it was given: none, or a short read-only list
   // when the channel asked for it. The restriction only names tools this Harness serves.

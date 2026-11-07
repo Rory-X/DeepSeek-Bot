@@ -1683,9 +1683,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       }
       const plain = {}
       for (const [name, value] of Object.entries(values)) if (!secretNames.has(name)) plain[name] = value
-      // A module may refuse a save that would break a connected channel (WeChat refuses a
-      // transport change while ready or in error). The context carries the saved settings,
-      // the runtime state and the level; a one-argument module simply ignores them.
+      // A module may refuse a save that would break a connected channel (a login may not
+      // switch transport while it is ready or in error). The context carries the saved
+      // settings, the runtime state and the level; a one-argument module simply ignores them.
       const prior = state.connectors?.[body.id] ?? {}
       let settings
       if (typeof connector.normalizeSettings === 'function') {
