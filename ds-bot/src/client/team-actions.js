@@ -192,8 +192,8 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     // level the reader sees.
     connectorOauthStart: (id, level) => after(call('connector-oauth-start', { id, ...(typeof level === 'string' && level !== '' ? { level } : {}) })),
     connectorOauthApp: (id, clientId, clientSecret) => after(call('connector-oauth-app', { id, clientId, clientSecret })),
-    // One small module operation the generic endpoints do not cover (WeChat's ClawBot login).
-    // The action name travels as the module declares it; the host refuses unknown ones.
+    // One small module operation the generic endpoints do not cover. The action name travels
+    // as the module declares it; the host refuses unknown ones.
     connectorCommand: (id, action, args) => after(call('connector-command', { id, action, ...(args === undefined ? {} : { args }) })),
     imAdd: payload => after(call('im-add', payload)),
     imUpdate: (id, patch) => after(call('im-update', { id, ...patch })),

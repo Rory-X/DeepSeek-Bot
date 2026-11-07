@@ -800,36 +800,9 @@ button.bt-connector-main:focus-visible{outline:2px solid var(--bt-accent);outlin
 .bt-connector-project .bt-connector-error{padding-left:0}
 .bt-connector-add-form{display:flex;flex-direction:column;gap:8px;padding:10px;border:.5px dashed var(--bt-line-2);border-radius:10px;min-width:0}
 .bt-connector-add-form .bt-connector-form-row{justify-content:flex-end}
-/* The WeChat card: a transport badge on each channel, the login step and the inbound
-   address inside the row, and the QR image only when the host sends one as a data URL. */
-.bt-wechat-error{padding:0 12px 10px;font-size:12px;line-height:16px;color:var(--bt-danger);overflow-wrap:anywhere}
-.bt-connector-about{font-size:12px;line-height:16px;color:var(--bt-ink-3);overflow-wrap:anywhere}
-.bt-wechat-docs{padding:2px 0 0}
-.bt-wechat-transport{margin-left:6px;font-size:11px;line-height:16px;font-weight:500;color:var(--bt-ink-3);padding:0 6px;border-radius:6px;background:var(--hover)}
-.bt-wechat-login{display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0;min-width:0}
-.bt-wechat-login-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;text-align:center}
-.bt-wechat-beta{flex:none;font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;border:.5px solid var(--bt-line-2);color:var(--bt-ink-3);text-transform:uppercase;letter-spacing:.04em}
-.bt-wechat-consent-points{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;text-align:left}
-.bt-wechat-login-detail{color:var(--bt-ink-3)}
-.bt-wechat-qr{width:168px;height:168px;border-radius:10px;border:.5px solid var(--bt-line-2);background:var(--bt-main);padding:6px;box-sizing:border-box}
-.bt-wechat-inbound{display:flex;flex-direction:column;gap:8px;border:.5px solid var(--bt-line);border-radius:10px;padding:10px 12px;min-width:0}
-.bt-wechat-copy-row{display:flex;align-items:center;gap:8px;min-width:0}
-.bt-wechat-copy-key{flex:none;width:42px;font-size:11px;line-height:16px;color:var(--bt-ink-3)}
-.bt-wechat-copy-row code{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow-wrap:anywhere}
-.bt-wechat-copy-row .bt-soft{flex:none}
-@media (max-width:640px){.bt-wechat-qr{width:180px;height:180px}}
-/* A phone cannot fit a channel name, its state and two buttons on one line: the row wraps,
-   buttons get a line of their own, and the name/state no longer end in an ellipsis. */
-@media (max-width:640px){
-[data-wechat-channel] .bt-connector-project-head{flex-wrap:wrap;row-gap:8px}
-[data-wechat-channel] .bt-connector-project-main{flex:1 1 100%}
-[data-wechat-channel] .bt-connector-project-name,[data-wechat-channel] .bt-connector-project-status{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
-[data-wechat-channel] .bt-connector-project-head>.bt-connector-actions{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap}
-}
-
-/* A connector card whose head carries two buttons (a ready or failed notify row) has the
-   same squeeze on a phone: the chevron and the buttons leave the name about 40px, so it
-   ends in an ellipsis. The same wrap the channel rows use keeps the name readable. */
+/* A connector card whose head carries two buttons (a ready or failed notify row) has a
+   squeeze on a phone: the chevron and the buttons leave the name about 40px, so it ends in
+   an ellipsis. The head wraps so the name keeps a line of its own. */
 @media (max-width:640px){
 .bt-connector-head:has(>.bt-connector-actions>button:nth-child(2)){flex-wrap:wrap;row-gap:8px}
 .bt-connector-head:has(>.bt-connector-actions>button:nth-child(2))>.bt-connector-main{flex:1 1 100%}
