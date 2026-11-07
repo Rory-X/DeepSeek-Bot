@@ -319,7 +319,16 @@ test('every blocked name is denied before it runs, without a card or a request',
   globalThis.fetch = bench.fetch
   const { ctx, home } = setup()
   t.after(async () => { await ctx.dispose(); rmSync(home, { recursive: true, force: true, maxRetries: 5 }) })
-  const gate = ctx.listeners.get('tools/pre-execute').at(-1)
+  // Modules added after the connectors (computer, im, local agents) register their own
+  // pre-execute gates, so the connectors' one is no longer the last listener: pick the
+  // listener that actually denies a blocked name instead of trusting the order.
+  const gates = ctx.listeners.get('tools/pre-execute') ?? []
+  const probeNext = () => Promise.resolve({ kind: 'allow' })
+  let gate
+  for (const candidate of [...gates].reverse()) {
+    if ((await candidate({ name: 'delete_repository', arguments: {} }, probeNext)).kind === 'deny') { gate = candidate; break }
+  }
+  assert.ok(gate, 'a pre-execute listener denies a blocked name')
   let passed = 0
   const next = () => { passed += 1; return Promise.resolve({ kind: 'allow' }) }
   for (const name of BLOCKED_TOOLS) {
