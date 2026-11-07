@@ -1,0 +1,283 @@
+TAP version 13
+# Subtest: apply registers listeners and effects in a fixed order
+not ok 1 - apply registers listeners and effects in a fixed order
+  ---
+  duration_ms: 575.645525
+  type: 'test'
+  location: '/home/dsh/.dsh/bot/workspace/DeepSeek-Bot/.tmp/wt-030/ds-bot/test/install.test.js:35:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    ... Skipped lines
+    
+      [
+        'effect ds-bot: diagnostics log',
+        'effect ds-bot: state lock',
+        'on llm/adapters-updated',
+        'on credentials/reference-updated',
+    ...
+        'on tools/pre-execute',
+    +   'on tools/pre-execute',
+    -   'on tools/change',
+        'effect ds-bot: connectors',
+        'on agent/created',
+        'effect ds-bot: capabilities',
+        'on agent/status',
+        'effect ds-bot: learning',
+    +   'on tools/pre-execute',
+    +   'on tools/execute',
+        'tools guard',
+        'on session/event',
+        'effect ds-bot: requirement delivery',
+    -   'on tools/pre-execute',
+    -   'on tools/execute',
+        'on agent/created',
+        'on agent/disposed',
+        'on user-questions/request (prepend)',
+        'on tools/pre-execute',
+        'on tools/execute',
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'effect ds-bot: diagnostics log'
+    1: 'effect ds-bot: state lock'
+    2: 'on llm/adapters-updated'
+    3: 'on credentials/reference-updated'
+    4: 'on credentials/record-updated'
+    5: 'on settings/document-updated'
+    6: 'on subagent/start'
+    7: 'on subagent/end'
+    8: 'on session/event'
+    9: 'on subagent/start'
+    10: 'on subagent/end'
+    11: 'on tools/result'
+    12: 'on session/event'
+    13: 'on tools/execute'
+    14: 'effect ds-bot: identity section'
+    15: 'prompt bot-identity 640'
+    16: 'effect ds-bot: channel rules'
+    17: 'prompt channel-rules 641'
+    18: 'on agent/pre-step (prepend)'
+    19: 'on tools/execute'
+    20: 'effect ds-bot: scoped team tools'
+    21: 'on tools/change'
+    22: 'tools guard'
+    23: 'on agent/created'
+    24: 'on system-prompt/assemble'
+    25: 'on session/event'
+    26: 'effect ds-bot: chat index'
+    27: 'effect ds-bot: group step lines'
+    28: 'on llm/stream'
+    29: 'on session/event'
+    30: 'on approval/request (prepend)'
+    31: 'on agent/inbox/discarded'
+    32: 'on session/event'
+    33: 'effect ds-bot: resume interrupted turns'
+    34: 'effect ds-bot: memory recovery'
+    35: 'effect ds-bot: memory section'
+    36: 'prompt bot-memory 645'
+    37: 'on agent/pre-step'
+    38: 'on agent/status'
+    39: 'effect ds-bot: memory review'
+    40: 'effect ds-bot: Bot compaction'
+    41: 'on agent/created'
+    42: 'on agent/pre-step (prepend)'
+    43: 'on system-prompt/assemble (prepend)'
+    44: 'on agent/request-error (prepend)'
+    45: 'on agent/request-error (prepend)'
+    46: 'effect ds-bot: hand on input kept in earlier parts'
+    47: 'on workspace/session-stop'
+    48: 'on workspace/session-activity'
+    49: 'on agent/status'
+    50: 'on llm/stream'
+    51: 'on llm/stream'
+    52: 'on agent/status'
+    53: 'on tools/execute'
+    54: 'on llm/stream'
+    55: 'effect ds-bot: load secrets'
+    56: 'on tools/pre-execute'
+    57: 'on tools/change'
+    58: 'effect ds-bot: connectors'
+    59: 'on agent/created'
+    60: 'effect ds-bot: capabilities'
+    61: 'on agent/status'
+    62: 'effect ds-bot: learning'
+    63: 'tools guard'
+    64: 'on session/event'
+    65: 'effect ds-bot: requirement delivery'
+    66: 'on tools/pre-execute'
+    67: 'on tools/execute'
+    68: 'on agent/created'
+    69: 'on agent/disposed'
+    70: 'on user-questions/request (prepend)'
+    71: 'on tools/pre-execute'
+    72: 'on tools/execute'
+    73: 'on session/event'
+    74: 'effect ds-bot: computer use section'
+    75: 'prompt computer-use:ds-bot 0'
+    76: 'effect ds-bot: computer use'
+    77: 'effect ds-bot: usage ledger'
+    78: 'on llm/stream'
+    79: 'effect ds-bot: update check'
+    80: 'effect ds-bot: dsh update install'
+    81: 'on agent/status'
+    82: 'on session/event'
+    83: 'on agent/assistant-stream'
+    84: 'effect ds-bot: live feed route'
+    85: 'route GET /api/bot/feed'
+    86: 'effect ds-bot: live feed'
+    87: 'on session/event'
+    88: 'effect ds-bot: im'
+    89: 'effect ds-bot: api route'
+    90: 'route POST /api/bot'
+    91: 'effect ds-bot: load state'
+    92: 'effect ds-bot: local agents'
+  actual:
+    0: 'effect ds-bot: diagnostics log'
+    1: 'effect ds-bot: state lock'
+    2: 'on llm/adapters-updated'
+    3: 'on credentials/reference-updated'
+    4: 'on credentials/record-updated'
+    5: 'on settings/document-updated'
+    6: 'on subagent/start'
+    7: 'on subagent/end'
+    8: 'on session/event'
+    9: 'on subagent/start'
+    10: 'on subagent/end'
+    11: 'on tools/result'
+    12: 'on session/event'
+    13: 'on tools/execute'
+    14: 'effect ds-bot: identity section'
+    15: 'prompt bot-identity 640'
+    16: 'effect ds-bot: channel rules'
+    17: 'prompt channel-rules 641'
+    18: 'on agent/pre-step (prepend)'
+    19: 'on tools/execute'
+    20: 'effect ds-bot: scoped team tools'
+    21: 'on tools/change'
+    22: 'tools guard'
+    23: 'on agent/created'
+    24: 'on system-prompt/assemble'
+    25: 'on session/event'
+    26: 'effect ds-bot: chat index'
+    27: 'effect ds-bot: group step lines'
+    28: 'on llm/stream'
+    29: 'on session/event'
+    30: 'on approval/request (prepend)'
+    31: 'on agent/inbox/discarded'
+    32: 'on session/event'
+    33: 'effect ds-bot: resume interrupted turns'
+    34: 'effect ds-bot: memory recovery'
+    35: 'effect ds-bot: memory section'
+    36: 'prompt bot-memory 645'
+    37: 'on agent/pre-step'
+    38: 'on agent/status'
+    39: 'effect ds-bot: memory review'
+    40: 'effect ds-bot: Bot compaction'
+    41: 'on agent/created'
+    42: 'on agent/pre-step (prepend)'
+    43: 'on system-prompt/assemble (prepend)'
+    44: 'on agent/request-error (prepend)'
+    45: 'on agent/request-error (prepend)'
+    46: 'effect ds-bot: hand on input kept in earlier parts'
+    47: 'on workspace/session-stop'
+    48: 'on workspace/session-activity'
+    49: 'on agent/status'
+    50: 'on llm/stream'
+    51: 'on llm/stream'
+    52: 'on agent/status'
+    53: 'on tools/execute'
+    54: 'on llm/stream'
+    55: 'effect ds-bot: load secrets'
+    56: 'on tools/pre-execute'
+    57: 'on tools/pre-execute'
+    58: 'effect ds-bot: connectors'
+    59: 'on agent/created'
+    60: 'effect ds-bot: capabilities'
+    61: 'on agent/status'
+    62: 'effect ds-bot: learning'
+    63: 'on tools/pre-execute'
+    64: 'on tools/execute'
+    65: 'tools guard'
+    66: 'on session/event'
+    67: 'effect ds-bot: requirement delivery'
+    68: 'on agent/created'
+    69: 'on agent/disposed'
+    70: 'on user-questions/request (prepend)'
+    71: 'on tools/pre-execute'
+    72: 'on tools/execute'
+    73: 'on session/event'
+    74: 'effect ds-bot: computer use section'
+    75: 'prompt computer-use:ds-bot 0'
+    76: 'effect ds-bot: computer use'
+    77: 'effect ds-bot: usage ledger'
+    78: 'on llm/stream'
+    79: 'effect ds-bot: update check'
+    80: 'effect ds-bot: dsh update install'
+    81: 'on agent/status'
+    82: 'on session/event'
+    83: 'on agent/assistant-stream'
+    84: 'effect ds-bot: live feed route'
+    85: 'route GET /api/bot/feed'
+    86: 'effect ds-bot: live feed'
+    87: 'on session/event'
+    88: 'effect ds-bot: im'
+    89: 'effect ds-bot: api route'
+    90: 'route POST /api/bot'
+    91: 'effect ds-bot: load state'
+    92: 'effect ds-bot: local agents'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/dsh/.dsh/bot/workspace/DeepSeek-Bot/.tmp/wt-030/ds-bot/test/install.test.js:38:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: the client channel answers from the saved state
+ok 2 - the client channel answers from the saved state
+  ---
+  duration_ms: 926.954761
+  type: 'test'
+  ...
+# Subtest: in the Desktop profile read_browser is the last tool and reads through the window
+ok 3 - in the Desktop profile read_browser is the last tool and reads through the window
+  ---
+  duration_ms: 272.868272
+  type: 'test'
+  ...
+# Subtest: browser takeover and give-back are user-only and publish hold state
+ok 4 - browser takeover and give-back are user-only and publish hold state
+  ---
+  duration_ms: 100.032841
+  type: 'test'
+  ...
+# Subtest: the desktop app has read_browser too; DSH Web does not
+ok 5 - the desktop app has read_browser too; DSH Web does not
+  ---
+  duration_ms: 188.192527
+  type: 'test'
+  ...
+# Subtest: config.browser turns Bot browsers off even in the Desktop profile
+ok 6 - config.browser turns Bot browsers off even in the Desktop profile
+  ---
+  duration_ms: 56.414339
+  type: 'test'
+  ...
+# Subtest: a custom agent keeps the local agents adapter live after install
+ok 7 - a custom agent keeps the local agents adapter live after install
+  ---
+  duration_ms: 54.446959
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 6
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5106.294478

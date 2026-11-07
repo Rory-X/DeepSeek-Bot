@@ -4,7 +4,7 @@
 
 [English](README.md) | 中文
 
-![版本](https://img.shields.io/badge/版本-v0.2_预览-blue) ![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.5-4D6BFE) ![许可](https://img.shields.io/badge/许可-Apache_2.0-green)
+![版本](https://img.shields.io/badge/版本-v0.3_预览-blue) ![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.1-4D6BFE) ![许可](https://img.shields.io/badge/许可-Apache_2.0-green)
 
 **[Download DS Bot for Windows 10/11 (64-bit) / 下载 Windows 10/11（64 位）版](https://github.com/Fei2411/DS-Bot/releases/latest)**, about 212 MB / 约 212 MB. A community project, not an official DeepSeek product. / 社区开源项目，不是 DeepSeek 官方产品。
 
@@ -93,8 +93,8 @@ DS Bot 0.2.1 及更早的版本在 DSH Desktop 0.2.1-rc.2 及以后的版本里�
 需要 Node.js `22.19` 以上和 pnpm。Linux 上它和桌面应用一样要求 glibc 2.28 及以上——dsh 自身会加载原生库，CentOS 7 这类旧 glibc 系统请走下面的 Docker 路线。
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add ds-bot
-npx @deepseek-ai/dsh@0.2.1-rc.5 web
+npx @deepseek-ai/dsh@0.2.2-rc.1 plugin --profile web add ds-bot
+npx @deepseek-ai/dsh@0.2.2-rc.1 web
 ```
 
 **Docker（NAS、Linux 服务器）**
@@ -157,11 +157,23 @@ Telegram 用你自己的 bot 发出 Bot 被要求发送的消息。
 
 连接完成后，Bot 用 `notify_telegram(text)` 发消息，最多 4,096 字符。token 只放在密钥里，不会出现在 view、团队文件或日志中。
 
+### 本地 Agent
+
+你已经在用的编程 Agent CLI（Devin CLI、Claude Code、Codex CLI、OpenCode 和其他 ACP Agent）可以直接当 Bot 用。设置 → **本地 Agent** 列出 DS Bot 找到的 CLI，在 Bot 的模型里选它即可。Bot 用的是 CLI 自己的登录和套餐，其他照常：私聊、群聊、交接、审批、记忆都一样。
+
+### 电脑操控
+
+Bot 可以在你允许的范围内使用电脑上的应用。在设置 → **电脑操控**里打开，再给每个 Bot 设档位和能用的应用。Bot 操作时你看得见，随时可以接管再交还；有些应用永远不交给 Bot。
+
 ### 用量
 
 在 设置 → 用量 里，可以按时间、按 bot、按模型查看 Token 用量。
 
 ![用量页](docs/images/usage.zh.png)
+
+### IM
+
+你可以在聊天应用里直接和 Bot 对话。设置 → IM 可以把 Bot 连接到 Telegram、微信、飞书、钉钉、企业微信、QQ、Discord 或 Slack——配对、群聊、审批卡片和回复都能用，电脑不需要公网地址或开放端口。
 
 ### Office 文件
 

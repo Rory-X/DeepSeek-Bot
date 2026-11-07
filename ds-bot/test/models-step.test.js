@@ -16,7 +16,7 @@ const { outputFiles } = await build({
 })
 const frames = []
 const react = {
-  createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), Fragment: Symbol('Fragment'),
+  Component: class {}, createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), Fragment: Symbol('Fragment'),
   useEffect: (effect) => { effect() }, useLayoutEffect() {}, useState: initial => [initial, () => {}],
   useMemo: make => make(), useRef: current => ({ current }), useId: () => 'id',
   // The bundled Deep View widgets make a React context when their module loads.
@@ -119,4 +119,19 @@ test('Harness settings opens DSH settings', () => {
   // Upstream hands the surface over first and closes only when the shell took it, so the
   // hand-over is not undone by this dialog on the way out.
   assert.deepEqual(plain.calls, ['settings', 'close'])
+})
+
+test('General settings keeps the Classic Agent mode switch', () => {
+  const calls = []
+  const roster = { byId: {}, roomsById: {}, bots: [], rooms: [], models: [], prefs: {} }
+  const tree = SettingsDialog({
+    page: 'general', id: null, roster, useUpdate: pick => pick({}),
+    actions: { closeSettings() {}, openSettings() {}, setSurface: mode => calls.push(mode) },
+  })
+  const [general] = walk(tree, node => typeof node.type === 'function' && node.type.name === 'GeneralPage')
+  const [row] = walk(general.type(general.props), node => node.props?.label === 'Classic Agent mode')
+  assert.ok(row !== undefined)
+  const [button] = walk(row, node => node.type === 'button' && textOf(node) === 'Switch')
+  button.props.onClick()
+  assert.deepEqual(calls, ['agent'])
 })

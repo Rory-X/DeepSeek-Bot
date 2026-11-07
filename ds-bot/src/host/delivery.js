@@ -52,14 +52,14 @@ export function install(rt) {
   // a message a shutdown cancelled; its first send may not have been recorded.
   // `askedBy` is the member whose @mention called a group turn (groups.js).
   // `fromRoomId`: the group whose Session the sender wrote from; the reply goes back
-  // to that Session (turns.js). `files` go along as file blocks, which DSH turns into
-  // a read-only path the recipient's tools can read. `length`: the whole message's
+  // to that Session (turns.js). `images` and `files` go along as image and file blocks,
+  // which DSH projects for the recipient's model and tools. `length`: the whole message's
   // length when it went as a file (attachLong). `work`: the work (handoffs.js) a
   // result that came back goes on with. `merged`: a request that takes in an earlier
   // one its recipient had not read, under that one's exchange. `untrusted`: a message
   // from an external channel; its sender is named but never trusted, and it is not
   // recorded as a team exchange.
-  async function deliver({ fromId, toId, sessionId, text, role, replyTo, roomId, audience, note, exchangeId = randomUUID(), steer = false, deferred = false, resumed = false, retried = false, resent = false, merged = false, askedBy, fromRoomId, files = [], length, work, untrusted = false, sender }) {
+  async function deliver({ fromId, toId, sessionId, text, role, replyTo, roomId, audience, note, exchangeId = randomUUID(), steer = false, deferred = false, resumed = false, retried = false, resent = false, merged = false, askedBy, fromRoomId, images = [], files = [], length, work, untrusted = false, sender }) {
     const from = rt.botOf(fromId)
     const to = rt.botOf(toId)
     if (to === undefined) throw new Error(`Unknown Bot ${toId}`)
@@ -103,6 +103,7 @@ export function install(rt) {
     const message = createUserMessage({
       content: [
         { type: 'text', text: `${headerFor(role, fromName, room?.name, audience, note, deferred, { resumed, retried, resent, asker, untrusted, senderName })}\n${text}` },
+        ...images.map(attachment => ({ type: 'image', attachment })),
         ...files.map(attachment => ({ type: 'file', attachment })),
       ],
       source,

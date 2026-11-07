@@ -21,9 +21,9 @@
 # from package.json, so an upstream sync needs no edit to this script.
 set -eu
 
-VERSION="${DEEP_VIEW_VERSION:-0.1.0}"
-SHA1="${DEEP_VIEW_SHA1:-71edfdadcc2a6f2ec0230df6be056c10df654026}"
-GIT_HEAD="${DEEP_VIEW_GIT_HEAD:-65afbc24a98b1690df86c45731782f30dfa14d68}"
+VERSION="${DEEP_VIEW_VERSION:-0.1.2}"
+SHA1="${DEEP_VIEW_SHA1:-6a0207ee0b6e9a8d96dc5f682ab66a6f6be2e124}"
+GIT_HEAD="${DEEP_VIEW_GIT_HEAD:-dab178d026332bdb2016afe71e57eddf0747b850}"
 TARBALL="${1:-${DEEP_VIEW_TARBALL:-}}"
 
 PLUGIN="$(cd "$(dirname "$0")/.." && pwd)"
