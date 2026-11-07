@@ -76,7 +76,7 @@ async function start({ state = seed(), schemas = [], home: reuse, config = {} } 
   return { rt, ctx, home, created, archived, workspaces, agents, emitSession, stop, dispose }
 }
 
-const bind = (rt, overrides = {}) => rt.channelSessionFor({ instance: 'wechat', botId: 'a', conversationId: 'dm:u1', title: 'Chief · WeChat', settings: {}, ...overrides })
+const bind = (rt, overrides = {}) => rt.channelSessionFor({ instance: 'webhook', botId: 'a', conversationId: 'dm:u1', title: 'Chief · Webhook', settings: {}, ...overrides })
 
 test('a channel conversation gets its own Session outside every workspace', async (t) => {
   const host = await start()
@@ -87,8 +87,8 @@ test('a channel conversation gets its own Session outside every workspace', asyn
   // workspace and never shows up in a project or session list.
   assert.deepEqual(host.workspaces, [])
   assert.equal(host.created[0].workspaceId, undefined)
-  assert.equal(host.created[0].cwd, join(host.home, 'wechat', 'sessions', 'wechat'))
-  assert.equal(statSync(join(host.home, 'wechat', 'sessions', 'wechat')).isDirectory(), true)
+  assert.equal(host.created[0].cwd, join(host.home, 'channels', 'sessions', 'webhook'))
+  assert.equal(statSync(join(host.home, 'channels', 'sessions', 'webhook')).isDirectory(), true)
   assert.equal(host.rt.selfOf('s1'), 'a')
   assert.equal(host.rt.isChannelSession('s1'), true)
   assert.equal(host.rt.isBotSession('s1'), false)
@@ -97,8 +97,8 @@ test('a channel conversation gets its own Session outside every workspace', asyn
   assert.equal(await bind(host.rt), 's1')
   assert.equal(host.created.length, 1)
   const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
-  assert.equal(saved.channels.wechat.conversations['dm:u1'].sessionId, 's1')
-  assert.equal(saved.channels.wechat.conversations['dm:u1'].botId, 'a')
+  assert.equal(saved.channels.webhook.conversations['dm:u1'].sessionId, 's1')
+  assert.equal(saved.channels.webhook.conversations['dm:u1'].botId, 'a')
 })
 
 test('a channel Session has no tools, or only the read tools it asked for', async (t) => {
@@ -149,13 +149,13 @@ test('rebinding archives every conversation and the next Bot starts fresh', asyn
   const host = await start()
   t.after(host.stop)
   const first = await bind(host.rt)
-  const archived = await host.rt.rebindChannel('wechat', { reason: 'rebind' })
+  const archived = await host.rt.rebindChannel('webhook', { reason: 'rebind' })
   assert.deepEqual(archived.map(entry => entry.sessionId), [first])
   assert.deepEqual(host.archived, [[first, { stopActivity: true }]])
   assert.equal(host.rt.isChannelSession(first), false)
   const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
-  assert.deepEqual(saved.channels.wechat.history.map(entry => [entry.sessionId, entry.botId, entry.reason]), [[first, 'a', 'rebind']])
-  assert.deepEqual(saved.channels.wechat.conversations, {})
+  assert.deepEqual(saved.channels.webhook.history.map(entry => [entry.sessionId, entry.botId, entry.reason]), [[first, 'a', 'rebind']])
+  assert.deepEqual(saved.channels.webhook.conversations, {})
 
   // The new Bot gets a new Session; the archived one is never handed out again.
   const second = await bind(host.rt, { botId: 'b' })
@@ -191,7 +191,7 @@ test('a channel conversation is found again after a restart', async (t) => {
   t.after(second.stop)
   assert.equal(second.rt.isChannelSession(sessionId), true)
   assert.equal(second.rt.selfOf(sessionId), 'a')
-  assert.equal(second.rt.channelOwners.get(sessionId).instance, 'wechat')
+  assert.equal(second.rt.channelOwners.get(sessionId).instance, 'webhook')
   assert.equal(second.rt.channelOwners.get(sessionId).conversationId, 'dm:u1')
 })
 
@@ -201,8 +201,8 @@ test('a channel keeps at most eight conversations and archives the oldest', asyn
   const ids = []
   for (let index = 1; index <= 9; index += 1) ids.push(await bind(host.rt, { conversationId: `dm:u${index}` }))
   const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
-  assert.equal(Object.keys(saved.channels.wechat.conversations).length, 8)
-  assert.equal(saved.channels.wechat.history.some(entry => entry.sessionId === ids[0] && entry.reason === 'lru'), true)
+  assert.equal(Object.keys(saved.channels.webhook.conversations).length, 8)
+  assert.equal(saved.channels.webhook.history.some(entry => entry.sessionId === ids[0] && entry.reason === 'lru'), true)
   assert.equal(host.rt.isChannelSession(ids[0]), false)
   assert.equal(host.rt.isChannelSession(ids.at(-1)), true)
 })
@@ -211,11 +211,11 @@ test('closing a channel archives its conversations and keeps the record', async 
   const host = await start()
   t.after(host.stop)
   const sessionId = await bind(host.rt)
-  await host.rt.closeChannel('wechat', 'instance-deleted')
+  await host.rt.closeChannel('webhook', 'instance-deleted')
   assert.deepEqual(host.archived, [[sessionId, { stopActivity: true }]])
   assert.equal(host.rt.isChannelSession(sessionId), false)
   const saved = JSON.parse(readFileSync(join(host.home, 'state.json'), 'utf8'))
-  assert.deepEqual(saved.channels.wechat.history.map(entry => [entry.sessionId, entry.reason]), [[sessionId, 'instance-deleted']])
+  assert.deepEqual(saved.channels.webhook.history.map(entry => [entry.sessionId, entry.reason]), [[sessionId, 'instance-deleted']])
 })
 
 test('a channel Session is not one of the Bot\'s own chat parts', async (t) => {

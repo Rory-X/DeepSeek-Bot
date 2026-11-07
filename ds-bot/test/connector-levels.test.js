@@ -8,7 +8,6 @@ import { test } from 'node:test'
 import { createConnectorHost } from '../src/host/connectors.js'
 import gmail from '../src/host/connectors/gmail.js'
 import telegram from '../src/host/connectors/telegram.js'
-import wechat from '../src/host/connectors/wechat.js'
 import { fakeContext } from './fake-ctx.js'
 
 function hostSetup({ state = { connectors: {} }, definitions = {}, secrets = {}, config = {}, readOnly = () => undefined } = {}) {
@@ -108,12 +107,10 @@ test('a read-only host keeps its rule even for a write-only connector', async (t
   assert.equal(host.registered.includes('pager_send'), false)
 })
 
-test('WeChat and Telegram declare one write level and hide the level choice', async (t) => {
-  for (const definition of [wechat, telegram]) {
-    assert.deepEqual(definition.levels, ['write'], definition.id)
-    assert.equal(definition.defaultLevel, 'write', definition.id)
-    assert.equal(definition.card.levelChoice, false, definition.id)
-  }
+test('a messaging connector declares one write level and hides the level choice', async (t) => {
+  assert.deepEqual(telegram.levels, ['write'])
+  assert.equal(telegram.defaultLevel, 'write')
+  assert.equal(telegram.card.levelChoice, false)
 
   const telegramHost = hostSetup({
     state: { connectors: { telegram: { level: 'read', settings: {}, chatId: '123' } } },
@@ -127,14 +124,19 @@ test('WeChat and Telegram declare one write level and hide the level choice', as
   assert.deepEqual(telegramRow.levels, ['write'])
   assert.equal(telegramRow.card.levelChoice, false)
 
-  const wechatHost = hostSetup({ state: { connectors: {} }, definitions: { wechat } })
-  t.after(() => stop(wechatHost))
-  const wechatRow = rowOf(wechatHost.rt, 'wechat')
-  assert.equal(wechatRow.level, 'write')
-  assert.equal(wechatRow.levels.length, 1)
-  assert.equal(wechatRow.levels[0].id, 'write')
-  assert.equal(wechatRow.card.levelChoice, false)
-  assert.equal(JSON.stringify(wechatRow.levels).includes('"read"'), false)
+  // Any write-only module draws the same row: one level, named write, and no read choice.
+  const pagerHost = hostSetup({
+    state: { connectors: { pager: { level: 'read', settings: {} } } },
+    definitions: { pager: writeOnly({ card: { levelChoice: false } }) },
+    secrets: { PAGER_TOKEN: 'token' },
+  })
+  t.after(() => stop(pagerHost))
+  await until(() => pagerHost.registered.includes('pager_send'), 'the Pager send tool')
+  const pagerRow = rowOf(pagerHost.rt, 'pager')
+  assert.equal(pagerRow.level, 'write')
+  assert.deepEqual(pagerRow.levels, ['write'])
+  assert.equal(pagerRow.card.levelChoice, false)
+  assert.equal(JSON.stringify(pagerRow.levels).includes('"read"'), false)
 })
 
 test('other connectors keep their levels and stored value', async (t) => {

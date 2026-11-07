@@ -148,12 +148,12 @@ test('a broken multi-instance declaration fails at load with the file name', asy
 
 test('a custom module that declares its credentials can be instances', async () => {
   const { dir, cleanup } = withModules({
-    'wechat.js': `export default { id: 'wechat', displayName: 'WeChat', mode: 'custom', tokenSecret: 'WECHAT_TOKEN', instances: { min: 1, max: 8 } }\n`,
+    'telegram.js': `export default { id: 'telegram', displayName: 'Telegram', mode: 'custom', tokenSecret: 'TELEGRAM_BOT_TOKEN', instances: { min: 1, max: 8 } }\n`,
     'wecom.js': `export default { id: 'wecom', displayName: 'WeCom', mode: 'custom', credentials: [{ name: 'WECOM_KEY' }], instances: {} }\n`,
   })
   try {
     const loaded = await loadConnectorModules(dir)
-    assert.deepEqual(loaded.wechat.instances, { prefix: 'wechat', min: 1, max: 8 })
+    assert.deepEqual(loaded.telegram.instances, { prefix: 'telegram', min: 1, max: 8 })
     assert.deepEqual(loaded.wecom.instances, { prefix: 'wecom', min: 1, max: 8 })
   } finally {
     cleanup()

@@ -1909,7 +1909,7 @@ test('a module view adds row data and the instance cap', async (t) => {
     view: ({ settings, instance }) => ({
       levels: [{ id: 'read', title: 'Read', description: 'Receive messages' }],
       canTest: true,
-      inbound: settings.transport === 'webhook' ? { url: `http://127.0.0.1:8799/wechat/${instance.id}/inbound`, token: 'inbound-1' } : undefined,
+      inbound: settings.transport === 'webhook' ? { url: `http://127.0.0.1:8799/channels/${instance.id}/inbound`, token: 'inbound-1' } : undefined,
       login: { state: settings.transport === 'clawbot' ? 'logged-in' : 'logged-out' },
       status: { lastInboundAt: 5 },
     }),
@@ -1922,7 +1922,7 @@ test('a module view adds row data and the instance cap', async (t) => {
   const first = rowOf(rt, 'demo')
   assert.equal(first.instance.max, 4)
   assert.deepEqual(first.levels, [{ id: 'read', title: 'Read', description: 'Receive messages' }])
-  assert.deepEqual(first.inbound, { url: 'http://127.0.0.1:8799/wechat/demo/inbound', token: 'inbound-1' })
+  assert.deepEqual(first.inbound, { url: 'http://127.0.0.1:8799/channels/demo/inbound', token: 'inbound-1' })
   assert.deepEqual(first.login, { state: 'logged-out' })
   assert.equal(first.canTest, true)
   assert.deepEqual(first.status, { lastInboundAt: 5 })
@@ -2005,7 +2005,7 @@ test('the shipped connectors still settle after the async mount path', async (t)
   t.after(async () => { await ctx.dispose() })
   await new Promise(resolve => setTimeout(resolve, 150))
   const rows = (await call(ctx, 'state')).value.connectors
-  assert.equal(rows.length, 11)
+  assert.equal(rows.length, 10)
   assert.deepEqual(rows.filter(row => row.state === 'error'), [])
   assert.deepEqual(rows.filter(row => row.state === 'ready'), [])
 })
