@@ -117,15 +117,6 @@ test('a Disconnect press says what it is doing', () => {
   assert.equal(disconnectLabel(false), 'Disconnect')
   assert.equal(disconnectLabel(true), 'Disconnecting…')
   const connectors = readFileSync(new URL('../src/client/connectors.js', import.meta.url), 'utf8')
-  const wechat = readFileSync(new URL('../src/client/wechat-card.js', import.meta.url), 'utf8')
   assert.equal(connectors.split('disconnectLabel(busy)').length - 1, 3, 'every connector card uses it')
-  assert.equal(wechat.split('disconnectLabel(busy)').length - 1, 1, 'the channel card uses it too')
   assert.ok(readFileSync(new URL('../client.js', import.meta.url), 'utf8').includes('Disconnecting…'), 'the built client carries the label')
-})
-
-test('the channel card draws the module capabilities too', () => {
-  const source = readFileSync(new URL('../src/client/wechat-card.js', import.meta.url), 'utf8')
-  assert.ok(source.includes('h(CapabilityList, {\n            capabilities: first?.capabilities'), 'the channel card renders the list once')
-  const built = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
-  assert.ok(built.includes('Every channel sends the same way; a notice goes only to the chat that wrote first.'), 'the built client carries the channel list')
 })

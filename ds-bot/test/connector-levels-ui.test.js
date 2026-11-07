@@ -9,7 +9,7 @@ import { build } from 'esbuild'
 // walked here, so a test can say what the reader would see without a browser.
 const bundle = await build({
   stdin: {
-    contents: "export { ConnectorsPage } from './src/client/connectors.js'\nexport { WeChatCard, WeChatChannel } from './src/client/wechat-card.js'\nexport { levelChoiceVisible } from './src/client/connector-shared.js'",
+    contents: "export { ConnectorsPage } from './src/client/connectors.js'\nexport { levelChoiceVisible } from './src/client/connector-shared.js'",
     resolveDir: dirname(dirname(fileURLToPath(import.meta.url))),
   },
   bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
@@ -46,7 +46,7 @@ const sandbox = {
   localStorage: { getItem: () => null, setItem: () => {} },
 }
 runInNewContext(bundle.outputFiles[0].text, sandbox)
-const { ConnectorsPage, WeChatCard, WeChatChannel, levelChoiceVisible } = module.exports
+const { ConnectorsPage, levelChoiceVisible } = module.exports
 
 const actions = new Proxy({}, { get: () => async () => {} })
 const fields = values => Object.entries(values ?? {}).map(([name, value]) => ({ name, label: name, value }))
@@ -61,13 +61,6 @@ const cloudflare = {
   fields: fields({}), actions: false, toolbox: false, toolboxCall: 'cloudflare_call',
   card: { glyph: 'cloudflare', about: "Zones, DNS records and Workers through Cloudflare's own MCP server." },
 }
-const wechatRow = (id, name) => ({
-  id, name, instance: { base: 'wechat', id, label: name, max: 8 }, state: 'off', level: 'read',
-  levels: ['read', 'write'], fields: fields({ label: name, transport: 'webhook', botId: '', webhookUrl: '' }),
-  transport: 'webhook', canTest: false,
-  card: { glyph: 'wechat', levelChoice: false, about: 'A WeChat channel bound to one Bot.' },
-})
-
 // Walk what the components return: function children are called with their props, so the
 // whole card is checked the way it renders.
 function flat(node, depth = 0) {
@@ -92,22 +85,6 @@ test('a one-way channel card leaves the access level out entirely', () => {
 
 test('a connector that keeps its two levels still shows them', () => {
   const tree = page([cloudflare])
-  assert.equal(hasLevelTitle(tree), true)
-  assert.equal(hasRadioGroup(tree), true)
-})
-
-test('the WeChat card leaves the access level out of every channel', () => {
-  // A channel row draws its settings only when open, which is where the level block would be.
-  const open = row => flat(WeChatChannel({ row, actions, bots: [], expanded: true, onToggle: () => {}, lastOne: false }))
-  assert.equal(hasLevelTitle(open(wechatRow('wechat', 'WeChat'))), false)
-  assert.equal(hasRadioGroup(open(wechatRow('wechat', 'WeChat'))), false)
-  const module = flat(WeChatCard({ rows: [wechatRow('wechat', 'WeChat')], actions, bots: [] }))
-  assert.equal(hasLevelTitle(module), false)
-})
-
-test('a WeChat channel that still lists its levels draws them when open', () => {
-  const row = { ...wechatRow('wechat', 'WeChat'), card: { glyph: 'wechat', about: 'A WeChat channel bound to one Bot.' } }
-  const tree = flat(WeChatChannel({ row, actions, bots: [], expanded: true, onToggle: () => {}, lastOne: false }))
   assert.equal(hasLevelTitle(tree), true)
   assert.equal(hasRadioGroup(tree), true)
 })

@@ -22,14 +22,3 @@ test('every glyph a connector declares has a mark in the client', () => {
     assert.match(glyphMap, new RegExp(`\\b${glyph}: [A-Z][A-Za-z]*Mark\\b`), `the client draws no mark for glyph "${glyph}"`)
   }
 })
-
-// The WeChat card draws its own mark and the glyph map points at that same mark, so one
-// icon never has two drawings.
-test('the WeChat mark has one drawing and the glyph map reuses it', () => {
-  const card = read(clientDir, 'wechat-card.js')
-  const map = read(clientDir, 'connectors.js')
-  assert.match(card, /export const WeChatMark = /)
-  assert.match(map, /import \{[^}]*\bWeChatMark\b[^}]*\} from '\.\/wechat-card\.js'/)
-  assert.match(map, /\bwechat: WeChatMark\b/)
-  assert.doesNotMatch(map, /export const WeChatMark /)
-})

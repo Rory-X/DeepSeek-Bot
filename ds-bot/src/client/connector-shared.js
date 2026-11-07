@@ -1,13 +1,13 @@
 // The pieces every connector card shares: what an instance row names, how a declared setting
 // is edited, and the level entries a module sends. Kept apart from the connectors page so a
-// module with its own card (WeChat) draws the same controls without copying them.
+// module that draws a card of its own reuses the same controls.
 import { createElement as h } from 'react'
 import { MaskedInput } from './secret-card.js'
 import { t } from './i18n.js'
 
-// A module may keep several connections — Neon keeps one per project, WeChat one per channel
-// — and then its view sends one row per instance, each naming the module it belongs to. A row
-// without `instance` stays the single card every connector drew before.
+// A module may keep several connections — Neon keeps one per project — and then its view
+// sends one row per instance, each naming the module it belongs to. A row without `instance`
+// stays the single card every connector drew before.
 export const instanceOf = (connector) => {
   const value = connector?.instance
   if (value === null || typeof value !== 'object') return null
@@ -21,7 +21,7 @@ export const instanceOf = (connector) => {
   }
 }
 
-// A row declares its settings as `settings` (the cards before the WeChat connector) or as
+// A row declares its settings as `settings` (the older card contract) or as
 // `fields` (the object-shaped contract with kinds); both name the same fields.
 export const declaredSettingsOf = (connector) => {
   const list = Array.isArray(connector.fields) ? connector.fields : connector.settings
@@ -30,7 +30,7 @@ export const declaredSettingsOf = (connector) => {
 
 export const levelsOfConnector = (connector) => (Array.isArray(connector.levels) ? connector.levels.filter(entry => entry !== null) : [])
 
-// A one-way channel (Telegram, WeChat push) has a single meaningful level, so its module
+// A one-way channel (Telegram) has a single meaningful level, so its module
 // declares `card.levelChoice: false` and the card leaves the whole level block out.
 export const levelChoiceVisible = (connector) => levelsOfConnector(connector).length > 0 && connector?.card?.levelChoice !== false
 
