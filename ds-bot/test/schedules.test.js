@@ -208,7 +208,16 @@ test('on DSH 0.2.2 a Bot reads and changes only the tasks of its own chat', asyn
   schedule.tasks.set('own', { record: { id: 'own', kind: 'at', title: 'Mine', prompt: 'x', scheduledAt: '2030-01-01T00:00:00.000Z' }, target: { kind: 'session', sessionId: 'w1' }, status: 'active' })
   schedule.tasks.set('chief', { record: { id: 'chief', kind: 'at', title: 'Chief', prompt: 'x', scheduledAt: '2030-01-01T00:00:00.000Z' }, target: { kind: 'session', sessionId: 'm1' }, status: 'active' })
   schedule.tasks.set('elsewhere', { record: { id: 'elsewhere', kind: 'at', title: 'New', prompt: 'x', scheduledAt: '2030-01-01T00:00:00.000Z' }, target: { kind: 'new_once' }, status: 'active' })
-  const [gate] = ctx.listeners.get('tools/pre-execute')
+  // Modules registered after the schedules gate (computer, im, local agents) add
+  // pre-execute gates of their own, so the first listener is no longer ours: pick the
+  // gate that actually denies another chat's task instead of trusting the order.
+  const gates = ctx.listeners.get('tools/pre-execute') ?? []
+  let gate
+  for (const candidate of gates) {
+    const probe = await candidate({ name: 'schedule_edit', arguments: { id: 'chief', action: 'delete' }, agent: { id: 'w2' } }, async () => ({ kind: 'allow' }))
+    if (probe?.kind === 'deny') { gate = candidate; break }
+  }
+  assert.ok(gate, 'a pre-execute listener denies another chat\'s task')
   const check = (name, id, sessionId) => gate({ name, arguments: { id, action: 'delete' }, agent: { id: sessionId } }, async () => ({ kind: 'allow' }))
   assert.deepEqual(await check('schedule_edit', 'own', 'w2'), { kind: 'allow' })
   assert.deepEqual(await check('schedule_view', 'own', 'w2'), { kind: 'allow' })
