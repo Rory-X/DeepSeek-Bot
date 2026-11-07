@@ -12,6 +12,7 @@ import { teamActions } from './team-actions.js'
 import { themeCss, shellTokens, registry, registerShape, registerTheme, allThemes, layoutOf, widthOf, flatWidthOf } from './themes.js'
 import { MENTION_ORIGIN, currentPart } from './text.js'
 import { SHELL_CSS, CONVERSATION_CSS, installStyles, installCompiledStyles } from './styles.js'
+import { APP_TILE_CSS } from './app-tiles.js'
 import { lookOf } from './mark.js'
 import { TeamSidebar, YouAvatar, AccountLauncher, FooterAccount, BrandMark, BrandName, BotReturn, SIDEBAR_CSS, RETURN_CSS, holdShellShortcuts, openHarnessOnboarding, openHarnessSettings, MODELS_STEP, MODELS_STEP_ORDER, OpenModelsStep } from './sidebar.js'
 import { frameLayout, readSidebar, writeSidebar, toggledPref, DSH_NARROW } from './frame-layout.js'
@@ -1407,7 +1408,9 @@ export function apply(ctx) {
   // group re-skins the session itself. Each step returns a disposer from slots.inject,
   // so a surface change withdraws the whole group and the outlets re-render.
   const installShell = () => [
-    () => installCompiledStyles(SHELL_CSS, 'shell'),
+    // The app tiles ship with the shell: a settings page that lists apps must style them
+    // even when the reader never opened the page that introduced them.
+    () => installCompiledStyles(SHELL_CSS + APP_TILE_CSS, 'shell'),
     () => installCompiledStyles(SIDEBAR_CSS, 'sidebar'),
     () => installCompiledStyles(BOARD_CSS, 'project-board'),
     () => installCompiledStyles(SECRET_CSS, 'secrets'),
