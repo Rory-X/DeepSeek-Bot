@@ -14,7 +14,8 @@ import { MENTION_ORIGIN, currentPart } from './text.js'
 import { SHELL_CSS, CONVERSATION_CSS, installStyles, installCompiledStyles } from './styles.js'
 import { APP_TILE_CSS } from './app-tiles.js'
 import { lookOf } from './mark.js'
-import { TeamSidebar, YouAvatar, AccountLauncher, FooterAccount, BrandMark, BrandName, BotReturn, SIDEBAR_CSS, RETURN_CSS, holdShellShortcuts, openHarnessOnboarding, openHarnessSettings, MODELS_STEP, MODELS_STEP_ORDER, OpenModelsStep } from './sidebar.js'
+import { TeamSidebar, YouAvatar, AccountLauncher, FooterAccount, BrandMark, BrandName, BotReturn, SIDEBAR_CSS, RETURN_CSS, holdShellShortcuts } from './sidebar.js'
+import { installSettingsShell, SETTINGS_SHELL_CSS } from './settings-shell.js'
 import { frameLayout, readSidebar, writeSidebar, toggledPref, DSH_NARROW } from './frame-layout.js'
 import { installFrameWatch } from './frame-watch.js'
 import { ProjectBoard, BOARD_CSS } from './project-board.js'
@@ -102,6 +103,9 @@ export function apply(ctx) {
   // where it came from instead of to the list page by name.
   const navOrigin = createSource(null)
   const navMotion = createSource('idle')
+  // Whether DS Bot holds the settings seat; Overlays draws the Settings dialog while it does not.
+  const settingsShellHeld = createSource(false)
+  let settingsShell = null
   // An installed app: no browser chrome, so the styles and the motion default treat it as
   // the most app-like case there is.
   const standalone = createSource(false)
@@ -838,39 +842,9 @@ export function apply(ctx) {
   actions.accountT = () => ctx.get('locale').bind('settings.account')
   // The Voice Input plugin's speech Remote; absent while that plugin is off.
   actions.speech = () => ctx.get('remote.speech') ?? undefined
-  // DSH's own settings: models, providers, keys and its plugins.
-  // The shell's own settings are a desktop surface. On a phone the entries that lead there
-  // say so beside themselves instead of opening something the reader cannot use; the
-  // desktop keeps its path. True means the phone answered the press itself, so a settings
-  // dialog the entry sits in stays where it is.
-  const showHint = (text, anchor) => {
-    const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : null
-    ui.set(state => ({ ...state, hint: {
-      text,
-      token: Date.now(),
-      // The rect is captured now: the hint stays where the entry was, even when the menu it
-      // came from closes on this press.
-      rect: rect === null
-        ? { left: window.innerWidth / 2, top: 0, bottom: 0, width: 0 }
-        : { left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width },
-    } }))
-  }
-  actions.dismissHint = token => ui.set(state => (state.hint && (token === undefined || state.hint.token === token) ? { ...state, hint: null } : state))
-  actions.openHarnessSettings = (anchor) => {
-    if (mobileNav.getSnapshot()) {
-      showHint(t('Open this setting on a desktop.'), anchor)
-      return true
-    }
-    openHarnessSettings()
-    return false
-  }
-  actions.openHarnessOnboarding = openHarnessOnboarding
-  // DSH's Models page, through DS Bot's own onboarding step while it is registered.
-  actions.openHarnessModels = () => {
-    const step = (ctx.slots.entries?.('settings.onboarding') ?? []).some(entry => entry.options?.id === MODELS_STEP)
-    if (step) openHarnessOnboarding(MODELS_STEP)
-    else openHarnessSettings()
-  }
+  // One of DSH's onboarding editors, such as the DeepSeek API key form, opened by id
+  // through the settings shell's coordinator.
+  actions.openHarnessOnboarding = id => settingsShell?.openOnboarding(id)
   // With the plugin manager mounted, setup is its bundle page (the model's size
   // and download notes live there). Where it is not mounted — the desktop app's
   // profile has no plugin manager — the speech Remote prepares the provider
@@ -1116,7 +1090,14 @@ export function apply(ctx) {
       else if (kind === 'letgo') void actions.computerAllowForeground(botId)
     })
   }
-  const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, computer, cards, heldCards, browserPages, browserTabs, browserHolds, surface, update, frame, sidebarPref, mobileNav, navLevel, navMotion } })
+  const face = () => ({ actions, hooks: { roster, ui, activity, work, memoryNews, registry, turnClock, live, computer, cards, heldCards, browserPages, browserTabs, browserHolds, surface, update, frame, sidebarPref, mobileNav, navLevel, navMotion, settingsShellHeld } })
+  // DS Bot holds the settings seat in every mode, Agent mode included: the bundle patch
+  // turns DSH's own shell off, and this one draws DSH's settings pages in DS Bot's dialog.
+  ctx.effect(() => {
+    const offStyles = installCompiledStyles(SETTINGS_SHELL_CSS, 'settings-shell')
+    settingsShell = installSettingsShell(ctx, { face, actions, ui, held: settingsShellHeld })
+    return () => { settingsShell?.dispose(); settingsShell = null; offStyles() }
+  }, 'ds-bot: settings shell')
   // The queue dock's per-session verbs, supplied the way the shell's own dock
   // injects them (the session facade and the conversation service).
   const queueFace = (sessionId) => ({
@@ -1442,7 +1423,6 @@ export function apply(ctx) {
     // The whale wins the seat over a shell account plugin's own launcher (the
     // Desktop's "··· More"), which comes back in Agent mode.
     () => shadow('settings.launcher', { priority: BOT_PRIORITY, inject: face }, AccountLauncher),
-    () => shadow('settings.onboarding', { id: MODELS_STEP, order: MODELS_STEP_ORDER }, OpenModelsStep),
     () => shadow('shell.overlay', { id: 'bot-computer', order: 40, inject: face }, ComputerIndicator),
     () => shadow('shell.overlay', { id: 'bot', order: 50, inject: face }, Overlays),
     () => shadow('shell.overlay', { id: 'bot-project-board', order: 52, inject: face }, ProjectBoard),
