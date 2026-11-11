@@ -4,7 +4,7 @@ import { dayLabel } from './text.js'
 import { colorOf, BotMark } from './mark.js'
 import { Bubbles } from './cells.js'
 import { stripLongNote } from './fold.js'
-import { useEscape, usePaneLeft } from './overlay-hooks.js'
+import { useEscape } from './overlay-hooks.js'
 import { layoutOf } from './themes.js'
 import { t } from './i18n.js'
 import { ArrowDownIcon } from './icons.js'
@@ -14,7 +14,7 @@ const SHEET_EXIT_MS = 220
 // How close to the bottom still counts as reading the newest line.
 const STICK_PX = 24
 
-export function ExchangeDialog({ pair, roster, actions, at }) {
+export function ExchangeDialog({ pair, paneLeft, roster, actions, at }) {
   const [entries, setEntries] = useState(null)
   const [leaving, setLeaving] = useState(false)
   const [offBottom, setOffBottom] = useState(false)
@@ -98,7 +98,6 @@ export function ExchangeDialog({ pair, roster, actions, at }) {
   const right = roster.byId[pair[1]]
   const flat = layoutOf(roster.prefs) === 'flat'
   let lastDay = 0
-  const paneLeft = usePaneLeft()
   return h('div', { className: 'bt-pane bt-exchange', style: { left: paneLeft }, 'data-leaving': leaving || undefined },
     h('div', { className: 'bt-dialog', role: 'dialog', 'aria-label': t('Bot exchange') },
       h('div', { className: 'bt-head' }, h('span', { className: 'bt-pill', style: { cursor: 'default' } },

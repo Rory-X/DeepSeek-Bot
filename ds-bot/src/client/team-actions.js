@@ -27,7 +27,8 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     pinBotFolder: payload => after(call('bot-folder-pin', payload)),
     dissolveBotFolder: payload => after(call('bot-folder-dissolve', payload)),
     ungroupBot: id => after(call('bot-folder-assign', { name: '', botIds: [id] })),
-    openNewChat: (mode, sectionId = null) => { ui.set(state => ({ ...state, newChat: mode, newChatSection: sectionId ?? null, menu: null, palette: null })) },
+    // The pane starts at the rail's edge, so a floating drawer would stick out from under it.
+    openNewChat: (mode, sectionId = null) => { ui.set(state => ({ ...state, newChat: mode, newChatSection: sectionId ?? null, menu: null, palette: null, leftDrawer: false })) },
     openPalette: (query = '') => { ui.set(state => ({ ...state, palette: { query, token: Date.now() }, newChat: null, menu: null })) },
     // The token keeps a late exit timer from closing a palette opened again since.
     closePalette: (token) => { ui.set(state => (state.palette && (token === undefined || state.palette.token === token) ? { ...state, palette: null } : state)) },
