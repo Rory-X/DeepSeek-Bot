@@ -1376,6 +1376,8 @@ var ZH = {
   "by you": "由你添加",
   "by {name}": "由 {name} 添加",
   "Remove from memory": "从记忆中删除",
+  "until {day}": "有效至 {day}",
+  "ended {day}": "已于 {day} 结束",
   "Click again to remove": "再点一次删除",
   Remove: "删除",
   "Ask or update": "询问或更新",
@@ -2949,6 +2951,7 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     // `summarize` starts a summary when the entries changed; `regenerate` always does.
     memoryView: (id, flags = {}) => call2("memory-view", { ...memoryOf(id), ...flags }),
     memoryAsk: (id, text) => call2("memory-ask", { ...memoryOf(id), text }),
+    memoryPin: (id, entry, pin) => call2("memory-pin", { ...memoryOf(id), scope: entry.scope, topic: entry.topic, text: entry.text, pin }),
     memoryForget: (id, entry) => call2("memory-forget", { ...memoryOf(id), scope: entry.scope, topic: entry.topic, text: entry.text }),
     memoryHistory: (id, before) => call2("memory-history", { ...memoryOf(id), ...before === void 0 ? {} : { before } }),
     memoryRestore: (id, rowId) => call2("memory-restore", { ...memoryOf(id), id: rowId }),
@@ -4979,6 +4982,7 @@ body[data-ds-dark-theme] .bt-theme-chip i{background:var(--da)}
 .bt-mem-remove{flex:none;height:28px;min-width:28px;border-radius:999px;border:0;background:none;color:var(--bt-ink-3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0 6px;font:inherit;font-size:12px;opacity:0;transition:opacity .12s ease,background-color .12s ease,color .12s ease}
 .bt-mem-entry:hover .bt-mem-remove,.bt-mem-remove:focus-visible,.bt-mem-remove[data-confirm]{opacity:1}
 .bt-mem-remove:hover{background:var(--bt-hover);color:var(--bt-ink)}
+.bt-mem-pin[data-on]{opacity:1;color:var(--bt-accent)}
 .bt-mem-remove[data-confirm]{background:color-mix(in srgb,var(--bt-danger) 10%,transparent);color:var(--bt-danger);padding:0 10px}
 @media (hover:none){.bt-mem-remove{opacity:1}}
 .bt-mem-none{font-size:13px;line-height:18px;color:var(--bt-ink-3);padding:8px 4px}
@@ -15214,7 +15218,7 @@ var groupEntries = (entries2) => entries2.reduce((groups, entry) => {
   else groups.push({ key, scope: entry.scope, topic: entry.topic, entries: [entry] });
   return groups;
 }, []);
-function EntryRow({ entry, remove }) {
+function EntryRow({ entry, remove, pin }) {
   const [confirming, setConfirming] = (0, import_react33.useState)(false);
   const [busy, setBusy] = (0, import_react33.useState)(false);
   (0, import_react33.useEffect)(() => {
@@ -15223,7 +15227,8 @@ function EntryRow({ entry, remove }) {
     return () => clearTimeout(timer);
   }, [confirming]);
   const by = entry.source === "memory panel" ? t("by you") : entry.by ? t("by {name}", { name: entry.by }) : null;
-  const meta = [entry.added, by].filter(Boolean).join(" · ");
+  const until = entry.until ? t(entry.expired ? "ended {day}" : "until {day}", { day: entry.until }) : null;
+  const meta = [entry.added, by, until].filter(Boolean).join(" · ");
   const click = async () => {
     if (!confirming) {
       setConfirming(true);
@@ -15243,6 +15248,16 @@ function EntryRow({ entry, remove }) {
     ),
     (0, import_react33.createElement)("button", {
       type: "button",
+      className: "bt-mem-remove bt-mem-pin",
+      "data-on": entry.pinned || void 0,
+      disabled: busy,
+      "aria-pressed": entry.pinned,
+      "aria-label": entry.pinned ? t("Unpin") : t("Pin"),
+      title: entry.pinned ? t("Unpin") : t("Pin"),
+      onClick: () => pin(entry, !entry.pinned)
+    }, (0, import_react33.createElement)(PinIcon)),
+    (0, import_react33.createElement)("button", {
+      type: "button",
       className: "bt-mem-remove",
       "data-confirm": confirming || void 0,
       disabled: busy,
@@ -15252,7 +15267,7 @@ function EntryRow({ entry, remove }) {
     }, confirming ? t("Remove") : (0, import_react33.createElement)(TrashIcon))
   );
 }
-function Entries({ owner, view, remove }) {
+function Entries({ owner, view, remove, pin }) {
   const groups = groupEntries(view.entries);
   const sections = owner.group ? [{ scope: "group", title: t("Group memory"), hint: t("Only its members read it"), size: view.sizes.group }] : [
     { scope: "own", title: t("{name}'s memory", { name: owner.name }), size: view.sizes.own },
@@ -15275,7 +15290,7 @@ function Entries({ owner, view, remove }) {
         import_react33.Fragment,
         { key: group.key },
         group.topic ? (0, import_react33.createElement)("div", { className: "bt-mem-topic" }, group.topic) : null,
-        (0, import_react33.createElement)("ul", { className: "bt-mem-list" }, group.entries.map((entry) => (0, import_react33.createElement)(EntryRow, { key: `${entry.topic ?? ""}:${entry.text}`, entry, remove })))
+        (0, import_react33.createElement)("ul", { className: "bt-mem-list" }, group.entries.map((entry) => (0, import_react33.createElement)(EntryRow, { key: `${entry.topic ?? ""}:${entry.text}`, entry, remove, pin })))
       )) : (0, import_react33.createElement)("div", { className: "bt-mem-none" }, t("Nothing saved yet"))
     ))
   );
@@ -15490,6 +15505,13 @@ function MemoryDialog({ owner, actions, leaving = false }) {
       return false;
     }
   };
+  const pin = async (entry, on) => {
+    try {
+      show2(await actions.memoryPin(owner.id, entry, on));
+    } catch (failure) {
+      setAnswer({ asked: entry.text, error: failure?.message ?? String(failure) });
+    }
+  };
   const undo = async (row) => {
     try {
       show2(await actions.memoryRestore(owner.id, row.id));
@@ -15560,7 +15582,7 @@ function MemoryDialog({ owner, actions, leaving = false }) {
         "div",
         { className: "bt-mem-body" },
         error ? (0, import_react33.createElement)("div", { className: "bt-error", role: "alert", style: { padding: 0 } }, hostText(error)) : null,
-        view === null ? error ? null : (0, import_react33.createElement)(Skeleton) : page === "entries" ? (0, import_react33.createElement)(Entries, { owner, view, remove }) : page === "history" ? (0, import_react33.createElement)(History, { owner, actions, undo, now }) : (0, import_react33.createElement)(Summary, { owner, view, regenerate })
+        view === null ? error ? null : (0, import_react33.createElement)(Skeleton) : page === "entries" ? (0, import_react33.createElement)(Entries, { owner, view, remove, pin }) : page === "history" ? (0, import_react33.createElement)(History, { owner, actions, undo, now }) : (0, import_react33.createElement)(Summary, { owner, view, regenerate })
       ),
       (0, import_react33.createElement)(
         "div",
