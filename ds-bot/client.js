@@ -20762,7 +20762,6 @@ function CreateBot({ roster, actions, start, brief = "", onBack, canGoBack, onCr
   const [reading, readModels] = useAgentModels(actions);
   const local = mode === "local";
   const chosen = local ? agentModel : model;
-  const blocked = busy || clash || Boolean(problem) || local && chosen === "";
   useEscape(onBack);
   (0, import_react46.useEffect)(() => {
     if (inline) frame.current?.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -20771,6 +20770,7 @@ function CreateBot({ roster, actions, start, brief = "", onBack, canGoBack, onCr
   const finalName = name.trim() || fallbackName;
   const clash = roster.bots.some((bot) => bot.name.toLowerCase() === finalName.toLowerCase());
   const problem = nameProblem(finalName);
+  const blocked = busy || clash || Boolean(problem) || local && chosen === "";
   const create = async () => {
     if (blocked) return;
     setError("");
