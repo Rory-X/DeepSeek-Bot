@@ -7248,9 +7248,10 @@ function ComputerPage({ roster, actions, run: run2, Section, Row: Row4, Switch: 
     });
   };
   (0, import_react12.useEffect)(() => {
-    if (computer.enabled && computer.macos === true) refresh();
+    if (computer.enabled && computer.macos === true && provider.state === "ready") refresh();
+    else setSystem(null);
     return void 0;
-  }, [computer.enabled, computer.macos]);
+  }, [computer.enabled, computer.macos, provider.state]);
   const perms = system ?? {};
   const permRow = (key, label) => {
     const state = perms[key]?.state ?? perms[key];
@@ -7281,7 +7282,7 @@ function ComputerPage({ roster, actions, run: run2, Section, Row: Row4, Switch: 
         ["error", "missing", "occupied"].includes(provider.state) && actions.computerProviderRetry ? (0, import_react12.createElement)("button", { type: "button", className: "bt-soft bt-soft-sm", onClick: () => run2(actions.computerProviderRetry()) }, t("Retry")) : null
       ),
       provider.state === "missing" && provider.install?.command ? (0, import_react12.createElement)(InstallRow, { install: provider.install, Row: Row4 }) : null,
-      computer.macos === true ? [permRow("accessibility", "Accessibility"), permRow("screenRecording", "Screen Recording")] : null
+      computer.macos === true && provider.state === "ready" ? [permRow("accessibility", "Accessibility"), permRow("screenRecording", "Screen Recording")] : null
     ) : null,
     (0, import_react12.createElement)(
       Section,
