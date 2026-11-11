@@ -38,7 +38,7 @@ async function start() {
   const sent = []
   let flushError
   Object.assign(ctx, {
-    workspaceRegistry: { get: () => undefined, resolveByPath: async () => undefined, create: async path => ({ id: 'w1', path }), archiveSession: async () => {} },
+    workspaceRegistry: { get: () => undefined, resolveByPath: async () => undefined, create: async path => ({ id: 'w1', path }), archiveSession: async () => {}, unarchiveSession: async () => {} },
     sessionController: {
       create: async () => ({ sessionId: 's1' }),
       resolveAgent: async sessionId => ({ agent: { session: { id: sessionId }, followup(message) { sent.push({ sessionId, message }) } } }),
@@ -272,4 +272,53 @@ test('show_view measures the bytes the model sent, before unwrapping the provide
   const over = await show('writer-now', { title: 'Meter', view: wrapped, await_reply: false })
   assert.equal(over.text, `The view is ${viewBytes('Meter', wrapped)} bytes; the limit is ${VIEW_BYTE_LIMIT}.`)
   assert.equal(over.concluded, false)
+})
+
+test('a question with no call row is not recorded as a dock view', async (t) => {
+  const { emit, call, team, stop } = await start()
+  t.after(stop)
+  await rt.teamTools.find(d => d.name === 'list_bots').execute({}, { agent: { id: 'chief' } })
+  const ask = () => rt.teamTools.find(d => d.name === 'ask_user').execute(
+    { question: 'Keep me', options: [{ label: 'Yes' }] },
+    { agent: { id: 'writer-now' }, concludeTurn() {} },
+  )
+  // A hidden-turn question has no callId; closing it with a message drops it as before.
+  await ask()
+  assert.equal((await team()).questions['writer-now'].callId, undefined)
+  emit('writer-now', 'user/message', { content: text('never mind'), source: { kind: 'user' } })
+  let open = await team()
+  assert.equal(open.questions['writer-now'], undefined)
+  assert.deepEqual(open.closedViews, {})
+  assert.deepEqual(open.closedCards, {})
+  // The same holds for the dismiss endpoint.
+  await ask()
+  assert.equal((await call('dismiss-question', { sessionId: 'writer-now' })).ok, true)
+  open = await team()
+  assert.equal(open.questions['writer-now'], undefined)
+  assert.deepEqual(open.closedViews, {})
+  assert.deepEqual(open.closedCards, {})
+})
+
+
+test('a closed dock view follows a reopened part and never returns from the old part', async (t) => {
+  const { emit, show, call, team, stop } = await start()
+  t.after(stop)
+  await team()
+  await show('writer-now', { title: 'First', view: CHOICES }, null)
+  emit('writer-now', 'user/message', { content: text('never mind'), source: { kind: 'user' } })
+  const first = (await team()).closedViews['writer-now']
+  assert.equal((await call('bot-open-part', { botId: 'writer', sessionId: 'writer-old' })).ok, true)
+  let open = await team()
+  assert.deepEqual(open.closedViews, { 'writer-old': first })
+  await show('writer-old', { title: 'Second', view: CHOICES }, null)
+  await call('dismiss-view', { sessionId: 'writer-old' })
+  const second = (await team()).closedViews['writer-old']
+  assert.equal(second.closed, 'dismissed')
+  assert.equal((await call('bot-open-part', { botId: 'writer', sessionId: 'writer-now' })).ok, true)
+  open = await team()
+  assert.deepEqual(open.closedViews, { 'writer-now': second })
+  // A new view clears the closed record; opening the other part cannot revive it.
+  await show('writer-now', { title: 'Third', view: CHOICES }, null)
+  await call('bot-open-part', { botId: 'writer', sessionId: 'writer-old' })
+  assert.deepEqual((await team()).closedViews, {})
 })
