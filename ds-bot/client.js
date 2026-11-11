@@ -10837,7 +10837,7 @@ function useFold(text, { limit = FOLD_AT, whole, live = false, markdown = true }
   const view = (0, import_react20.useMemo)(() => live ? null : foldView(text, cut ? ALWAYS : limit, markdown), [text, live, limit, markdown, cut]);
   if (view === null) return { shown: text, control: null };
   const readWhole = async () => {
-    if (read?.whole === true) return read;
+    if (typeof read?.text === "string") return read;
     setRead("loading");
     const value = await Promise.resolve().then(() => whole.load?.()).catch(() => void 0) ?? { whole: false };
     setRead(value);
@@ -11536,8 +11536,13 @@ function FoldCodeCopy({ code, actions }) {
   const [copied, setCopied] = (0, import_react23.useState)(false);
   const copy2 = async () => {
     try {
-      const text = typeof code === "function" ? await code() : code;
-      if (!await (0, import_dsh_client_ui_primitives.writeClipboard)(text)) throw new Error("Could not copy the code block");
+      if (typeof code === "function" && typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        const text = Promise.resolve().then(code).then((value) => new Blob([value], { type: "text/plain" }));
+        await navigator.clipboard.write([new ClipboardItem({ "text/plain": text })]);
+      } else {
+        const text = typeof code === "function" ? await code() : code;
+        if (!await (0, import_dsh_client_ui_primitives.writeClipboard)(text)) throw new Error("Could not copy the code block");
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 1e3);
     } catch (error) {
