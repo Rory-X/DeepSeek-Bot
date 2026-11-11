@@ -9,7 +9,7 @@ import { createRuntime } from '../index.js'
 import { LocalAgentAdapter } from '../src/host/local-agents/adapter.js'
 import { AcpEngine } from '../src/host/local-agents/acp.js'
 import { probeSignIn } from '../src/host/local-agents/discover.js'
-import { agentAvatar, modelsFor } from '../src/client/agent-routes.js'
+import { agentAvatar, badgeOf, isLocalRoute, modelsFor } from '../src/client/agent-routes.js'
 import { avatarAfter, createPayload, runModeNotes, startModel } from '../src/client/bot-draft.js'
 import { fakeContext } from './fake-ctx.js'
 
@@ -25,8 +25,8 @@ const until = async (check, what = 'the condition') => {
 const textOf = message => message.content.map(block => block.text ?? '').join('')
 
 const DS = 'ds/flash'
-const CLI = 'acp-fake/default'
-const CLI2 = 'acp-other/default'
+const CLI = 'local-acp-fake/default'
+const CLI2 = 'local-acp-other/default'
 
 const team = (bots = {}) => ({
   version: 1,
@@ -119,9 +119,20 @@ async function start(t, { saved = team() } = {}) {
         steer(message) { calls.push(['steer', message]) },
         inject(message) { calls.push(['inject', message]) },
         cancel() {},
+        send(message, target) { calls.push(['send', message, target]) },
         async whenIdle() {},
         async runMaintenance(fn) { return fn(AbortSignal.timeout(60_000)) },
-        inbox: { nextStep: [], nextTurn: [], remove() {} },
+        inbox: {
+          nextStep: [],
+          nextTurn: [],
+          remove(id) {
+            for (const list of [this.nextStep, this.nextTurn]) {
+              const at = list.findIndex(queued => queued.id === id)
+              if (at !== -1) list.splice(at, 1)
+            }
+          },
+          prepend(target, queued) { (target === 'next-turn' ? this.nextTurn : this.nextStep).unshift(queued) },
+        },
       })
     }
     return agents.get(sessionId)
@@ -170,14 +181,15 @@ async function start(t, { saved = team() } = {}) {
     method: 'POST', body: JSON.stringify({ endpoint, payload }),
   }))).json()
   const tool = (name, args, sessionId) => rt.teamTools.find(def => def.name === name).execute(args, { agent: agentOf(sessionId), name, callId: 'c1' })
-  const preStep = (sessionId, messages = [], step = 1) => ctx.listeners.get('agent/pre-step').at(-1)(
-    { agent: agentOf(sessionId), messages, step, signal: AbortSignal.timeout(60_000) }, async () => 'next')
+  // `modelSelection`: where the step is about to go, as DSH captured it for the step.
+  const preStep = (sessionId, messages = [], step = 1, modelSelection) => ctx.listeners.get('agent/pre-step').at(-1)(
+    { agent: agentOf(sessionId), messages, step, signal: AbortSignal.timeout(60_000), ...(modelSelection === undefined ? {} : { modelSelection }) }, async () => 'next')
   const state = () => JSON.parse(readFileSync(join(home, 'state.json'), 'utf8'))
   const handoffOf = sessionId => agentOf(sessionId).calls.filter(([kind, message]) => kind === 'followup' && message.source?.role === 'handoff').map(([, message]) => textOf(message)).at(-1)
   const startCount = () => (existsSync(starts) ? readFileSync(starts, 'utf8').trim().split('\n').length : 0)
   await tool('list_bots', {}, 'a')
   // Everything a route could not register for until the state load has finished.
-  await until(() => llm.routes.has('acp-fake'), 'the custom routes')
+  await until(() => llm.routes.has('local-acp-fake'), 'the custom routes')
   return { rt, ctx, llm, call, tool, preStep, state, agentOf, handoffOf, created, archived, selected, lastRoute, starts, startCount, root }
 }
 
@@ -211,6 +223,34 @@ test('the user has to confirm a change of run mode', async (t) => {
   await env.call('update-bot', { id: 'b', model: CLI, changeEngine: true })
   assert.equal((await env.call('update-bot', { id: 'b', model: CLI2 })).ok, false)
   assert.equal(env.state().bots.b.model, CLI)
+})
+
+test('a Bot without a model of its own still moves to a CLI only by the user, confirmed', async (t) => {
+  const env = await start(t, { saved: team({
+    c: { id: 'c', name: 'Unset', role: '', sessionId: 'c', createdAt: 3, appliedModel: DS },
+    d: { id: 'd', name: 'Fresh', role: '', sessionId: 'd', createdAt: 4 },
+  }) })
+  for (const name of ['Unset', 'Fresh']) {
+    assert.match(await env.tool('update_bot', { bot: name, model: CLI }, 'a'), new RegExp(`Only the user can change what ${name} runs on`))
+  }
+  for (const id of ['c', 'd']) {
+    const refused = await env.call('update-bot', { id, model: CLI })
+    assert.equal(refused.ok, false)
+    assert.match(refused.error.message, /needs a confirmation/)
+  }
+  assert.equal(env.state().bots.c.model, undefined)
+  assert.equal(env.state().bots.d.model, undefined)
+  // A model of DS Bot's own is an ordinary pick.
+  assert.equal((await env.call('update-bot', { id: 'd', model: 'ds/pro' })).ok, true)
+  assert.equal(env.state().bots.d.model, 'ds/pro')
+})
+
+test('a Bot on a CLI keeps a model of it', async (t) => {
+  const env = await start(t, { saved: team({ c: { id: 'c', name: 'Local', role: '', sessionId: 'c', createdAt: 3, model: CLI, appliedModel: CLI } }) })
+  const cleared = await env.call('update-bot', { id: 'c', model: null })
+  assert.equal(cleared.ok, false)
+  assert.match(cleared.error.message, /keeps a model of it/)
+  assert.equal(env.state().bots.c.model, CLI)
 })
 
 // -----------------------------------------------------------------------------
@@ -276,7 +316,7 @@ test('coming back to the same run mode moves on again, in both directions', asyn
   // archived only once the move has finished.
   await until(() => env.archived.some(([id]) => id === 'b'), 'the move to the CLI')
   const onCli = env.state().bots.b.sessionId
-  env.lastRoute.set(onCli, { provider: 'acp-fake', model: 'default' })
+  env.lastRoute.set(onCli, { provider: 'local-acp-fake', model: 'default' })
   await env.call('update-bot', { id: 'b', model: DS, changeEngine: true })
   await until(() => env.archived.some(([id]) => id === onCli), 'the move back')
   const back = env.state().bots.b.sessionId
@@ -314,17 +354,49 @@ test('a part whose new route cannot be selected does not move on at every step',
   const stuck = env.state().bots.b.sessionId
   env.ctx.sessionController.selectModel = select
   env.lastRoute.set(stuck, { provider: 'ds', model: 'flash' })
-  assert.equal(await env.preStep(stuck), 'next')
+  // Meanwhile it takes no step on the other side: its input waits in its inbox.
+  const input = createUserMessage({ content: [{ type: 'text', text: 'wait for me' }], source: { kind: 'user' } })
+  assert.deepEqual(await env.preStep(stuck, [input]), { kind: 'enter', messages: [] })
+  assert.deepEqual(env.agentOf(stuck).inbox.nextTurn.map(textOf), ['wait for me'])
+  assert.equal(env.state().bots.b.sessionId, stuck)
+  // After the wait it tries again, and the input goes along.
+  const now = Date.now.bind(Date)
+  t.mock.method(Date, 'now', () => now() + 600_000)
+  assert.deepEqual(await env.preStep(stuck), { kind: 'enter', messages: [] })
+  await until(() => env.state().bots.b.sessionId !== stuck, 'the next try')
+  const next = env.state().bots.b.sessionId
+  await until(() => env.agentOf(next).calls.some(([, message]) => textOf(message) === 'wait for me'), 'the kept input')
+})
+
+test('a fresh part whose run mode did not apply waits instead of running on the other side', async (t) => {
+  const env = await start(t)
+  env.lastRoute.set('b', { provider: 'ds', model: 'flash' })
+  const select = env.ctx.sessionController.selectModel
+  // The fresh parts (s1, s2, …) cannot select the CLI.
+  env.ctx.sessionController.selectModel = async (options) => {
+    if (/^s\d+$/.test(options.sessionId) && options.provider === 'local-acp-fake') throw new Error('no route')
+    return select(options)
+  }
+  await env.call('update-bot', { id: 'b', model: CLI, changeEngine: true })
+  await until(() => env.state().bots.b.sessionId !== 'b', 'the fresh part')
+  const fresh = env.state().bots.b.sessionId
+  // It never made a request; the step it is about to take would go to a model.
+  const input = createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } })
+  assert.deepEqual(await env.preStep(fresh, [input], 1, { provider: 'ds', model: 'flash' }), { kind: 'enter', messages: [] })
+  assert.deepEqual(env.agentOf(fresh).inbox.nextTurn.map(textOf), ['hello'])
+  assert.equal(env.state().bots.b.sessionId, fresh)
+  // A step to what the Bot runs on goes on.
+  assert.equal(await env.preStep(fresh, [], 1, { provider: 'local-acp-fake', model: 'default' }), 'next')
 })
 
 // -----------------------------------------------------------------------------
 // No Bot lands on a local agent, or leaves one, by itself.
 
 test('a fallback never crosses the line, in either direction', async (t) => {
-  const env = await start(t, { saved: { ...team({ c: { id: 'c', name: 'Local', role: '', sessionId: 'c', createdAt: 3, model: 'acp-gone/default', appliedModel: 'acp-gone/default' } }) } })
+  const env = await start(t, { saved: { ...team({ c: { id: 'c', name: 'Local', role: '', sessionId: 'c', createdAt: 3, model: 'local-acp-gone/default', appliedModel: 'local-acp-gone/default' } }) } })
   const { rt } = env
   // A CLI that is gone stays the Bot's own.
-  assert.equal(await rt.desiredModel(rt.botOf('c')), 'acp-gone/default')
+  assert.equal(await rt.desiredModel(rt.botOf('c')), 'local-acp-gone/default')
   // A model that is gone falls to a model, not to a CLI it last ran on.
   const lost = { id: 'x', model: 'ds/gone', appliedModel: CLI }
   assert.equal(await rt.desiredModel(lost), DS)
@@ -352,9 +424,9 @@ test('a local Bot whose route is not registered yet keeps its applied model', as
 })
 
 test('a route a Bot runs on stays registered when its CLI is gone', async (t) => {
-  const env = await start(t, { saved: team({ c: { id: 'c', name: 'Local', role: '', sessionId: 'c', createdAt: 3, model: 'devin-cli/default', appliedModel: 'devin-cli/default' } }) })
-  await until(() => env.llm.routes.has('devin-cli'), 'the route of the Bot')
-  assert.ok((await env.rt.catalog({ fresh: true })).some(entry => entry.ref === 'devin-cli/default'))
+  const env = await start(t, { saved: team({ c: { id: 'c', name: 'Local', role: '', sessionId: 'c', createdAt: 3, model: 'local-devin-cli/default', appliedModel: 'local-devin-cli/default' } }) })
+  await until(() => env.llm.routes.has('local-devin-cli'), 'the route of the Bot')
+  assert.ok((await env.rt.catalog({ fresh: true })).some(entry => entry.ref === 'local-devin-cli/default'))
 })
 
 test('a Bot created by a Bot on a CLI does not take that CLI', async (t) => {
@@ -368,7 +440,7 @@ test('a short name does not reach a CLI, a full ref does', async (t) => {
   const env = await start(t)
   await assert.rejects(env.rt.resolveModel('default'), /not available/)
   assert.equal(await env.rt.resolveModel(CLI), CLI)
-  await assert.rejects(env.rt.resolveModel('acp-fake/not-there'), /not available/)
+  await assert.rejects(env.rt.resolveModel('local-acp-fake/not-there'), /not available/)
 })
 
 // -----------------------------------------------------------------------------
@@ -380,14 +452,14 @@ test('state, models and a model menu start no CLI; a local Bot\'s menu starts it
   await env.call('models')
   await env.tool('list_bot_models', {}, 'a')
   assert.equal(env.startCount(), 0, 'no CLI starts for the ordinary paths')
-  const first = await env.call('local-agent-models', { route: 'acp-fake' })
+  const first = await env.call('local-agent-models', { route: 'local-acp-fake' })
   assert.deepEqual(first.value.map(model => model.id), ['default', 'fake-large', 'fake-small'])
   assert.equal(env.startCount(), 1)
-  const second = await env.call('local-agent-models', { route: 'acp-fake' })
+  const second = await env.call('local-agent-models', { route: 'local-acp-fake' })
   assert.deepEqual(second.value, first.value)
   assert.equal(env.startCount(), 1, 'the second look reads what the CLI said')
   // What it said is now in the catalog, and a route nobody serves is not asked.
-  assert.ok((await env.rt.catalog()).some(entry => entry.ref === 'acp-fake/fake-large'))
+  assert.ok((await env.rt.catalog()).some(entry => entry.ref === 'local-acp-fake/fake-large'))
   assert.deepEqual((await env.call('local-agent-models', { route: 'nope' })).value, [])
 })
 
@@ -421,7 +493,7 @@ function adapterFor(t, records = {}) {
 const send = async (adapter, sessionId, messages, extra = {}) => {
   let text = ''
   let finish
-  for await (const chunk of adapter.stream({ provider: 'acp-fake', model: 'default', sessionId, messages, tools: [], signal: AbortSignal.timeout(30_000), ...extra })) {
+  for await (const chunk of adapter.stream({ provider: 'local-acp-fake', model: 'default', sessionId, messages, tools: [], signal: AbortSignal.timeout(30_000), ...extra })) {
     if (chunk.type === 'text-delta') text += chunk.text
     if (chunk.type === 'finish') finish = chunk.reason
   }
@@ -430,7 +502,7 @@ const send = async (adapter, sessionId, messages, extra = {}) => {
 
 test('listing a route lists what DS Bot knows and starts nothing', async (t) => {
   const { adapter, engines } = adapterFor(t)
-  const models = await adapter.listModels('acp-fake')
+  const models = await adapter.listModels('local-acp-fake')
   assert.deepEqual(models.map(model => model.id), ['default', 'used-one'])
   assert.equal(engines.length, 0)
 })
@@ -445,9 +517,9 @@ test('a probe that fails is tried again, and one that worked is not', async (t) 
       return [{ id: 'real', name: 'Real' }]
     },
   })
-  assert.deepEqual((await adapter.probeModels('acp-fake')).map(model => model.id), ['default', 'used-one'])
-  assert.deepEqual((await adapter.probeModels('acp-fake')).map(model => model.id), ['default', 'real', 'used-one'])
-  await adapter.probeModels('acp-fake')
+  assert.deepEqual((await adapter.probeModels('local-acp-fake')).map(model => model.id), ['default', 'used-one'])
+  assert.deepEqual((await adapter.probeModels('local-acp-fake')).map(model => model.id), ['default', 'real', 'used-one'])
+  await adapter.probeModels('local-acp-fake')
   assert.equal(asked.length, 2)
 })
 
@@ -455,7 +527,7 @@ test('two looks at once ask the CLI once', async (t) => {
   const { adapter } = adapterFor(t)
   let asked = 0
   adapter.engine = () => ({ listModels: async () => { asked += 1; await settle(); return [] } })
-  await Promise.all([adapter.probeModels('acp-fake'), adapter.probeModels('acp-fake')])
+  await Promise.all([adapter.probeModels('local-acp-fake'), adapter.probeModels('local-acp-fake')])
   assert.equal(asked, 1)
 })
 
@@ -501,7 +573,7 @@ test('a model change waits for the turn that runs', async (t) => {
   const ended = send(adapter, 's1', [message('m1', 'hang')])
   await until(() => adapter.live.get('s1')?.state === 'running', 'the turn')
   const live = adapter.live.get('s1')
-  assert.equal(await adapter.liveFor({ sessionId: 's1', provider: 'acp-fake', model: 'fake-large' }), live)
+  assert.equal(await adapter.liveFor({ sessionId: 's1', provider: 'local-acp-fake', model: 'fake-large' }), live)
   await adapter.closeSession('s1')
   assert.equal(adapter.live.has('s1'), false)
   await Promise.race([ended, settle()])
@@ -509,7 +581,7 @@ test('a model change waits for the turn that runs', async (t) => {
 
 test('closing a Session answers what its CLI waits on and lets the process go', async (t) => {
   const { adapter, engines, records } = adapterFor(t)
-  const first = adapter.stream({ provider: 'acp-fake', model: 'default', sessionId: 's1', messages: [message('m1', 'ask-permission')], tools: [], signal: AbortSignal.timeout(30_000) })
+  const first = adapter.stream({ provider: 'local-acp-fake', model: 'default', sessionId: 's1', messages: [message('m1', 'ask-permission')], tools: [], signal: AbortSignal.timeout(30_000) })
   for await (const chunk of first) if (chunk.type === 'finish') assert.equal(chunk.reason.kind, 'tool-calls')
   assert.equal(adapter.live.get('s1').pending.size, 1)
   const child = engines[0].child
@@ -571,45 +643,45 @@ test('the sign-in check gives only yes, no or unknown', async (t) => {
 const CATALOG = [
   { ref: 'ds/flash', provider: 'ds', id: 'flash', name: 'Flash' },
   { ref: 'ds/nokey', provider: 'ds', id: 'nokey', name: 'No key', needsKey: true },
-  { ref: 'devin-cli/default', provider: 'devin-cli', id: 'default', name: 'CLI default' },
-  { ref: 'codex-cli/default', provider: 'codex-cli', id: 'default', name: 'CLI default' },
-  { ref: 'codex-cli/gpt', provider: 'codex-cli', id: 'gpt', name: 'GPT' },
-  { ref: 'acp-x/default', provider: 'acp-x', id: 'default', name: 'CLI default' },
+  { ref: 'local-devin-cli/default', provider: 'local-devin-cli', id: 'default', name: 'CLI default' },
+  { ref: 'local-codex-cli/default', provider: 'local-codex-cli', id: 'default', name: 'CLI default' },
+  { ref: 'local-codex-cli/gpt', provider: 'local-codex-cli', id: 'gpt', name: 'GPT' },
+  { ref: 'local-acp-x/default', provider: 'local-acp-x', id: 'default', name: 'CLI default' },
 ]
 
 test('a menu lists only what its Bot may pick', () => {
   const refs = ref => modelsFor(CATALOG, ref).map(model => model.ref)
   assert.deepEqual(refs('ds/flash'), ['ds/flash', 'ds/nokey'])
   assert.deepEqual(refs(undefined), ['ds/flash', 'ds/nokey'])
-  assert.deepEqual(refs('codex-cli/gpt'), ['codex-cli/default', 'codex-cli/gpt'])
-  assert.deepEqual(refs('acp-x/default'), ['acp-x/default'])
+  assert.deepEqual(refs('local-codex-cli/gpt'), ['local-codex-cli/default', 'local-codex-cli/gpt'])
+  assert.deepEqual(refs('local-acp-x/default'), ['local-acp-x/default'])
   assert.deepEqual(modelsFor(undefined, 'ds/flash'), [])
 })
 
 test('the form never starts on a local agent', () => {
-  assert.equal(startModel({ models: CATALOG, prefs: { defaultBotModel: 'codex-cli/gpt' }, defaultModel: 'devin-cli/default' }), 'ds/flash')
+  assert.equal(startModel({ models: CATALOG, prefs: { defaultBotModel: 'local-codex-cli/gpt' }, defaultModel: 'local-devin-cli/default' }), 'ds/flash')
   assert.equal(startModel({ models: CATALOG.filter(model => model.provider !== 'ds') }), '')
 })
 
 test('a new local Bot wears its CLI\'s logo only when it has no look of its own', () => {
   const look = { shape: 'whale', color: 'blue' }
-  const worn = createPayload({ name: 'A', look, image: null, model: 'codex-cli/gpt' })
-  assert.equal(worn.avatar.image, agentAvatar('codex-cli').image)
-  const own = createPayload({ name: 'B', look, image: null, model: 'codex-cli/gpt', ownLook: true })
+  const worn = createPayload({ name: 'A', look, image: null, model: 'local-codex-cli/gpt' })
+  assert.equal(worn.avatar.image, agentAvatar('local-codex-cli').image)
+  const own = createPayload({ name: 'B', look, image: null, model: 'local-codex-cli/gpt', ownLook: true })
   assert.equal(own.avatar.image, undefined)
-  const photo = createPayload({ name: 'C', look, image: 'data:image/png;base64,AA', model: 'codex-cli/gpt' })
+  const photo = createPayload({ name: 'C', look, image: 'data:image/png;base64,AA', model: 'local-codex-cli/gpt' })
   assert.equal(photo.avatar.image, 'data:image/png;base64,AA')
   assert.equal(createPayload({ name: 'D', look, image: null, model: 'ds/flash' }).avatar.image, undefined)
 })
 
 test('a Bot wearing its old CLI\'s logo changes it along; its own picture stays', () => {
-  const logo = agentAvatar('codex-cli').image
-  const wearing = { engine: 'codex-cli', avatar: { shape: 'whale', image: logo } }
+  const logo = agentAvatar('local-codex-cli').image
+  const wearing = { engine: 'local-codex-cli', avatar: { shape: 'whale', image: logo } }
   assert.deepEqual(avatarAfter(wearing, 'ds/flash'), { avatar: { shape: 'whale' } })
-  assert.deepEqual(avatarAfter({ engine: 'codex-cli', avatar: { image: logo } }, 'ds/flash'), { avatar: null })
-  assert.equal(avatarAfter(wearing, 'devin-cli/default').avatar.image, agentAvatar('devin-cli').image)
-  assert.deepEqual(avatarAfter({ engine: 'codex-cli', avatar: { image: 'data:image/png;base64,AA' } }, 'ds/flash'), {})
-  assert.deepEqual(avatarAfter({ avatar: { shape: 'whale' } }, 'codex-cli/default'), {})
+  assert.deepEqual(avatarAfter({ engine: 'local-codex-cli', avatar: { image: logo } }, 'ds/flash'), { avatar: null })
+  assert.equal(avatarAfter(wearing, 'local-devin-cli/default').avatar.image, agentAvatar('local-devin-cli').image)
+  assert.deepEqual(avatarAfter({ engine: 'local-codex-cli', avatar: { image: 'data:image/png;base64,AA' } }, 'ds/flash'), {})
+  assert.deepEqual(avatarAfter({ avatar: { shape: 'whale' } }, 'local-codex-cli/default'), {})
 })
 
 test('the confirmation says what the change does to this Bot', () => {
@@ -617,11 +689,21 @@ test('the confirmation says what the change does to this Bot', () => {
   const plain = runModeNotes({ bot: { id: 'c' }, roster, target: 'ds/flash' })
   assert.equal(plain.length, 2)
   assert.match(plain[0], /^Its own chat starts/)
-  const full = runModeNotes({ bot: { id: 'b', capabilities: ['x'], private: true }, roster, target: 'codex-cli/default', agent: { name: 'Codex', signedIn: false } })
+  const full = runModeNotes({ bot: { id: 'b', capabilities: ['x'], private: true }, roster, target: 'local-codex-cli/default', agent: { name: 'Codex', signedIn: false } })
   assert.match(full[0], /2 group chats/)
   assert.ok(full.some(note => /MCP servers and skills/.test(note)))
   assert.ok(full.some(note => /Codex is not signed in/.test(note)))
   assert.ok(full.some(note => /privacy rules/.test(note)))
   const toModel = runModeNotes({ bot: { id: 'b', capabilities: ['x'], private: true }, roster, target: 'ds/flash' })
   assert.equal(toModel.length, 2)
+})
+
+// The page reads the run mode from the route's prefix, so a model of DSH's own
+// OpenCode provider is not shown as a local agent (#1059).
+test('only prefixed routes count as local agents on the page', () => {
+  assert.equal(isLocalRoute('opencode/glm-5'), false)
+  assert.equal(isLocalRoute('local-opencode/default'), true)
+  assert.deepEqual(badgeOf('local-codex-cli'), ['CX', 'green'])
+  assert.deepEqual(badgeOf('local-acp-a1'), ['AC', 'rose'])
+  assert.equal(badgeOf('codex-cli'), undefined)
 })

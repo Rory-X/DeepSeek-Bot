@@ -43,6 +43,8 @@ export class CodexEngine {
     wireProcess(child, peer)
     child.on('exit', () => {
       peer.close(new Error(`${this.engine.name} exited`))
+      // A process close() let go of must not take the one that replaced it along.
+      if (this.child !== child) return
       this.child = undefined
       this.peer = undefined
       for (const thread of this.threads.values()) {
@@ -96,6 +98,7 @@ export class CodexEngine {
         thread?.push({
           type: 'permission', id: `perm-${Math.random().toString(36).slice(2)}`, reply,
           action: params?.reason ?? params?.command ?? 'The agent asks to run an action',
+          changes: true,
           detail: detailText(params),
           options,
         })
@@ -115,22 +118,28 @@ export class CodexEngine {
     const peer = await this.ensure()
     const thread = this.threadFor(dshSessionId)
     if (resumeId !== undefined) thread.threadId = resumeId
-    const config = {
+    // Codex 0.166 reads `ThreadStartParams` from the top level and takes the MCP
+    // servers from `config`; it drops unknown keys without a word. So the fields keep
+    // their documented names: `sandbox`, `approvalPolicy`, and `config.mcp_servers`.
+    // The team instructions belong to a new thread: a resumed one keeps the
+    // instructions it was started with, and instruct() updates them later.
+    const params = {
       cwd,
-      ...(instructions ? { developer_instructions: instructions } : {}),
-      ...(mode ? { sandbox_mode: mode, approval_policy: mode === 'danger-full-access' ? 'never' : 'on-request' } : {}),
       ...(model && model !== 'default' ? { model } : {}),
-      ...(mcp !== undefined ? { mcp_servers: { [MCP_SERVER]: { url: mcp.url, http_headers: { Authorization: `Bearer ${mcp.token}` } } } } : {}),
+      ...(mode ? { sandbox: mode, approvalPolicy: mode === 'danger-full-access' ? 'never' : 'on-request' } : {}),
+      ...(mcp !== undefined ? { config: { mcp_servers: { [MCP_SERVER]: { url: mcp.url, http_headers: { Authorization: `Bearer ${mcp.token}` } } } } } : {}),
     }
     if (thread.threadId !== undefined) {
       try {
-        await peer.request('thread/resume', { threadId: thread.threadId, config }, { timeout: 30_000 })
+        // thread/resume takes the same params, plus the thread id. The instructions it
+        // was started with stay: they are not sent again here.
+        await peer.request('thread/resume', { threadId: thread.threadId, ...params }, { timeout: 30_000 })
         return thread
       } catch {
         thread.threadId = undefined
       }
     }
-    const reply = await peer.request('thread/start', config, { timeout: 60_000 })
+    const reply = await peer.request('thread/start', { ...params, ...(instructions ? { developerInstructions: instructions } : {}) }, { timeout: 60_000 })
     thread.threadId = reply?.thread?.id ?? reply?.threadId
     return thread
   }
@@ -141,11 +150,13 @@ export class CodexEngine {
     await this.peer?.request('thread/inject_items', { threadId: thread.threadId, items: [{ type: 'developerMessage', text }] }, { timeout: 15_000 }).catch(() => {})
   }
 
-  async prompt(thread, blocks, { signal }) {
+  async prompt(thread, blocks, { signal, effort }) {
     const peer = await this.ensure()
     const reply = await peer.request('turn/start', {
       threadId: thread.threadId,
       input: blocks.map(block => block.type === 'image' ? { type: 'image', url: block.url ?? block.data } : { type: 'text', text: block.text ?? '' }),
+      // The app-server takes the level per turn and keeps it for the next ones.
+      ...(effort === undefined ? {} : { effort }),
     }, { signal, timeout: 0 })
     thread.turnId = reply?.turn?.id ?? reply?.id
     return thread.turnId
@@ -159,10 +170,32 @@ export class CodexEngine {
     this.peer?.request('turn/interrupt', { threadId: thread.threadId, turnId: thread.turnId }, { timeout: 15_000 }).catch(() => {})
   }
 
+  // The adapter stopped reading this thread: a later open starts a new queue, or
+  // the pump that waits on this one would swallow its first event.
+  forget(dshSessionId) {
+    this.threads.delete(dshSessionId)
+  }
+
   async listModels() {
     const peer = await this.ensure()
     const reply = await peer.request('model/list', {}, { timeout: 30_000 })
-    return (reply?.data ?? reply?.models ?? []).map(entry => ({ id: String(entry.id ?? entry.model), name: String(entry.displayName ?? entry.name ?? entry.id ?? entry.model) }))
+    return (reply?.data ?? reply?.models ?? []).map((entry) => {
+      const model = {
+        id: String(entry.id ?? entry.model),
+        name: String(entry.displayName ?? entry.name ?? entry.id ?? entry.model),
+      }
+      // The app-server advertises the levels each model takes. Its default is
+      // left out on purpose: DSH would send it on every turn, and the level the
+      // user set in their Codex config (model_reasoning_effort) would stop
+      // applying. A Bot without a level of its own keeps the CLI's.
+      const efforts = (entry.supportedReasoningEfforts ?? []).map(option => ({
+        id: String(option.reasoningEffort ?? option),
+        name: String(option.reasoningEffort ?? option),
+        ...(option.description ? { description: String(option.description) } : {}),
+      }))
+      if (efforts.length === 0) return model
+      return { ...model, reasoning: { efforts } }
+    })
   }
 
   async close() {
