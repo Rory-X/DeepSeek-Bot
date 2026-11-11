@@ -5083,6 +5083,13 @@ body[data-ds-dark-theme] .bt-theme-chip i{background:var(--da)}
 @media (max-width:640px) and (pointer:coarse){
   .bt-input,.bt-bs-input,.bt-browser-address input,.bt-folder-input,.bt-secret-input,.bt-q-input,.bt-to input,.bt-palette-head input,.bt-mem-input{font-size:16px}
 }
+/* On a phone the Bot surface owns navigation: a Bot chat is the whole screen
+   with the back control in its header, never the desktop Bot column. */
+@media (max-width:767px){
+  body[data-bt-nav="chat"] .bt-leftcol,
+  .bt-side-collapse,
+  [data-shell-leading] [data-sidebar-opener]{display:none!important}
+}
 `;
 var CONVERSATION_CSS = `
 .bt-think{font-size:13px;line-height:18px;color:var(--bt-ink-2);margin:2px 0 4px;max-width:calc(var(--bt-msg-w) * 100%)}
