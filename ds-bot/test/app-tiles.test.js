@@ -61,7 +61,7 @@ test('the tile base carries the layout, button and icon rules, not just the name
 test('the shell installs the tile base, so a panel opened first is still styled', () => {
   const index = readFileSync(join(PLUGIN, 'src/client/index.js'), 'utf8')
   assert.match(index, /import \{ APP_TILE_CSS \} from '\.\/app-tiles\.js'/)
-  assert.match(index, /installCompiledStyles\(SHELL_CSS \+ APP_TILE_CSS, 'shell'\)/)
+  assert.match(index, /\[SHELL_CSS \+ APP_TILE_CSS, 'shell'\]/)
 })
 
 test('the built client.js carries the tile rules', () => {
