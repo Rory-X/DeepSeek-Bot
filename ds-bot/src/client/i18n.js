@@ -1604,6 +1604,7 @@ const ZH = {
   'Failed': '失败',
 
   'Switch to classic Agent mode': '切换经典 Agent 模式',
+  'Bot settings': 'Bot 设置',
 }
 
 // Host errors stay English, since Bots read them too; they are translated where the

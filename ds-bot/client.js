@@ -1842,7 +1842,8 @@ var ZH = {
   "Attachments: {names}": "附件：{names}",
   "Sent": "已发送",
   "Failed": "失败",
-  "Switch to classic Agent mode": "切换经典 Agent 模式"
+  "Switch to classic Agent mode": "切换经典 Agent 模式",
+  "Bot settings": "Bot 设置"
 };
 var HOST_ERRORS = [
   [/^Could not reach the mail server at (.+)\. Check the server address\.$/, "连不上邮件服务器 $1，请检查服务器地址。"],
