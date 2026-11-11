@@ -122,7 +122,7 @@ export class AcpEngine {
   }
 
   // A new or resumed ACP session for one DS Bot Session.
-  async open(dshSessionId, { cwd, mcp, resumeId, mode }) {
+  async open(dshSessionId, { cwd, mcp, resumeId, mode, model }) {
     const peer = await this.ensure()
     const session = this.sessionFor(dshSessionId)
     const mcpServers = mcp === undefined ? [] : [{ type: 'http', name: 'dsbot', url: mcp.url, headers: [{ name: 'Authorization', value: `Bearer ${mcp.token}` }] }]
@@ -142,15 +142,25 @@ export class AcpEngine {
     session.configOptions = reply?.configOptions ?? []
     session.modes = reply?.modes?.availableModes ?? configOptionsOf(session.configOptions, 'mode')?.options ?? []
     if (mode !== undefined) await this.setOption(session, 'mode', mode).catch(() => {})
+    // A model the agent does not take fails the turn: going on would answer with a
+    // model the user did not pick.
+    if (model !== undefined && model !== 'default') {
+      await this.setOption(session, 'model', model).catch((error) => {
+        throw Object.assign(new Error(`${this.engine.name} did not switch to the model ${model}: ${error?.message ?? error}. Pick another model in the Bot's settings.`), { code: 'LOCAL_AGENT_MODEL' })
+      })
+    }
     return session
   }
 
   async setOption(session, category, value) {
     const peer = await this.ensure()
     try {
-      await peer.request('session/set_config_option', { sessionId: session.acpSessionId, configId: category, value }, { timeout: 15_000 })
-    } catch {
-      if (category === 'mode') await peer.request('session/set_mode', { sessionId: session.acpSessionId, modeId: value }, { timeout: 15_000 }).catch(() => {})
+      const configId = configOptionsOf(session.configOptions ?? [], category)?.id ?? category
+      await peer.request('session/set_config_option', { sessionId: session.acpSessionId, configId, value }, { timeout: 15_000 })
+    } catch (error) {
+      // An agent from before config options takes its mode through session/set_mode.
+      if (category !== 'mode') throw error
+      await peer.request('session/set_mode', { sessionId: session.acpSessionId, modeId: value }, { timeout: 15_000 }).catch(() => {})
     }
   }
 
