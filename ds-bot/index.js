@@ -22,6 +22,7 @@ import * as timeContext from './src/host/time-context.js'
 import * as tools from './src/host/tools.js'
 import * as chatIndex from './src/host/chat-index.js'
 import * as groups from './src/host/groups.js'
+import * as groupLog from './src/host/group-log.js'
 import * as channels from './src/host/channels.js'
 import * as goals from './src/host/goals.js'
 import * as approvals from './src/host/approvals.js'
@@ -61,8 +62,7 @@ export const inject = ['llm', 'tools', 'systemPrompt', 'sessionController', 'ses
 // install. Listeners run and tools are listed in registration order, so this order holds:
 // usage meters model requests after every listener that rewrites them. privacy checks a
 // call before the hooks of tools do, so a closed call never reaches a card they show.
-const MODULES = [diagnostics, store, models, providers, permissions, turns, steer, handoffs, requests, delivery, roster, folders, privacy, agents, prompt, timeContext, tools, botFolders, chatIndex, groups, channels, goals, approvals, resume, memory, parts, images, avatarLibrary, secrets, connectors, capabilities, learning, schedules, board, boardBots, browser, browserPlugins, computer, usage, update, dshUpdate, thinking, feed, im, channel, officeSkills, goalSkills, localAgents]
-
+const MODULES = [diagnostics, store, models, providers, permissions, turns, steer, handoffs, requests, delivery, roster, folders, privacy, agents, prompt, timeContext, tools, botFolders, chatIndex, groups, groupLog, channels, goals, approvals, resume, memory, parts, images, avatarLibrary, secrets, connectors, capabilities, learning, schedules, board, boardBots, browser, browserPlugins, computer, usage, update, dshUpdate, thinking, feed, im, channel, officeSkills, goalSkills, localAgents]
 export function apply(ctx, config = {}) {
   createRuntime(ctx, config)
 }
@@ -85,5 +85,13 @@ export function createRuntime(ctx, config = {}) {
     },
   }
   for (const module of MODULES) module.install(rt)
+  // A live Agent can be scoped before the last module has added its tools (the memory
+  // module starts a load during install): complete the scope now that every tool is in.
+  rt.syncScopedTools?.()
+  // dsh can load this plugin again in place, its files replaced while it runs: dsh
+  // keeps the turns and child agents it had, while this runtime starts with empty
+  // maps. Adopt them now, so Stop, the group view and a late child settle still see
+  // the work. A fresh start has nothing to adopt.
+  void rt.adoptLiveWork?.().catch(error => rt.warn?.('ds-bot: adopting the work still running failed: %s', error))
   return rt
 }

@@ -218,6 +218,8 @@ export function installReview(rt, memory) {
   // What a Session's turn gives the review: its Bot's own chat, or its group with a
   // copy of the group's log as of now. `key` is where the review keeps its place.
   const reviewOf = (sessionId) => {
+    // A channel Session is outside the review: it is not the Bot's own chat.
+    if (rt.isChannelSession?.(sessionId) === true) return undefined
     const chat = rt.chatOwners.get(sessionId)
     if (chat !== undefined) return { key: `chat:${sessionId}`, sessionId, botId: chat }
     const owner = rt.groupOwners.get(sessionId) ?? rt.pastOwners.get(sessionId)
@@ -377,7 +379,7 @@ export function installReview(rt, memory) {
     // A turn that starts again before the delay is over is reviewed when it ends.
     ctx.on('agent/status', ({ agent, status }) => {
       const id = agent?.id
-      if (id === undefined || (!rt.isBotSession(id) && !turnOwners.has(id))) return
+      if (id === undefined || rt.isChannelSession?.(id) === true || (!rt.isBotSession(id) && !turnOwners.has(id))) return
       clearTimeout(reviewTimers.get(id))
       reviewTimers.delete(id)
       if (status !== 'idle') {
