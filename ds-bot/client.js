@@ -17761,6 +17761,7 @@ function SectionBlock({ section, entries: entries2, rowProps, markedUnread, rena
     if (!keep || value.trim() === "" || value.trim() === section.name) return;
     void Promise.resolve(actions.saveSection({ id: section.id, name: value.trim() })).catch((error) => actions.reportError(error, "section-rename"));
   };
+  const bodyEntries = section.collapsed && activeEntry ? entries2.filter((entry) => entry !== activeEntry) : entries2;
   return (0, import_react40.createElement)(
     "div",
     {
@@ -17851,11 +17852,15 @@ function SectionBlock({ section, entries: entries2, rowProps, markedUnread, rena
     ),
     (0, import_react40.createElement)(
       "div",
-      { className: "bt-sec-body" },
+      {
+        className: "bt-sec-body",
+        inert: section.collapsed ? "" : void 0,
+        "aria-hidden": section.collapsed ? true : void 0
+      },
       (0, import_react40.createElement)(
         "div",
         { className: "bt-sec-body-in" },
-        entries2.map((entry) => renderSidebarEntry(entry, rowProps, markedUnread, onDragStart))
+        bodyEntries.map((entry) => renderSidebarEntry(entry, rowProps, markedUnread, onDragStart))
       )
     ),
     section.collapsed && activeEntry ? (0, import_react40.createElement)("div", { className: "bt-sec-peek" }, renderSidebarEntry(activeEntry, rowProps, markedUnread, onDragStart)) : null
@@ -17869,6 +17874,7 @@ function useListGlide(listRef, layout, key) {
     const next = /* @__PURE__ */ new Map();
     const still = reducedMotion() || tops.current.layout !== layout;
     for (const row of list.querySelectorAll("[data-bot-id],[data-room-id],[data-agent-id],[data-sec-id]")) {
+      if (row.closest?.('[aria-hidden="true"]')) continue;
       const id = row.dataset.secId ? `sec:${row.dataset.secId}` : row.dataset.botId ?? row.dataset.roomId ?? row.dataset.agentId;
       const top = row.offsetTop;
       next.set(id, top);
@@ -18233,7 +18239,7 @@ function TeamSidebar(props) {
     { className: wideContent ? "bt-side" : "bt-side bt-rail", onKeyDown: typeToSearch },
     top,
     wideContent && roster.readOnly ? (0, import_react40.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
-    (0, import_react40.createElement)(BotList, { listRef, mains, order, roster, markedUnread, rowProps, drag: { onDragStart, onDragEnd: () => {
+    (0, import_react40.createElement)(BotList, { listRef, mains, order, roster, markedUnread, rowProps, drag: { onDragStart, dragging: dragId, onDragEnd: () => {
       setDragId(null);
       setDropTarget(null);
     }, onDragLeave: (event) => {
@@ -18267,6 +18273,7 @@ function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTi
     (0, import_react40.createElement)("div", {
       key: "ungrouped",
       className: "bt-sec-ungrouped",
+      "data-dragging": dragProps.dragging ? "true" : void 0,
       "data-drop": dragProps.dropTarget === "__none__" ? "true" : void 0,
       onDragOver: (event) => dragProps.onDragOverSec?.(event, "__none__"),
       onDrop: (event) => dragProps.onDropSec?.(event, null)
@@ -19089,7 +19096,8 @@ ${BOT_FOLDERS_CSS}
 .bt-row-time{flex:none;margin-left:auto;padding-left:8px;font-size:12px;line-height:18px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums}
 /* Sidebar sections: collapsible header with a 3D character pile and live status when
    folded, active conversation peek, drag-and-drop highlight, and 88px rail cluster. */
-.bt-sec-ungrouped{display:flex;flex-direction:column;gap:3px;border-radius:10px;transition:background-color .14s ease,box-shadow .14s ease}
+.bt-sec-ungrouped{display:flex;flex-direction:column;gap:3px;border-radius:10px;transition:min-height .14s ease,background-color .14s ease,box-shadow .14s ease}
+.bt-sec-ungrouped[data-dragging=true]:empty{min-height:28px;margin-bottom:2px;box-shadow:inset 0 0 0 1px var(--bt-line-2)}
 .bt-sec-ungrouped[data-drop=true]{background:color-mix(in srgb,var(--bt-accent) 9%,transparent);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--bt-accent) 65%,transparent)}
 .bt-sec{display:flex;flex-direction:column;margin-top:6px;border-radius:12px;transition:background-color .14s ease,box-shadow .14s ease}
 .bt-sec[data-drop=true]{background:color-mix(in srgb,var(--bt-accent) 9%,transparent);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--bt-accent) 65%,transparent)}
@@ -28876,6 +28884,14 @@ function ContextMenu({ menu, roster, actions, leaving = false }) {
 }
 function SectionMenu({ menu, roster, actions, leaving }) {
   const ref = (0, import_react65.useRef)(null);
+  const trigger = (0, import_react65.useRef)(typeof document === "undefined" ? null : document.activeElement);
+  (0, import_react65.useEffect)(() => {
+    const onKey = (event) => {
+      stepMenuFocus(ref.current, event, trigger.current);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   const [place, setPlace] = (0, import_react65.useState)({ left: menu.x, top: menu.y });
   const tick = useViewport();
   (0, import_react65.useLayoutEffect)(() => {

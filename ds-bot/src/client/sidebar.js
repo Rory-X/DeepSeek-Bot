@@ -358,6 +358,7 @@ function SectionBlock({ section, entries, rowProps, markedUnread, renaming, drop
     if (!keep || value.trim() === '' || value.trim() === section.name) return
     void Promise.resolve(actions.saveSection({ id: section.id, name: value.trim() })).catch(error => actions.reportError(error, 'section-rename'))
   }
+  const bodyEntries = section.collapsed && activeEntry ? entries.filter(entry => entry !== activeEntry) : entries
   return h('div', {
     className: 'bt-sec',
     'data-sec-id': section.id,
@@ -414,9 +415,13 @@ function SectionBlock({ section, entries, rowProps, markedUnread, renaming, drop
               openSecMenu('section', rect.left, rect.bottom + 4)
             },
           }, h(DotsIcon)))),
-  h('div', { className: 'bt-sec-body' },
+  h('div', {
+    className: 'bt-sec-body',
+    inert: section.collapsed ? '' : undefined,
+    'aria-hidden': section.collapsed ? true : undefined,
+  },
     h('div', { className: 'bt-sec-body-in' },
-      entries.map(entry => renderSidebarEntry(entry, rowProps, markedUnread, onDragStart)))),
+      bodyEntries.map(entry => renderSidebarEntry(entry, rowProps, markedUnread, onDragStart)))),
   section.collapsed && activeEntry
     ? h('div', { className: 'bt-sec-peek' }, renderSidebarEntry(activeEntry, rowProps, markedUnread, onDragStart))
     : null)
@@ -429,6 +434,7 @@ function useListGlide(listRef, layout, key) {
     const next = new Map()
     const still = reducedMotion() || tops.current.layout !== layout
     for (const row of list.querySelectorAll('[data-bot-id],[data-room-id],[data-agent-id],[data-sec-id]')) {
+      if (row.closest?.('[aria-hidden="true"]')) continue
       const id = row.dataset.secId ? `sec:${row.dataset.secId}` : (row.dataset.botId ?? row.dataset.roomId ?? row.dataset.agentId)
       // offsetTop ignores transforms, so a glide in flight does not skew the next one.
       const top = row.offsetTop
@@ -828,7 +834,7 @@ export function TeamSidebar(props) {
   const content = h('div', { className: wideContent ? 'bt-side' : 'bt-side bt-rail', onKeyDown: typeToSearch },
     top,
     wideContent && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
-    h(BotList, { listRef, mains, order, roster, markedUnread, rowProps, drag: { onDragStart, onDragEnd: () => { setDragId(null); setDropTarget(null) }, onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null) }, dropTarget, onDragOverSec, onDropSec, renamingSection: renameSection } }),
+    h(BotList, { listRef, mains, order, roster, markedUnread, rowProps, drag: { onDragStart, dragging: dragId, onDragEnd: () => { setDragId(null); setDropTarget(null) }, onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null) }, dropTarget, onDragOverSec, onDropSec, renamingSection: renameSection } }),
     foot)
   return h(Fragment, null,
     h(TitleToggle, { hidden: mode === 'hidden', onToggle }),
@@ -861,6 +867,7 @@ function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTi
         h('div', {
           key: 'ungrouped',
           className: 'bt-sec-ungrouped',
+          'data-dragging': dragProps.dragging ? 'true' : undefined,
           'data-drop': dragProps.dropTarget === '__none__' ? 'true' : undefined,
           onDragOver: event => dragProps.onDragOverSec?.(event, '__none__'),
           onDrop: event => dragProps.onDropSec?.(event, null),
@@ -1649,7 +1656,8 @@ ${BOT_FOLDERS_CSS}
 .bt-row-time{flex:none;margin-left:auto;padding-left:8px;font-size:12px;line-height:18px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums}
 /* Sidebar sections: collapsible header with a 3D character pile and live status when
    folded, active conversation peek, drag-and-drop highlight, and 88px rail cluster. */
-.bt-sec-ungrouped{display:flex;flex-direction:column;gap:3px;border-radius:10px;transition:background-color .14s ease,box-shadow .14s ease}
+.bt-sec-ungrouped{display:flex;flex-direction:column;gap:3px;border-radius:10px;transition:min-height .14s ease,background-color .14s ease,box-shadow .14s ease}
+.bt-sec-ungrouped[data-dragging=true]:empty{min-height:28px;margin-bottom:2px;box-shadow:inset 0 0 0 1px var(--bt-line-2)}
 .bt-sec-ungrouped[data-drop=true]{background:color-mix(in srgb,var(--bt-accent) 9%,transparent);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--bt-accent) 65%,transparent)}
 .bt-sec{display:flex;flex-direction:column;margin-top:6px;border-radius:12px;transition:background-color .14s ease,box-shadow .14s ease}
 .bt-sec[data-drop=true]{background:color-mix(in srgb,var(--bt-accent) 9%,transparent);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--bt-accent) 65%,transparent)}
