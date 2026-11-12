@@ -883,6 +883,10 @@ html:not([data-windows-titlebar]) [class*="_footArea"],:not([class*="_collapsed"
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_frame"]{grid-template-columns:0 minmax(0,1fr) 0!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_sidebarCol"],${NOT_DESKTOP} body[data-bt-nav] [data-rightbar-col]{display:none!important}
 ${NOT_DESKTOP} body[data-bt-nav] [class*="_centerCol"]{grid-column:2!important}
+/* Overlay panes are positioned from the desktop sidebar's right edge. On a phone that
+   column is gone and the Bot list is a separate page, so the pane spans the whole screen;
+   otherwise its first pixels sit on top of the conversation underneath it. */
+${NOT_DESKTOP} body[data-bt-nav] .bt-pane{left:0!important}
 /* The panel is fullscreen on a phone by its own rule, and this column is the box it
    positions itself against: the column covers the viewport with it, so the panel is the
    whole screen and the shell's own chrome inside it is the way out. */

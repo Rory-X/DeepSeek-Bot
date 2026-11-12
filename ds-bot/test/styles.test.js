@@ -227,3 +227,13 @@ test('the phone lets the shell\'s fullscreen right panel through', () => {
   assert.match(shown, /width:100%!important/)
   assert.equal(css.includes('bt-right-scrim'), false, 'no strip means no scrim')
 })
+
+// Overlay panes are positioned from the desktop sidebar's edge; on the phone that column
+// is gone, so the pane has to cover the whole viewport instead of leaving a strip of the
+// conversation visible underneath it.
+test('the phone makes overlay panes span the viewport', () => {
+  const css = readFileSync(new URL('../src/client/styles.js', import.meta.url), 'utf8')
+  const rule = css.split('\n').find(line => line.includes('body[data-bt-nav] .bt-pane{'))
+  assert.ok(rule, 'the mobile pane rule is there')
+  assert.match(rule, /left:0!important/)
+})
