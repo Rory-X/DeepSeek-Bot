@@ -67,7 +67,7 @@ const waitingFor = (roster, waits) => {
 function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, wide, marked, time, onDragStart }) {
   const id = bot.id
   const part = currentPart(bot)
-  const preview = useSessions(list => previewOf(list, part, roster.exchangeTurns[part]))
+  const preview = useSessions(list => previewOf(list, part, roster.exchangeTurns[part], roster.chatSummaries?.[part]))
   const running = useSessionStatus(map => map.get(part)?.running === true)
   const active = useSessionRetainInfo(part, info => (info?.retainedBy?.mainView ?? 0) > 0)
   const unread = useSessionStatus(map => map.get(part)?.completionUnread === true || map.get(part)?.pendingInteraction !== undefined) || (marked && !active)
@@ -126,7 +126,7 @@ function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSess
   const menu = useRowMenu(point => actions.openMenu({ kind: 'room', id, x: point.x, y: point.y }))
   // The group's own Session is a chain of parts; the row shows the current one.
   const sessionId = room.sessionId ?? id
-  const fallback = useSessions(list => previewOf(list, sessionId))
+  const fallback = useSessions(list => previewOf(list, sessionId, [], roster.chatSummaries?.[sessionId]))
   const preview = room.preview?.replace(/\s+/g, ' ').trim() || fallback
   const active = useSessionRetainInfo(sessionId, info => (info?.retainedBy?.mainView ?? 0) > 0)
   const unread = useSessionStatus(map => map.get(sessionId)?.completionUnread === true) || (marked && !active)

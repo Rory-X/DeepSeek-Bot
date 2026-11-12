@@ -90,6 +90,8 @@ test('apply registers listeners and effects in a fixed order', (t) => {
     'on workspace/session-activity',
     'on agent/status',
     'on llm/stream',
+    'on session/event',
+    'effect ds-bot: lightweight chat summaries',
     'on llm/stream',
     'on agent/status',
     'on tools/execute',

@@ -10,6 +10,7 @@ import { registerOpenToolbar, closeOtherToolbars } from './message-toolbar.js'
 import { clockLabel, messageClock } from './text.js'
 import { useFold } from './fold.js'
 import { splitQuote, QuoteCard } from './quote.js'
+import { deferContent } from './progressive-content.js'
 
 // -------------------------------------------------------------------------
 // The user's own messages. DSH draws every "@word" in them as a file reference, and
@@ -65,7 +66,7 @@ function Attachments({ attachments, renderMessageImages }) {
   const compact = attachments.length > 1
   return h('div', { className: 'bt-uattach' }, attachments.map((block, index) => {
     if (block.type === 'image') {
-      return renderMessageImages ? h(Fragment, { key: index }, renderMessageImages({ images: [{ attachment: block.attachment }], align: 'end', compact })) : null
+      return renderMessageImages ? h(Fragment, { key: index }, deferContent(renderMessageImages({ images: [{ attachment: block.attachment }], align: 'end', compact }), {})) : null
     }
     const file = block.attachment
     const meta = [ui.fileExtension?.(file.name)?.toUpperCase().slice(0, 8), ui.fileSizeText?.(file.bytes)].filter(Boolean).join(' · ')

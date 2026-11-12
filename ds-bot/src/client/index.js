@@ -189,14 +189,13 @@ export function apply(ctx) {
     const unread = unreadStore.update(marks => setUnread(marks, id, value), ui.getSnapshot().unread)
     ui.set(state => (JSON.stringify(state.unread) === JSON.stringify(unread) ? state : { ...state, unread }))
   }
-  const refreshed = new Set()
   // Pulls can overlap (the poll and a navigation); an older answer never wins.
   let pulls = 0
   let applied = 0
   const pull = queueRosterPull(async () => {
     const order = ++pulls
     const known = roster.getSnapshot()
-    const value = await call('state', { since: known.revision, models: known.modelsKey ?? '', live: liveKey, locale: language() })
+    const value = await call('state', { since: known.revision, models: known.modelsKey ?? '', live: liveKey, locale: language(), fast: true })
     if (order < applied) return
     applied = order
     if (value.liveKey !== undefined) liveKey = value.liveKey
@@ -216,6 +215,7 @@ export function apply(ctx) {
     const current = roster.getSnapshot()
     // Connector and capability states change without a new revision.
     const live = {}
+    if (value.chatSummaries !== undefined && JSON.stringify(value.chatSummaries) !== JSON.stringify(current.chatSummaries ?? {})) live.chatSummaries = value.chatSummaries
     if (value.connectors !== undefined && JSON.stringify(value.connectors) !== JSON.stringify(current.connectors ?? [])) live.connectors = value.connectors
     // A host can stop allowing changes without a new revision; the connector cards read it.
     if (value.readOnly !== undefined && value.readOnly !== (current.readOnly ?? null)) live.readOnly = value.readOnly
@@ -240,11 +240,6 @@ export function apply(ctx) {
     const listed = ctx.sessions.list.getSnapshot().byId ?? {}
     for (const id of pendingAdopt.keys()) {
       if (roster.getSnapshot().agentOf[id] !== undefined || listed[id] === undefined) pendingAdopt.delete(id)
-    }
-    for (const id of [...value.bots.map(currentPart), ...value.rooms.map(room => room.sessionId ?? room.id)]) {
-      if (refreshed.has(id)) continue
-      refreshed.add(id)
-      void Promise.resolve(ctx.sessions.refreshProjections?.(id)).catch(quietly('refresh projections'))
     }
   })
 

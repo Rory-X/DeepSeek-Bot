@@ -1,6 +1,7 @@
 import { createElement as h, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MarkdownText, writeClipboard } from './dsh-primitives.js'
+import { deferContent } from './progressive-content.js'
 import { inkText } from './inks.js'
 import { linkMentions, mentionTarget, dayLabel, contentText, stripHeader, isHiddenTurn, isRelayContext, relaysBefore, relayPart, commRunOf, toolName, toolArgs, reminderPrompts, elapsedLabel, clockLabel, messageClock } from './text.js'
 import { splitQuote, QuoteCard } from './quote.js'
@@ -99,7 +100,7 @@ const foldArea = (body, code, codeHead, actions) => (code === undefined ? body
 function Bubble({ text, index, roster, selfId, actions, sessionId, msgKey, mentions, fold, picked, live, lead, whole }) {
   const { shown, folded, control, code, codeHead } = useFold(text, { limit: fold, whole, live })
   const key = msgKey ? `${msgKey}:${index}` : undefined
-  const body = shown === '' ? null : h(MarkdownText, { text: linkMentions(shown, roster.bots, selfId), streaming: live, labels: mdLabels(), variant: 'compact', fileMentions: mentions })
+  const body = shown === '' ? null : deferContent(h(MarkdownText, { text: linkMentions(shown, roster.bots, selfId), streaming: live, labels: mdLabels(), variant: 'compact', fileMentions: mentions }), { text: shown, live })
   const row = useRef(null)
   const bubble = useRef(null)
   const toolsId = useRef(Symbol('message-tools'))
@@ -740,7 +741,7 @@ function chatRow(row, key, { sessionId, selfId, roster, actions, useUi, onBtwDel
       ? h('div', { key, className: 'bt-q-inline' }, h(SettledQuestion, { question: row.question, closed: row.closed }))
       : h(ClosedView, { key, title: row.title, view: row.view, closed: row.closed })
     // A display-only view replays from the blueprint the host kept on the call.
-    case 'view': return h(WidgetCell, { key, sessionId, callId: row.callId, args: { text: name => name === 'title' ? row.title : undefined, value: name => name === 'view' ? row.view : undefined }, done: true, isError: false, roster, actions })
+    case 'view': return deferContent(h(WidgetCell, { key, sessionId, callId: row.callId, args: { text: name => name === 'title' ? row.title : undefined, value: name => name === 'view' ? row.view : undefined }, done: true, isError: false, roster, actions }), { key })
     case 'bot': {
       const bubbles = h(Bubbles, { key, texts: row.texts, roster, selfId, actions, sessionId: useUi ? sessionId : undefined, msgKey: useUi ? `${sessionId}:${row.time}` : undefined, useUi, fold: FOLD_HUGE })
       const speaker = layoutOf(roster.prefs) === 'flat' ? roster.byId[selfId] : undefined
@@ -1266,7 +1267,7 @@ function renderCall(call, { sessionId, roster, actions, useUi, useWork, findBot,
       return h(PendingQuestion, { key: JSON.stringify([sessionId, question.id]), sessionId, question, actions, inline: true, enterToSend: sendsOnEnter(roster.prefs) })
     }
     case 'show_view':
-      return h(WidgetCell, { sessionId, callId: call.callId, args: { text: arg, value: argValue }, done, isError: call.isError, roster, actions, heldCards })
+      return deferContent(h(WidgetCell, { sessionId, callId: call.callId, args: { text: arg, value: argValue }, done, isError: call.isError, roster, actions, heldCards }), { live: !done || Boolean(roster.views?.[sessionId]) })
     case 'request_secret':
       return h(SecretToolCell, { sessionId, callId: call.callId, name: arg('name'), done, content: call.content, roster, actions, heldCards })
     case 'browser_handoff':

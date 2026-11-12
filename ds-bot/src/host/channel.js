@@ -113,6 +113,7 @@ export function install(rt) {
   // turn there runs; the approvals waiting; per Bot, who it waits for to hand back work;
   // and per Session, when its running turn began.
   const live = () => ({
+    chatSummaries: rt.chatSummariesView?.() ?? {},
     activity: rt.activityView(),
     work: { bots: rt.workView(), rooms: rt.roomWorkView(), approvals: rt.approvalsView(), waiting: rt.waitingView?.() ?? {}, turns: rt.turnsView?.() ?? {}, steered: rt.steeredView?.() ?? {} },
     memoryNews: rt.memoryNews(),
@@ -236,8 +237,9 @@ export function install(rt) {
         case 'state': {
           if (typeof body.locale === 'string' && /^[a-z]{2,3}(-[\w-]+)?$/i.test(body.locale)) uiLocale = body.locale
           if (readOnly === undefined) await rt.bootstrap()
-          await rt.catalog()
+          if (body.fast !== true) await rt.catalog()
           await rt.loadSecrets()
+          await rt.chatSummariesReady?.()
           const answer = liveAnswer()
           if (body.since === state.revision && (body.models === undefined || body.models === modelsKey())) {
             if (body.live === answer.key) return ok({ revision: state.revision, unchanged: true, liveKey: answer.key })
@@ -797,17 +799,29 @@ export function install(rt) {
   Object.assign(rt, { sendUser, answerQuestion })
 
   // An exact Fetch route on the shared /api channel; the browser authenticates with its session cookie.
-  ctx.effect(() => ctx.connection.fetch.register({
-    path: ROUTE,
-    methods: ['POST'],
-    requestBody: 'buffered',
-    fetch: async (request) => {
-      let body
-      try { body = await request.json() } catch { body = {} }
-      const result = await handle(String(body?.endpoint ?? ''), body?.payload, request.signal, { origin: request.headers.get('origin') ?? undefined })
-      return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
-    },
-  }), 'ds-bot: api route')
+  ctx.effect(() => {
+    let closed = false, catalogRefresh
+    const prefetchCatalog = () => {
+      if (closed || catalogRefresh) return
+      catalogRefresh = new Promise(resolve => setImmediate(resolve))
+        .then(() => { if (!closed) return rt.catalog() })
+        .catch(error => rt.warn('ds-bot: background model catalog refresh failed (%s)', error?.code ?? error?.name ?? 'error'))
+        .finally(() => { catalogRefresh = undefined })
+    }
+    const off = ctx.connection.fetch.register({
+      path: ROUTE,
+      methods: ['POST'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        let body
+        try { body = await request.json() } catch { body = {} }
+        const result = await handle(String(body?.endpoint ?? ''), body?.payload, request.signal, { origin: request.headers.get('origin') ?? undefined })
+        if (result.ok && body?.endpoint === 'state' && body.payload?.fast === true) prefetchCatalog()
+        return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
+      },
+    })
+    return () => { closed = true; return off() }
+  }, 'ds-bot: api route')
 
   ctx.effect(() => {
     void rt.load()
