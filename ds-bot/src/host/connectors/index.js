@@ -18,6 +18,20 @@ import { output } from '../tools.js'
 
 export const GITHUB = 'github'
 export const GITHUB_SECRET = 'GITHUB_TOKEN'
+
+// A connector whose catalog entry depends on saved state (Neon's extra project instances)
+// hands the host an overlay: an entry with the same id replaces the catalog one, a new id
+// is appended. Everything else about the entry is the normal catalog shape.
+export function catalogWithOverlay(overlay = [], catalog = CATALOG) {
+  const replaced = new Map()
+  const extra = []
+  for (const entry of Array.isArray(overlay) ? overlay : []) {
+    if (entry === null || typeof entry !== 'object' || typeof entry.id !== 'string' || entry.id === '') continue
+    if (catalog.some(item => item.id === entry.id)) replaced.set(entry.id, entry)
+    else if (!extra.some(item => item.id === entry.id)) extra.push(entry)
+  }
+  return [...catalog.map(entry => replaced.get(entry.id) ?? entry), ...extra]
+}
 const MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
 const CHECK_TIMEOUT_MS = 15_000
 const SIGN_IN_TIMEOUT_MS = 10 * 60_000
@@ -55,16 +69,23 @@ export function install(rt) {
   const refreshes = new Map()
   const gateways = { gw: null }
   const pluginP = { p: null }
+  const overlay = () => {
+    const value = typeof rt.connectorCatalogOverlay === 'function' ? rt.connectorCatalogOverlay() : []
+    return Array.isArray(value) ? value : []
+  }
 
   const entries = () => {
-    const list = [...CATALOG.filter(entry => entry.id !== 'github' || options !== null)]
+    const extra = overlay()
+    for (const entry of extra) CONNECTOR_IDS.add(entry.id)
+    const list = [...catalogWithOverlay(extra).filter(entry => entry.id !== 'github' || options !== null)]
     for (const [id, saved] of Object.entries(state.connectors ?? {})) {
+      if (list.some(entry => entry.id === id)) continue
       if (saved?.custom) list.push({ id, name: saved.custom.name, category: 'custom', about: saved.custom.url ?? saved.custom.command ?? '', auth: { kind: 'custom' }, custom: saved.custom })
     }
     return list
   }
   const entryFor = (id) => {
-    const catalog = entryOf(id)
+    const catalog = catalogWithOverlay(overlay()).find(entry => entry.id === id)
     // rt.config.github keeps its url/api overrides from the old single connector.
     if (catalog !== undefined && id === 'github' && options?.url !== undefined) {
       return { ...catalog, remote: { url: options.url } }
@@ -858,6 +879,6 @@ export function install(rt) {
     },
     connectorSettleRequests: settleRequests,
     secretsChanged: () => { void sync() },
-    connectorsInternals: { mounts, statuses, pendings, gateways, refreshConnector, upstreamOf },
+    connectorsInternals: { mounts, statuses, pendings, gateways, gateway, sync, refreshConnector, upstreamOf },
   })
 }

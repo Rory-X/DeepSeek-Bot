@@ -104,6 +104,7 @@ export async function migrateConnectors(rt, { validateMail, checkGrant = readGra
       const old = state.connectors[id]
       const grant = await checkGrant(rt, id)
       legacyOf(id, { grantKey: grantKey(id), projectId: old?.projectId, projectName: old?.projectName, role: old?.role })
+      if (typeof old?.level === 'string') state.connectors[id].readOnly ??= old.level === 'read'
       if (grant === undefined) {
         state.connectors[id].legacy = { ...state.connectors[id].legacy, needsReconnect: true }
         finish(id, 'needs-reconnect', { reason: 'grant-missing' })

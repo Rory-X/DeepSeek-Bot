@@ -1,6 +1,7 @@
 // Chooses which connector host the plugin installs. `legacy` is the default and is the
-// fork host used in production; `bridge` is the opt-in compatibility shell for the
-// upstream catalog+gateway migration (P1: same fork connectors behind the new view shape).
+// fork host used in production; `bridge` is the opt-in compatibility shell: the upstream
+// catalog+gateway host runs the six covered connectors, the fork host keeps only
+// Telegram/ima/WeRead, and the old tool names are mounted as aliases.
 import * as legacy from './connectors.js'
 import * as bridge from './connectors-bridge.js'
 

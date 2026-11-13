@@ -71,7 +71,7 @@ export const VERCEL_READ_TOOLS = [
 
 // The deployment actions Vercel's server offers. They change something outside DS Bot,
 // so they are registered only when the user turns them on, and every call asks first.
-const VERCEL_ACTION_TOOLS = ['create_deployment', 'cancel_deployment', 'request_promote', 'request_rollback']
+export const VERCEL_ACTION_TOOLS = ['create_deployment', 'cancel_deployment', 'request_promote', 'request_rollback']
 
 // Cloudflare's API server in its endpoint mode (`?codemode=false`): one tool per API
 // endpoint, no code execution. Only these read endpoints are registered; every write
