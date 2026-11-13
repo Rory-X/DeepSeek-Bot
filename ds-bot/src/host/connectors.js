@@ -53,7 +53,7 @@ const takeNotifySend = (rt, id, name) => {
 
 // The read tools Vercel's server offers that DS Bot exposes. Everything else it lists
 // (write and destructive calls, environment values) is never registered.
-const VERCEL_READ_TOOLS = [
+export const VERCEL_READ_TOOLS = [
   'search_vercel_documentation',
   'list_projects',
   'get_project',
@@ -71,12 +71,12 @@ const VERCEL_READ_TOOLS = [
 
 // The deployment actions Vercel's server offers. They change something outside DS Bot,
 // so they are registered only when the user turns them on, and every call asks first.
-const VERCEL_ACTION_TOOLS = ['create_deployment', 'cancel_deployment', 'request_promote', 'request_rollback']
+export const VERCEL_ACTION_TOOLS = ['create_deployment', 'cancel_deployment', 'request_promote', 'request_rollback']
 
 // Cloudflare's API server in its endpoint mode (`?codemode=false`): one tool per API
 // endpoint, no code execution. Only these read endpoints are registered; every write
 // endpoint, and the code-mode tools (`docs`, `search`, `execute`), stay unregistered.
-const CLOUDFLARE_READ_TOOLS = [
+export const CLOUDFLARE_READ_TOOLS = [
   'whoami',
   'get_accounts',
   'get_zones',
