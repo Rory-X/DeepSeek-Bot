@@ -271,8 +271,6 @@ export const BOT_SETTINGS_CSS = `
 .bt-bs-name{font-size:17px;line-height:24px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bt-bs-sub{font-size:13px;line-height:18px;color:var(--bt-ink-2)}
 .bt-bs .bt-avedit{left:0;transform:none;width:min(284px,calc(100vw - 32px))}
-/* A popover over a phone goes back on its anchor, which sits in the middle of the pane. */
-@media (max-width:640px){.bt-bs .bt-avedit{left:50%;transform:translateX(-50%)}}
 .bt-bs-row{min-height:48px}
 label.bt-bs-row{cursor:text}
 .bt-bs-row>.bt-set-copy{flex:1 1 auto}
@@ -312,5 +310,9 @@ label.bt-bs-row{cursor:text}
 @media (max-width:640px){
   .bt-bs-row{flex-direction:row;align-items:center;gap:10px}
   .bt-bs-row.bt-bs-stack{flex-direction:column;align-items:stretch}
+  /* The avatar anchor sits near the left edge, so a popover centred on it would put
+     most of the editor off the screen. A phone gets a full-width bottom sheet instead:
+     opaque over the settings page and scrollable when the character grid is tall. */
+  .bt-bs .bt-avedit{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));top:auto;width:auto;max-height:calc(100dvh - 120px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));overflow-y:auto;transform:none;transform-origin:bottom center;border-radius:20px;background:var(--bt-main)}
 }
 `

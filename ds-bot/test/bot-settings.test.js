@@ -76,3 +76,13 @@ test('BOT_SETTINGS_CSS keeps a settings row on one line and shares a narrow pane
   // Same specificity means source order decides: the shares must come after the base rule.
   assert.ok(BOT_SETTINGS_CSS.indexOf('.bt-bs-input{flex:0 1 220px') < BOT_SETTINGS_CSS.indexOf('@container (max-width:520px)'))
 })
+
+test('the phone makes the avatar editor a full-width bottom sheet', () => {
+  const { BOT_SETTINGS_CSS } = module.exports
+  const phone = BOT_SETTINGS_CSS.slice(BOT_SETTINGS_CSS.lastIndexOf('@media (max-width:640px)'))
+  assert.match(phone, /\.bt-bs \.bt-avedit\{position:fixed;left:12px;right:12px;bottom:/)
+  assert.match(phone, /width:auto/)
+  assert.match(phone, /overflow-y:auto/)
+  assert.match(phone, /transform:none/)
+  assert.match(phone, /background:var\(--bt-main\)/)
+})
