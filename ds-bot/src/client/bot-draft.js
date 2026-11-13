@@ -18,7 +18,7 @@ export function startModel(roster) {
 }
 
 // A chosen model is always sent: the host fixes it on the Bot at creation.
-export function createPayload({ name, look, image, model, effort, brief, sectionId, ownLook = false }) {
+export function createPayload({ name, look, image, model, effort, brief, ownLook = false, sectionId }) {
   // An abot with no character of its own starts with its engine's badge.
   const badge = !image && !ownLook && isLocalRoute(model) ? agentAvatar(String(model).split('/')[0]) : undefined
   const payload = { name, color: look.color, avatar: image ? { shape: look.shape, image } : badge !== undefined ? { shape: look.shape, image: badge.image } : { shape: look.shape } }

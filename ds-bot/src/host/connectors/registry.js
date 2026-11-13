@@ -29,7 +29,9 @@ export const INSTANCE_LIMIT = 64
 // read only.
 export const CONNECTOR_LEVELS = ['read', 'write']
 // This file and test-only helpers stay out of the registry.
-const NOT_A_CONNECTOR = /^(registry\.js|_.*|.*\.test\.js)$/
+// The upstream connector framework shares this directory: index/catalog/gateway/oauth are
+// not connector modules, and neither are the underscore helpers or this registry.
+const NOT_A_CONNECTOR = /^(registry\.js|index\.js|catalog\.js|gateway\.js|oauth\.js|_.*|.*\.test\.js)$/
 const LEVEL_HOOKS = ['authorize', 'toolsOf', 'readiness', 'normalizeSettings', 'actionApproval', 'view', 'status', 'test', 'command']
 const CAPABILITY_RISKS = ['read', 'write', 'destructive']
 const SETTING_KINDS = ['text', 'secret', 'bot', 'segmented']

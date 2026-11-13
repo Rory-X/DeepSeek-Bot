@@ -197,8 +197,8 @@ test('a lead can resume a blocked step without changing its assignment or scope'
 
 test('a task can create its first member session before any group relay ran', async t => {
   const ctx = fakeContext()
-  const room = { id: 'room', members: ['lead'], boardCardId: 'card' }
-  const rt = { ctx, home: '/unused', groupOwners: new Map(), roomOf: () => room, botOf: () => bots.lead,
+  const room = { id: 'room', members: ['lead'], boardCardId: 'card', sessions: {}, seen: {} }
+  const rt = { ctx, home: '/unused', groupOwners: new Map(), roomOf: () => room, botOf: () => bots.lead, ledger: { importer: () => {} }, roomProgress: new Map(),
     workDirOf: () => '/project', createSession: async (_title, options) => { assert.equal(options.strictDir, true); return 'task' },
     desiredModel: async () => undefined, applyPermission: async () => {}, save: async () => {}, ensureCapabilities: async () => {}, ownChatBrief: async () => undefined,
     resolveAgent: async () => {} }

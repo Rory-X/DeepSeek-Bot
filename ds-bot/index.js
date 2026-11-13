@@ -22,7 +22,7 @@ import * as timeContext from './src/host/time-context.js'
 import * as tools from './src/host/tools.js'
 import * as chatIndex from './src/host/chat-index.js'
 import * as groups from './src/host/groups.js'
-import * as groupLog from './src/host/group-log.js'
+import * as ledger from './src/host/ledger.js'
 import * as channels from './src/host/channels.js'
 import * as goals from './src/host/goals.js'
 import * as approvals from './src/host/approvals.js'
@@ -40,14 +40,16 @@ import * as connectors from './src/host/connectors.js'
 import * as capabilities from './src/host/capabilities.js'
 import * as learning from './src/host/learning.js'
 import * as schedules from './src/host/schedules.js'
+import * as board from './src/host/board.js'
+import * as boardBots from './src/host/board-bots.js'
 import * as usage from './src/host/usage.js'
 import * as update from './src/host/update.js'
 import * as dshUpdate from './src/host/dsh-update.js'
 import * as thinking from './src/host/thinking.js'
+import * as phone from './src/host/phone.js'
 import * as channel from './src/host/channel.js'
+import * as mobile from './src/host/mobile.js'
 import * as feed from './src/host/feed.js'
-import * as board from './src/host/board.js'
-import * as boardBots from './src/host/board-bots.js'
 import * as im from './src/host/im/index.js'
 import * as officeSkills from './src/host/office-skills.js'
 import * as goalSkills from './src/host/goal-skills.js'
@@ -56,14 +58,15 @@ import * as localAgents from './src/host/local-agents/index.js'
 export { COLORS } from './src/host/constants.js'
 
 export const name = 'ds-bot'
-export const inject = ['llm', 'tools', 'systemPrompt', 'sessionController', 'sessions', 'sessionTitle', 'workspaceRegistry', 'connection', 'jobs']
+export const inject = ['llm', 'tools', 'systemPrompt', 'sessionController', 'sessions', 'sessionTitle', 'workspaceRegistry', 'connection']
 
 // Each module's install(rt) registers its listeners, tools, and effects, and puts on `rt`
 // the functions other modules call; they call them through `rt` at run time, never during
 // install. Listeners run and tools are listed in registration order, so this order holds:
 // usage meters model requests after every listener that rewrites them. privacy checks a
 // call before the hooks of tools do, so a closed call never reaches a card they show.
-const MODULES = [diagnostics, store, models, providers, permissions, turns, steer, handoffs, requests, delivery, roster, folders, privacy, agents, prompt, timeContext, tools, botFolders, chatIndex, groups, groupLog, channels, goals, approvals, resume, memory, parts, chatSummaries, images, avatarLibrary, secrets, connectors, capabilities, learning, schedules, board, boardBots, browser, browserPlugins, computer, usage, update, dshUpdate, thinking, feed, im, channel, officeSkills, goalSkills, localAgents]
+const MODULES = [diagnostics, store, ledger, models, providers, permissions, turns, steer, handoffs, requests, delivery, roster, botFolders, folders, privacy, agents, prompt, timeContext, tools, chatIndex, groups, channels, goals, approvals, resume, memory, parts, chatSummaries, images, avatarLibrary, secrets, connectors, capabilities, learning, schedules, board, boardBots, browser, browserPlugins, computer, usage, update, dshUpdate, thinking, mobile, feed, phone, im, channel, officeSkills, goalSkills, localAgents]
+
 export function apply(ctx, config = {}) {
   createRuntime(ctx, config)
 }

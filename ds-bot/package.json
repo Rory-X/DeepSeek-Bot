@@ -1,6 +1,6 @@
 {
   "name": "ds-bot",
-  "version": "0.3.2",
+  "version": "0.3.6",
   "description": "DS Bot: a team of long-lived Bots for DeepSeek Harness, with Main Bots, Bot-to-Bot messages and group chats",
   "keywords": [
     "dsh-plugin",
@@ -30,21 +30,22 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "NOTICE",
     "index.js",
     "src/host/",
     "src/shared/",
     "src/office/",
     "client.js",
+    "link.js",
     "office.js",
     "web-search.js",
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
+    "NOTICE",
     "vendor/"
   ],
   "scripts": {
-    "build": "node scripts/build-client.mjs",
+    "build": "node scripts/build-client.mjs && node scripts/build-link.mjs",
     "test": "node --import ./test/harness-resolve.mjs --test --test-timeout=120000 --test-force-exit \"test/*.test.js\"",
     "lint": "node scripts/lint.mjs",
     "harness": "npm install --prefix dev/harness --legacy-peer-deps=false --no-package-lock --no-fund --no-audit",
@@ -69,5 +70,16 @@
     "@xmldom/xmldom": "0.9.12",
     "esbuild": "0.28.2",
     "qrcode-generator": "2.0.4"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "deep-view": "0.1.2",
+    "imapflow": "2.9.1",
+    "jpeg-js": "0.4.4",
+    "mailparser": "3.12.4",
+    "nodemailer": "10.2.1",
+    "playwright-core": "1.64.1",
+    "pngjs": "7.0.0",
+    "ws": "8.18.3"
   }
 }

@@ -6,91 +6,35 @@
 
 ![版本](https://img.shields.io/badge/版本-v0.3_预览-blue) ![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.1-4D6BFE) ![许可](https://img.shields.io/badge/许可-Apache_2.0-green)
 
-**[Download DS Bot for Windows 10/11 (64-bit) / 下载 Windows 10/11（64 位）版](https://github.com/Fei2411/DS-Bot/releases/latest)**, about 212 MB / 约 212 MB. A community project, not an official DeepSeek product. / 社区开源项目，不是 DeepSeek 官方产品。
+DS Bot 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（简称 dsh）的开源项目，提供独立桌面应用和 dsh 插件两种形态。它将 dsh 改造为 bot 形式，你可以与自己创建的 bot 交流、工作。
 
-On that page, download `DS-Bot-<version>-win-x64.exe`. Double-click it to install; DS Bot opens when it is done. No administrator rights, no Node or DSH needed. You need a DeepSeek account (you can sign up with a phone number on the spot) or a DeepSeek API key. DeepSeek bills by usage: see [its prices](https://api-docs.deepseek.com/quick_start/pricing). For macOS, Linux or the DSH plugin, see [Install](README.md#install).
+## 赞助
 
-在这个页面下载 `DS-Bot-<版本>-win-x64.exe`，双击就会安装，装好自动打开。不用管理员权限，不用另装 Node 或 DSH。需要一个 DeepSeek 账号（可以当场用手机号注册）或 DeepSeek API Key。DeepSeek 按用量收费，见[价格页](https://api-docs.deepseek.com/quick_start/pricing)。macOS、Linux 和 DSH 插件见[安装](README.zh.md#安装)。
+<table>
+<tr>
+<td width="180" align="center"><a href="https://modelgo.ai/?utm_source=dsbot&utm_medium=sponsorship&utm_content=readme&campaign_id=dsbot&ad_group_id=readme"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/sponsors/modelgo-dark.svg"><img src="docs/images/sponsors/modelgo.svg" alt="ModelGo" width="150"></picture></a></td>
+<td>ModelGo 是一个稳定、高效的企业级 AI API 聚合平台，一个 API Key 即可调用 Claude、OpenAI、Gemini、DeepSeek 等主流 AI 模型。当前注册即享 6 折 deepseek v4.1 flash。<br>另为 DS-Bot 用户提供专属福利：注册即送 $0.5 额度，完成首次 API 调用再送 $2，充值赠金最高至 $10！立即体验：<a href="https://modelgo.ai/?utm_source=dsbot&utm_medium=sponsorship&utm_content=readme&campaign_id=dsbot&ad_group_id=readme">ModelGo 官网</a></td>
+</tr>
+</table>
 
-<details>
-<summary><b>The browser or Windows warns you, or blocks the installer? / 浏览器或 Windows 提示、拦下了安装包？</b></summary>
-
-The installer is not signed yet, so Windows does not know its publisher.
-
-- Edge says the file is not commonly downloaded: **···** → **Keep** → **Show more** → **Keep anyway**.
-- "Windows protected your PC": **More info** → **Run anyway**.
-- "Smart App Control blocked …", with no **Run anyway**: there is no safe way around this for an unsigned installer. Use [DSH Desktop with the DS Bot plugin](README.md#install) instead. Do not turn Smart App Control off.
-- An antivirus blocks it: check the file first. In Command Prompt, run `certutil -hashfile <file> SHA256` and compare the result with the file's line in `SHA256SUMS.txt` on the release page. If they match, choose to trust the file in the antivirus.
-- The installer says it could not uninstall the old version: close DS Bot and run the installer again. If your antivirus stopped the installer, check and trust it as above first.
-
-Still stuck? [Report an install problem](https://github.com/Fei2411/DS-Bot/issues/new?template=install.yml).
-
-安装包还没有签名，所以 Windows 认不出发布者。
-
-- Edge 提示「不常下载」：「···」→「保留」→「显示更多」→「仍然保留」。
-- 「Windows 已保护你的电脑」：「更多信息」→「仍要运行」。
-- 「智能应用控制已阻止…」，而且没有「仍要运行」：未签名的安装包没有安全的绕过办法，请改用 [DSH Desktop 加 DS Bot 插件](README.zh.md#安装)。不要关掉智能应用控制。
-- 杀毒软件拦截：先核对文件。在命令提示符里运行 `certutil -hashfile <文件> SHA256`，和 Release 页上 `SHA256SUMS.txt` 里这个文件的那一行比较，一致后再在杀毒软件里选「信任」。
-- 安装时提示卸载旧版失败：先关掉 DS Bot，再运行一次安装包。杀毒软件拦了安装包时，先按上面的方法核对，选「信任」。
-
-还是装不上？[报告安装问题](https://github.com/Fei2411/DS-Bot/issues/new?template=install.yml)。
-</details>
-
-**DS Bot**: the desktop app, the project and the plugin / 桌面应用、项目和插件 · **DeepSeek Harness (DSH)**: what they are built on / 它们的底层
-
-DS Bot 是一个基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（简称 dsh）的 bot 插件，插件将 dsh 改造为 bot 形式。你可以与自己创建的 bot 交流、工作。
+<h2></h2>
 
 ![和 Chief 说一句话，它就把 bot 和群聊建好](docs/images/team.zh.png)
-
-## 项目看板预览
-
-项目看板功能分支为 DSH 已注册项目增加主导航看板，支持四列布局、待开始需求保存、一位主负责人和多位协作者。点击开始后建立需求专属任务对话；主负责人澄清并提交方案，用户批准后才开始实现。各 Bot 更新自己的步骤，多人任务由独立审查者复核，主负责人逐条附上验收证据和交付物。用户可以验收或退回修改，只有用户验收才标为完成。Bot 工具与界面共用带版本检查的工作流。
-
-全局队列显示任务正在等待哪位 Bot 或哪个项目。每位 Bot 同时执行一项看板工作，同项目的实现任务依次进行。暂停和取消会停止新派发，并请求执行中的 DSH 回合停止；确认 Agent 空闲且其 DSH 管理的后台任务已停止后才释放执行名额。详情显示 shell 任务状态，包括前台超时转入后台的命令。硬重启可能丢失 DSH 进程内的任务注册表，此时保持阻塞；用户核实旧任务已停止并在详情中记录依据后，恢复工作仍须核对已产生的效果。取消保留文件与记录，不撤销外部操作。重启后先核对持久收件箱和公开会话记录，确认未送达才重发，已中断的工作建立恢复接续。Bot 必须检查并记录已有结果后才能继续修改文件。隔离 bench 使用脚本化 mock 模型验证真实工具流程，并对其专属 web 进程进行受保护的硬中断测试。见[设计与验收阶段](docs/plans/2026-10-20-project-board.md)。
-
-## Bot 列表分组
-
-主 Bot 或其他窗口修改分组后，已打开的 Bot 列表会自动更新。主 Bot 卡片之后依次显示所有置顶项、置顶分组、其他分组，再显示其他未分组项。组内 Bot 置顶后显示在分组上方，保留成员归属，取消置顶后回到原分组。展开的分组在最后一行可见 Bot 下方显示细分割线。分组右侧「…」菜单提供「置顶分组／取消置顶」「管理分组」和「解散分组」；解散后成员回归列表的正常排序，Bot 和聊天记录保留。
-
-点击列表下方的「新建 Bot 分组」，或 Bot 菜单里的「移入分组…」，按工作内容整理 Bot。勾选成员并保存后，列表以 `connector` 这样的小字标题呈现分组，标题不显示数量，点击即可折叠或展开。成员归属在重启后保留，折叠状态由各浏览器记忆。可以修改组名和成员，空组可删除；Bot 的聊天和运行中的工作照常继续。
-
-主 Bot 可先用 `list_bots` 和 `list_bot_folders` 查看职责与分组，再调用 `organize_bots`：`action: "assign"`、`folder: "connector"`、`bots` 中填写 Bot 名称，即可创建或复用分组并一次归入所有成员。分组名留空会将指定 Bot 移出分组。同一工具也支持对现有组名传入 `action: "pin"`、`"unpin"` 或 `"dissolve"`，完成置顶、取消置顶和解散；解散保留所有 Bot 和聊天记录。只有主 Bot 能通过工具整理团队；列表分组与群聊、项目无关。见[设计说明](docs/plans/2026-10-20-bot-folders.md)。
 
 ## 安装
 
 **桌面应用（Windows、macOS、Linux）**
 
-桌面应用自带 dsh，不用先装 dsh。在 [Releases](https://github.com/Fei2411/DS-Bot/releases) 里下载：
+桌面应用自带 dsh，不用先装 dsh。直接在 [Releases](https://github.com/Fei2411/DS-Bot/releases/latest) 下载对应系统的安装包，打开后在设置里配好模型就能用（也可以直接复制你原来在 dsh 里的 bot 团队）。
 
-- Windows（x64）：`DS-Bot-<版本>-win-x64.exe`。运行它即可安装，只装给当前用户，不要管理员权限。如果提示“Windows 已保护你的电脑”，点 **更多信息** → **仍要运行**。其他提示和拦截，打开本页开头的 **浏览器或 Windows 提示、拦下了安装包？**。
-- macOS：Apple 芯片下载 `DS-Bot-<版本>-mac-arm64.zip`，Intel 下载 `DS-Bot-<版本>-mac-x64.zip`。Safari 会自动解压；把 **DS Bot** 拖进 **应用程序**，再打开。如果提示无法检查这个 App，打开 **系统设置** → **隐私与安全性**，点 **仍要打开**。
-- Linux（x64）：`DS-Bot-<版本>-linux-x86_64.AppImage` 通用于 glibc 2.28 及以上的所有发行版——加上可执行权限后打开即可。它通过 FUSE 2 挂载，可能需要先安装（Ubuntu 24.04+ 用 `sudo apt install libfuse2t64`，Fedora 用 `sudo dnf install fuse-libs`，Arch 用 `sudo pacman -S fuse2`）。Ubuntu 24.04 及以后版本会限制 AppImage 需要的沙箱，AppImage 可能因此拒绝启动；Debian/Ubuntu 上的 `DS-Bot-<版本>-linux-amd64.deb` 没有这个问题，还会加菜单项。CentOS 7 这类旧 glibc 系统上应用和 dsh Web 会因 `GLIBC_2.27 not found` 失败，改用 Docker 镜像（见下文和[已知问题](docs/known-issues.zh.md)）。
-
-第一次打开时，App 把数据和 Bot 的文件放在你的用户文件夹里，启动窗口上写着放在哪，点一下就能换；并可以从你的 dsh 复制 Bot 团队（只读取你的 dsh，不改它）。在 App 的设置里配好模型就能用。Windows 版和 Linux 的 AppImage 会自动更新；macOS 版和 Linux 的 deb 有新版本时会提示你下载。
-
-下载不了、装不上或打不开时，[报告安装问题](https://github.com/Fei2411/DS-Bot/issues/new?template=install.yml)，不需要诊断信息。
-
-**从源码启动桌面应用（Windows）**
-
-安装 Node.js 22.19 或以上版本及 npm 后，在仓库目录用 PowerShell 运行 `.\start.ps1`。脚本自动准备并启动当前源码，Bot、聊天记录和模型配置持久保存在 `.ds-bot-local/`，重启后继续使用。见[源码启动说明](app/README.md#run-from-source-windows)。
+如果安装或打开时提示未签名拦截：Windows 点 **更多信息** → **仍要运行**；macOS 在 **系统设置** → **隐私与安全性** 里点 **仍要打开**。
 
 **作为 dsh 插件**
 
 先装好 dsh，并在 dsh 里配好至少一个模型。ds bot 直接使用 dsh 里的模型。
 
-**dsh Desktop（Windows、macOS）**
-
-1. 侧栏点 **插件** → **添加插件**。
-2. **包名或地址** 填 `ds-bot`。在中国大陆，**安装源** 选 **中国大陆镜像源**。
-3. 点 **安装**，再点 **立即启用**。如果提示“下次启动生效”，完全退出 dsh 再打开。
-
-连不上 npm 时，第 2 步也可以填 [Releases](https://github.com/Fei2411/DS-Bot/releases) 里下载的 `ds-bot-<版本>.tgz` 的完整路径，或者 `github:Fei2411/DS-Bot#v<版本>&path:/ds-bot`（需要装 Git）。
-
-DS Bot 0.2.1 及更早的版本在 DSH Desktop 0.2.1-rc.2 及以后的版本里不能自己更新：在插件页移除 `ds-bot`，再添加 `ds-bot`。Bot、聊天和记忆都会保留。
-
-**dsh Web（Windows、macOS、Linux）**
-
-需要 Node.js `22.19` 以上和 pnpm。Linux 上它和桌面应用一样要求 glibc 2.28 及以上——dsh 自身会加载原生库，CentOS 7 这类旧 glibc 系统请走下面的 Docker 路线。
+- **dsh Desktop**：侧栏点 **插件** → **添加插件**，包名填 `ds-bot`（在中国大陆，安装源选 **中国大陆镜像源**），点 **安装** 并 **立即启用**。
+- **dsh Web**（需要 Node.js `22.19` 以上和 pnpm）：
 
 ```sh
 npx @deepseek-ai/dsh@0.2.2-rc.1 plugin --profile web add ds-bot
@@ -99,7 +43,7 @@ npx @deepseek-ai/dsh@0.2.2-rc.1 web
 
 **Docker（NAS、Linux 服务器）**
 
-[`docker/`](docker/) 目录构建一个带 dsh Web 和 DS Bot 的镜像，适合 NAS 或其他常开的机器。CI 已配置为向 GHCR 发布 linux/amd64 预构建镜像。容器就是 bot 的沙箱：bot 对挂进容器的目录有完全权限，其他的碰不到。见 [`docker/README.md`](docker/README.md)（英文）。
+见 [`docker/README.md`](docker/README.md)。
 
 ## 配置
 
@@ -113,9 +57,11 @@ DS Bot 会把 `auto` 搜索 provider 选为整个 profile 的后端。禁用 `we
 
 ### Bot
 
-你可以在一个窗口中和一个 bot 完成所有对话和工作，你无需担心背后的上下文问题。你可以在 bot 详情页查看 bot 信息，也可以为 bot 选择你想使用的模型。你可以随时切换模型，但我仍然建议你为一个 bot 长期保持一个模型，仅在真正必要的时刻切换。
+你可以在一个窗口中和一个 bot 完成所有对话和工作，你无需担心背后的上下文问题。你可以在 bot 详情页查看 bot 信息，也可以为 bot 选择你想使用的模型和思考强度。你可以随时切换模型，但我仍然建议你为一个 bot 长期保持一个模型，仅在真正必要的时刻切换。
 
 另外，bot 拥有记忆，它会记住你的喜好并在下次的工作中应用。你可以在 bot 的详情页管理记忆，也可以直接和 bot 对话来进行管理。
+
+每个 bot 可以单独设置工作文件夹和权限，换文件夹直接和它说一声就行。它干活时你可以随时插话，或者输入 `/side` 开侧边对话顺手问一句而不打断它；它也能在回复里直接画图表、表格和表单，或者跑定时任务。侧边栏里还可以把 bot 和群聊按工作收进分组。
 
 ![bot 详情页：模型、记忆、用量](docs/images/details.zh.png)
 
@@ -127,43 +73,51 @@ DS Bot 会把 `auto` 搜索 provider 选为整个 profile 的后端。禁用 `we
 
 ### 群聊
 
-ds bot 拥有群聊功能。群聊是非常好的多 bot 协作方式，但它会带来非常明显的费用问题。ds bot 为此特意做了优化：在一个群聊中，你需要设置一个管理员。你的消息默认由管理员回复，它会帮你调用其他 bot。你也可以直接 @ 你需要沟通的 bot，它会直接回应你：输入 @，从列表里选 bot 就行。想让 bot 参考另一段对话，点输入框的 + → 引用对话。
+ds bot 拥有群聊功能。群聊是非常好的多 bot 协作方式，但它会带来非常明显的费用问题。ds bot 为此特意做了优化：在一个群聊中，你需要设置一个管理员。你的消息默认由管理员回复，它会帮你调用其他 bot。你也可以直接 @ 你需要沟通的 bot，它会直接回应你。想让 bot 参考另一段对话，点输入框的 + → 引用对话就行。
 
-任何 bot 都可以用 @ 把活派给另一个 bot。接活的 bot 自己去做，群聊照常进行。它干活时会在群里同步进度，群聊、侧边栏和它自己的聊天里也能看到它在做什么。做完后，它把结果发到群里，由派活的 bot 接着回应。要停下它的工作，打开群聊详情。
-
-群聊有自己的记忆。你在群里交代的事留在群里：群成员在这个群里会用到，你的其他对话和群外的 bot 都看不到。你可以在群聊详情里管理它。
-
-做大任务时，群聊可以设定目标（Goal）：管理员先和你对齐完成标准，再把工作拆成阶段分给成员，每个阶段对照证据验收通过后才进入下一阶段。
+任何 bot 都可以用 @ 把活派给其他 bot，接活的 bot 自己去做，做完把结果发回群里。群聊有自己独立的记忆和工作文件夹，群外的 bot 看不到。做大任务时，群聊可以设定目标（Goal），由管理员先和你对齐完成标准，再拆成阶段分给成员，逐段验收推进。
 
 ![群聊：管理员 Chief 把活派给写手和程序员](docs/images/group.zh.png)
 
-### 能力
+### 隐私 bot
 
-设置 → **能力** 是团队共享的 MCP 服务、技能和能力包列表。在 Bot 设置中启用能力后，从该 Bot 下一条消息开始生效，也适用于它参与的群聊。Bot 添加的本地 MCP 命令需要你先批准才能运行。有其他 Bot 在用的能力，只有你或主 Bot 能修改、删除。
+如果有些私密工作你只想和一个 bot 聊，可以在它的设置里打开隐私，并给它设一个独立的工作文件夹。其他 bot 读不到它的文件夹、记忆和聊天记录，它向其他 bot 发消息或写外部文件也必须先经你批准。就算删掉它，原来的内容也会继续受保护，直到你在设置里手动解除。
 
-### 连接器
-
-设置 → **连接器** 可以连接外部服务，连接后每个 bot 都能使用该服务的工具。GitHub（`GITHUB_TOKEN`）或 Vercel（`VERCEL_TOKEN`）只需连接一次：token 保存在密钥里，只在 MCP 连接中使用。GitHub 的工具名是 `mcp__github__…`；Vercel 只读连接，工具如 `vercel_list_projects`、`vercel_get_runtime_logs`。Vercel 的四个部署动作默认关闭：在连接器里打开后，每次调用前会在聊天里显示一张审批卡（允许一次 / 拒绝），不批准就什么都不会发出。另有一个工具箱开关，打开后会加上 `vercel_search_tools` 和 `vercel_call`，用搜索触达 Vercel 的全部能力；写操作仍需在这张卡上批准，会返回凭据或环境变量值的工具一律不提供。**Cloudflare** 用 OAuth 连接：点 Connect，在 Cloudflare 页面上同意只读权限即可，授权保存在 DSH 的凭据存储里而不是密钥里。它挂载 14 个具名只读工具（`cloudflare_get_zones`、`cloudflare_get_zones_dns_records`、分析类与 Workers 读取等）。可选的 **Full capabilities** 开关会加上 `cloudflare_search_tools` / `cloudflare_call`，覆盖服务器全部端点：GET/HEAD 直接读，任何写操作都先在审批卡上批准，会铸造或读取凭据的端点一律不提供；不走 Cloudflare 的代码执行工具。 **微信**是通道类连接器：每个通道绑定一个 Bot，通过 webhook 发通知（每次发送前都会在审批卡上确认）；在卡片上保存 **Webhook secret** 后，它还会在 `127.0.0.1:8799` 上监听入站消息（`POST /wechat/<实例>/inbound`，用同一个 secret 签名）。推送 webhook URL 按凭据保存，卡片只显示是否已保存；不配 secret 时通道仍可发通知但不开端口，移除或禁用通道会关闭端口。
-
-
-#### Telegram 通知
-
-Telegram 用你自己的 bot 发出 Bot 被要求发送的消息。
-
-1. 打开 [@BotFather](https://t.me/BotFather)，发送 `/newbot`，复制它给你的 token。
-2. 设置 → **连接器** → **Telegram**：粘贴 token，点 **Connect**。Telegram 接受 token 后，卡片上会显示 bot 的 username。
-3. 在 Telegram 里先给你的新 bot 发一条任意消息，然后点 **Test message**。连接器会找到这个私聊并向它发送一条测试消息。
-4. 如果 bot 收到多个 chat，或者你想发给群：在卡片上手动填 chat id（数字，群是负数），再点一次 **Test message**。留空会清除它。
-
-连接完成后，Bot 用 `notify_telegram(text)` 发消息，最多 4,096 字符。token 只放在密钥里，不会出现在 view、团队文件或日志中。
+要注意，隐私 bot 不能作为 main bot，也不能进群聊。这道隔离只防团队里的其他 bot，不是系统沙箱：如果给了它终端命令或联网权限，它仍然能读写系统文件或联网，模型服务商也会收到对话内容。
 
 ### 本地 Agent
 
-你已经在用的编程 Agent CLI（Devin CLI、Claude Code、Codex CLI、OpenCode 和其他 ACP Agent）可以直接当 Bot 用。设置 → **本地 Agent** 列出 DS Bot 找到的 CLI，在 Bot 的模型里选它即可。Bot 用的是 CLI 自己的登录和套餐，其他照常：私聊、群聊、交接、审批、记忆都一样。
+你电脑上已经在用的编程 Agent CLI（Claude Code、Codex CLI、Cursor CLI、Devin CLI、OpenCode、Gemini CLI 等）可以直接接入当 bot 用。新建 bot 时选本地 Agent（或在 bot 设置里切换），它就会直接用 CLI 自己的登录、套餐和模型，同时照常参与私聊、群聊、派活和记忆。
+
+不过有几点限制：本地 Agent 走的是 CLI 自己的工具和上下文，ds bot 里的共享能力和连接器不会传给它，切换运行方式也会新开一段对话；不支持 HTTP MCP 的自定义 CLI 拿不到建 bot、派活等团队工具。另外，Cursor CLI 会把最后一次切换的模型存成它自己的全局默认（`~/.cursor`），如果你在 ds bot 里给某个 Cursor bot 选了具体模型，其他用默认模型的 Cursor bot 和你终端里的 Cursor 都会跟着变，不想改全局默认的话保持“CLI 默认”即可（需要先登录 Cursor 才能看到模型列表）。
+
+### 浏览器
+
+每个 bot 有自己独立的浏览器，登录状态互不干扰，也支持从文件或本机浏览器导入 Cookie。在 设置 → 浏览器 里开启操作插件后，bot 可以自己打开和操作网页；发帖、上传、下载、删除需要你批准，遇到登录、验证码或付款会发卡片交给你处理，你随时可以接管再交还。
+
+浏览器功能仅桌面应用和 dsh Desktop 可用（dsh Web 没有），且只有桌面应用在退出后会保留网页登录状态、支持导入 Cookie。Windows 上 Chrome 和 Edge 开启了 v20 加密的新 Cookie 无法直接读取，需要先用浏览器扩展导出成文件再导入。
 
 ### 电脑操控
 
-Bot 可以在你允许的范围内使用电脑上的应用。在设置 → **电脑操控**里打开，再给每个 Bot 设档位和能用的应用。Bot 操作时你看得见，随时可以接管再交还；有些应用永远不交给 Bot。
+在 设置 → 电脑操控 里打开开关后，bot 可以在你允许的范围内操作电脑上的应用。你可以给每个 bot 单独设档位（只看、后台操作、可以动前台）和允许使用的应用，操作时屏幕顶部有指示条，随时能暂停或接管；系统设置、密码管理这类应用永远不会交给 bot。
+
+所有 bot 和你共用同一个桌面，同一个应用或前台鼠标同一时间只能有一个 bot 用。Windows 上 Chrome、Electron 这类应用在后台常收不到点击和输入，需要设为“可以动前台”，且无法操作管理员权限的应用；macOS 需要 14 及以上并开启辅助功能与屏幕录制权限；Linux 支持 X11，Wayland 受限。
+
+### IM
+
+在 设置 → IM 里，可以把 bot 或群聊连到微信、飞书、钉钉、企业微信、QQ、Telegram、Discord 或 Slack。配对账号后就能在聊天软件里直接对话、在群里 @ 机器人、回复提问卡和审批卡，电脑不需要公网地址或开放端口。
+
+只有你的电脑开着、ds bot 在运行时才能收发消息。微信只支持和扫码账号私聊，不支持群聊；微信和 QQ 受平台限制，只有在你发消息后的一段时间内能回复，超时后你在聊天软件里再发一句就能恢复。微信、QQ、钉钉没有卡片按钮，直接回复数字编号来选择；出于安全，密钥卡不能在聊天软件里填。
+
+### 连接器与能力
+
+在 设置 → 连接器 里，可以登录 GitHub、Gmail、QQ 邮箱、163 等邮箱和远程 MCP 服务，也能从 Claude Desktop、Cursor、VS Code 导入已有配置。凭据保存在 ds bot 的密钥里，bot 看不到明文，写的邮件默认也要你确认后才发。
+
+在 设置 → 能力 里，可以管理团队共享的 MCP 服务、技能和能力包，并在每个 bot 的设置里按需开启；bot 自己添加的本地命令需要先经你批准才能运行。
+
+### Office 文件
+
+bot 可以直接创建、检查和修改 Word（`.docx`）、PowerPoint（`.pptx`）和 Excel（`.xlsx`）文档，还能把页面渲染成图片来检查排版。桌面应用已经自带完整的运行环境，开箱即用；dsh Web 没有打包这套环境，只能检查和修改已有文档，从零建文件和渲染页面需要用桌面应用或 dsh Desktop。
 
 ### 用量
 
@@ -171,17 +125,9 @@ Bot 可以在你允许的范围内使用电脑上的应用。在设置 → **电
 
 ![用量页](docs/images/usage.zh.png)
 
-### IM
-
-你可以在聊天应用里直接和 Bot 对话。设置 → IM 可以把 Bot 连接到 Telegram、微信、飞书、钉钉、企业微信、QQ、Discord 或 Slack——配对、群聊、审批卡片和回复都能用，电脑不需要公网地址或开放端口。
-
-### Office 文件
-
-Bot 可以处理 Office 文档：创建和编辑 .docx、.pptx、.xlsx；按稳定 id 读文档结构；检查会让 Office 拒开的包缺陷；定点编辑（批注、修订、域、表格单元格）；幻灯片重排与复制；列出工作簿错误；渲染成图片并按拼图检查。桌面应用已全部带上；在 DSH Desktop 里用 DSH 自己的 Office 运行时加 DS Bot 的命令；在 DSH Web 里检查、校验、编辑类命令可用，从头建文件和渲染页面需要桌面应用或 DSH Desktop。
-
 ## 数据
 
-所有数据都在你自己的电脑上，在 dsh 主目录（默认 `~/.dsh`）的 `bot/` 和 `sessions/` 里。卸载插件不会删除这些数据。
+所有数据都在你自己的电脑上：桌面应用存在首次启动选定的位置（默认 `~/.ds-bot`），插件版存在 dsh 主目录（默认 `~/.dsh`）的 `bot/` 和 `sessions/` 里。卸载应用或插件不会删除这些数据。
 
 ## 开发
 

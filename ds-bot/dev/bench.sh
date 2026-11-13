@@ -33,6 +33,17 @@ fi
 
 alive() { [ -f "$HOME_DIR/$1.pid" ] && kill -0 "-$(cat "$HOME_DIR/$1.pid")" 2>/dev/null; }
 
+# macOS has no setsid; the shim is a real file because exec does not resolve
+# shell functions. perl does the same syscall and execs the command, so the pid
+# each process writes is still its own process group for stop_one.
+SETSID=setsid
+if ! command -v setsid >/dev/null 2>&1; then
+  mkdir -p "$HOME_DIR"
+  SETSID="$HOME_DIR/.setsid"
+  printf '#!/bin/sh\nexec perl -e '"'"'use POSIX; setsid; exec @ARGV'"'"' "$@"\n' > "$SETSID"
+  chmod +x "$SETSID"
+fi
+
 # Each process runs in its own session (setsid), so its pid is also its process group, which
 # outlives it: pnpm exits before the dsh it started. The process writes its own pid: the `$!`
 # of a background job is the subshell that runs setsid, not the session leader it forks, so
@@ -79,17 +90,6 @@ write_overlay() {
       printf -- '      - { id: deepseek-v4-pro, contextWindow: %s, maxTokens: 8000 }\n' "$CONTEXT_WINDOW"
     } >> "$overlay"
   fi
-  if [ "${DSH_BOARD_DEMO:-}" = 1 ]; then
-    [ "$NAME" = project-board ] || [ "$NAME" = project-board-workflow ] || [ "$NAME" = project-board-queue ] || [ "$NAME" = project-board-shell ] || { echo "board fixtures require the project-board bench" >&2; exit 1; }
-    [ "$(cat "$overlay")" != '[]' ] || : > "$overlay"
-    fixture="$PLUGIN/dev/board-bench.mjs"
-    case "$NAME" in project-board-queue|project-board-shell) fixture="$PLUGIN/dev/board-queue-bench.mjs" ;; esac
-    printf -- '- insert:\n    - id: board-demo\n      name: %s\n' "$fixture" >> "$overlay"
-  fi
-  if [ "$NAME" = board-preview ]; then
-    [ "$(cat "$overlay")" != '[]' ] || : > "$overlay"
-    printf -- '- id: ui-sidebar-browser\n  disabled: false\n' >> "$overlay"
-  fi
 }
 
 start() {
@@ -99,7 +99,7 @@ start() {
   if ! alive mock; then
     rm -f "$HOME_DIR/mock.pid"
     (cd "$PLUGIN" && MOCK_PORT="$MOCK_PORT" MOCK_DELAY_MS="${MOCK_DELAY_MS:-300}" MOCK_LOG="$HOME_DIR/mock.jsonl" \
-      exec setsid sh -c 'set -eu; echo $$ >"$1"; shift; exec "$@"' sh "$HOME_DIR/mock.pid" \
+      exec "$SETSID" sh -c 'set -eu; echo $$ >"$1"; shift; exec "$@"' sh "$HOME_DIR/mock.pid" \
       node dev/mock-llm.mjs "$HOME_DIR") </dev/null >"$HOME_DIR/mock.out" 2>&1 &
     # The mock writes its own pid just before it starts; wait for the file so a
     # status or stop right after start does not miss a mock still coming up.
@@ -109,15 +109,10 @@ start() {
   if ! alive web; then
     log="$HOME_DIR/web.log"
     rm -f "$log" "$HOME_DIR/web.pid"
-    # The browse-picker pin is a file of the harness *source* checkout; a DSH installed from
-    # npm has no apps/ directory, so it is only passed when it is there.
-    set -- --profile web
-    [ -f "$DSH_HARNESS/apps/web/tests/pin-browse-picker.overlay.yml" ] && \
-      set -- "$@" --patch apps/web/tests/pin-browse-picker.overlay.yml
-    set -- "$@" --patch "$HOME_DIR/bench.patch.yml" --no-open --port "$WEB_PORT"
     (cd "$DSH_HARNESS" && DSH_HOME="$HOME_DIR" DEEPSEEK_BASE_URL="http://127.0.0.1:$MOCK_PORT/v1" DEEPSEEK_API_KEY=mock-key \
-      exec setsid sh -c 'set -eu; echo $$ >"$1"; shift; exec "$@"' sh "$HOME_DIR/web.pid" \
-      pnpm -s dsh "$@") </dev/null >"$log" 2>&1 &
+      exec "$SETSID" sh -c 'set -eu; echo $$ >"$1"; shift; exec "$@"' sh "$HOME_DIR/web.pid" \
+      pnpm -s dsh --profile web --patch apps/web/tests/pin-browse-picker.overlay.yml --patch "$HOME_DIR/bench.patch.yml" \
+      --no-open --port "$WEB_PORT") </dev/null >"$log" 2>&1 &
     # The process writes its own pid just before dsh starts; wait for that file so a
     # start still in progress is not read as an exit.
     i=0

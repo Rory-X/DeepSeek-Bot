@@ -4,6 +4,10 @@
 //   live      work changed without a new revision: ask for `state` again
 //   message   a new entry of a Bot's own chat, as the `chat` endpoint returns it
 //   stream    the reply a Bot is writing: a start, its text as it comes, an end
+//   notice    something a client that is not looking should hear about (mobile.js)
+//   room      a group chat changed: ask for `room-chat` again
+// `hello` carries the team's revision and, for the mobile API, its version and the
+// latest notice, so a client that reconnects knows what it missed.
 import { ROUTE } from './constants.js'
 
 export const FEED_ROUTE = `${ROUTE}/feed`
@@ -24,6 +28,7 @@ export function install(rt) {
   // open stream, removed at `leave`, which is the only place a stream is taken away.
   /** @type {Map<ReadableStreamDefaultController<Uint8Array>, AbortSignal>} */
   const clients = new Map()
+  // Streams that asked for roster news only: they see saves, not chat or stream events.
   const rosterClients = new Set()
   const send = (controller, chunk) => {
     if ((controller.desiredSize ?? 0) < -MAX_QUEUED) {
@@ -38,19 +43,34 @@ export function install(rt) {
     }
   }
   const publish = (event, data) => {
+    for (const tap of taps) {
+      try { tap(event, data) } catch { /* taps are isolated from the feed */ }
+    }
+    if (clients.size === 0) return
     const chunk = encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     for (const controller of clients.keys()) {
       if (!rosterClients.has(controller) || event === 'revision') send(controller, chunk)
     }
   }
 
+  // Non-SSE listeners (the phone link) get every event through a tap; a tap is
+  // isolated so a slow or throwing listener never hurts SSE clients.
+  const taps = new Set()
+  rt.feedTap = (listener) => { taps.add(listener); return () => taps.delete(listener) }
+  const listening = () => clients.size > 0 || taps.size > 0
+  // A roster-only stream is not a window: without a full stream or a tap there is no one
+  // to hear about chat, streams or live status.
+  const fullListening = () => taps.size > 0 || clients.size > rosterClients.size
   const offSaved = rt.onSaved(() => {
-    if (clients.size > 0) publish('revision', { revision: state.revision })
+    if (listening()) publish('revision', { revision: state.revision })
   })
+  rt.publishFeed = (event, data) => {
+    if (listening()) publish(event, data)
+  }
 
   let liveTimer
   const live = () => {
-    if (clients.size === rosterClients.size || liveTimer !== undefined) return
+    if (!fullListening() || liveTimer !== undefined) return
     liveTimer = setTimeout(() => {
       liveTimer = undefined
       publish('live', {})
@@ -61,21 +81,20 @@ export function install(rt) {
   })
 
   ctx.on('session/event', (session, event) => {
-    if (clients.size === rosterClients.size) return
+    if (!fullListening()) return
     const botId = rt.chatOwners.get(session.id)
     if (botId === undefined) return
     for (const item of rt.displayItems(session.id, [event])) publish('message', { botId, sessionId: session.id, item })
     if (event.type === 'tool/call') live()
   })
 
-  // Attempts being streamed, by id. A turn with nothing of its own to show (a stop
-  // acknowledgement, a part's opening line) is hidden from the chat, so its text is
-  // not streamed.
+  // Attempts being streamed, by id. A turn that answers another Bot is hidden from the
+  // chat (turns.js marks it before the model is called), so its text is not streamed.
   const writing = new Map()
   ctx.on('agent/assistant-stream', ({ agent, frame }) => {
     if (frame.type === 'start') {
       const botId = rt.chatOwners.get(agent.id)
-      if (clients.size === rosterClients.size || botId === undefined || (state.exchangeTurns[agent.id] ?? []).includes(frame.turn)) return
+      if (!fullListening() || botId === undefined || (state.exchangeTurns[agent.id] ?? []).includes(frame.turn)) return
       writing.set(frame.attemptId, { botId, sessionId: agent.id })
       publish('stream', { botId, sessionId: agent.id, attemptId: frame.attemptId, phase: 'start' })
       return
@@ -92,7 +111,7 @@ export function install(rt) {
   const leave = (controller) => {
     clients.delete(controller)
     rosterClients.delete(controller)
-    if (clients.size === rosterClients.size) writing.clear()
+    if (!fullListening()) writing.clear()
     try { controller.close() } catch { /* already closed or errored */ }
   }
 
@@ -114,7 +133,8 @@ export function install(rt) {
             return
           }
           request.signal.addEventListener('abort', () => leave(own), { once: true })
-          send(own, encoder.encode(`event: hello\ndata: ${JSON.stringify({ revision: state.revision })}\n\n`))
+          const hello = { revision: state.revision, ...(rt.noticeCursor ? { api: rt.apiVersion, ...rt.noticeCursor() } : {}) }
+          send(own, encoder.encode(`event: hello\ndata: ${JSON.stringify(hello)}\n\n`))
         },
         cancel() { leave(controller) },
       })
