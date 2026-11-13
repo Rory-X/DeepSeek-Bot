@@ -1772,21 +1772,16 @@ export function install(rt) {
   const previewText = item => String(item.text ?? item.title ?? item.texts?.join(' ') ?? '').replace(/\s+/g, ' ').trim()
   const applyTail = (sessionId, item) => tails.set(sessionId, { lastAt: item.time ?? 0, preview: previewText(item) })
   const fillTail = async sessionId => {
-    // Newest page back until a row shows; chats almost always have it on page one.
+    // One page is enough for a row in almost every chat. Paging back further turns a cold
+    // start on a large team into a full session-store scan, so keep it to the first page.
     try {
-      let beforeSeq
-      for (let pages = 0; pages < 10; pages += 1) {
-        const page = await ctx.sessionController.page({
-          address: { kind: 'session', sessionId },
-          ...(beforeSeq !== undefined ? { beforeSeq } : {}),
-          maxMessages: EARLIER_PAGE,
-        }, AbortSignal.timeout(HISTORY_TIMEOUT_MS))
-        const events = page.records.map(record => record.event)
-        const last = [...displayItems(sessionId, events)].reverse().find(item => PREVIEWABLE.has(item.kind))
-        if (last !== undefined) { applyTail(sessionId, last); return }
-        if (!page.hasMore || events.length === 0) break
-        beforeSeq = events[0]?.seq
-      }
+      const page = await ctx.sessionController.page({
+        address: { kind: 'session', sessionId },
+        maxMessages: EARLIER_PAGE,
+      }, AbortSignal.timeout(HISTORY_TIMEOUT_MS))
+      const events = page.records.map(record => record.event)
+      const last = [...displayItems(sessionId, events)].reverse().find(item => PREVIEWABLE.has(item.kind))
+      if (last !== undefined) { applyTail(sessionId, last); return }
       tails.set(sessionId, { lastAt: 0, preview: '' })
     } catch { tails.set(sessionId, { lastAt: 0, preview: '' }) }
   }

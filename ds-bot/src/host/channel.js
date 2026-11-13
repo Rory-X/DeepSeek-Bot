@@ -72,12 +72,15 @@ export function install(rt) {
     // `waiting`: the Bot holds its greeting until the user picks its model or fixes
     // what failed it. `blocked`: the facts of a failure only the user can fix (turns.js).
     bots: Object.values(state.bots).map(({ segments, kickoff, ...bot }) => {
-      const tail = rt.chatTail(rt.chatOf(bot.id))
+      // The row's preview comes from the chat-summaries cache, which the live view below
+      // already carries. Reading every Bot's session pages here made a cold start index
+      // the whole session store, which pegged the CPU on a large team.
+      const summary = (rt.chatSummariesView?.() ?? {})[rt.chatOf(bot.id)]
       return {
         ...bot, sessionId: rt.chatOf(bot.id), parts: (segments ?? []).map(segment => segment.sessionId), lastActivity: rt.lastActivityOf(bot.id), ...(kickoff ? { waiting: true } : {}),
         // `engine` is the Bot's local-agent route, present only on abots.
         ...(rt.localAgentBadge?.(bot.model ?? bot.appliedModel) !== undefined ? { engine: rt.localAgentBadge(bot.model ?? bot.appliedModel) } : {}),
-        ...(tail ? { lastAt: tail.lastAt, preview: tail.preview } : {}),
+        ...(summary ? { lastAt: summary.updatedAt ?? 0, preview: summary.preview } : {}),
       }
     }),
     // `sessionId` is the group's own Session's current part, `ownParts` its earlier

@@ -527,3 +527,28 @@ test('room-chat keeps two group_relay calls that start at the same seq apart by 
   ])
 })
 
+
+test('building the state view does not read every Bot session page', async (t) => {
+  const { call, ctx, stop } = start()
+  t.after(stop)
+  await team(call)
+  const original = ctx.sessionController.page
+  let pages = 0
+  ctx.sessionController.page = async (...args) => { pages += 1; return original(...args) }
+  await call('state', {})
+  assert.equal(pages, 0)
+})
+
+test('a cold tail read stops at the first page', async (t) => {
+  const { call, ctx, rt, history, stop } = start()
+  t.after(stop)
+  const { chief } = await team(call)
+  const sessionId = (await call('state', {})).value.bots.find(bot => bot.id === chief).sessionId
+  history[sessionId] = Array.from({ length: 200 }, (_, index) => ({ seq: index + 1, time: index + 1, type: 'tool/call', data: { callId: `call-${index}` } }))
+  const original = ctx.sessionController.page
+  let pages = 0
+  ctx.sessionController.page = async (...args) => { pages += 1; return original(...args) }
+  rt.chatTail(sessionId)
+  await settle()
+  assert.equal(pages, 1)
+})
