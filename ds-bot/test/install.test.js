@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { createRuntime } from '../index.js'
+import { createRuntime, inject } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
 
 let rt
@@ -32,6 +32,10 @@ function start(state, { config = {}, services } = {}) {
 // Listeners run in registration order; the team tools are not in this list
 // because they are registered per Bot session scope, not globally — every module's
 // team tools go through rt.teamTools, so none of them appears as a global `tool` call.
+test('the plugin injects the jobs service its board uses', () => {
+  assert.ok(inject.includes('jobs'))
+})
+
 test('apply registers listeners and effects in a fixed order', (t) => {
   const { ctx, stop } = start()
   t.after(stop)

@@ -58,7 +58,7 @@ import * as localAgents from './src/host/local-agents/index.js'
 export { COLORS } from './src/host/constants.js'
 
 export const name = 'ds-bot'
-export const inject = ['llm', 'tools', 'systemPrompt', 'sessionController', 'sessions', 'sessionTitle', 'workspaceRegistry', 'connection']
+export const inject = ['llm', 'tools', 'systemPrompt', 'sessionController', 'sessions', 'sessionTitle', 'workspaceRegistry', 'connection', 'jobs']
 
 // Each module's install(rt) registers its listeners, tools, and effects, and puts on `rt`
 // the functions other modules call; they call them through `rt` at run time, never during
