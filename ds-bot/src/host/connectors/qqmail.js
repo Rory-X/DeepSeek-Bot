@@ -15,6 +15,7 @@ export const QQMAIL_HOST = 'imap.qq.com'
 export const QQMAIL_ADDRESS_SECRET = 'QQMAIL_ADDRESS'
 export const QQMAIL_SECRET = 'QQMAIL_AUTH_CODE'
 export const QQMAIL_TOOLS = ['qqmail_list_folders', 'qqmail_search', 'qqmail_list_messages', 'qqmail_get_message', 'qqmail_list_attachments', 'qqmail_read_attachment']
+export const QQMAIL_WRITE_TOOLS = ['qqmail_mark_read', 'qqmail_mark_unread', 'qqmail_move_messages', 'qqmail_delete_messages', 'qqmail_save_draft']
 
 // `signInQQMail` accepts both shapes: one `address:code` string (the card's older form) or
 // a stored code beside the stored address (what the two credential fields keep). The code
