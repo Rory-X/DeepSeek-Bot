@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { migrateConnectors } from '../src/host/connectors-migration.js'
 import { createMailShim } from '../src/host/connectors-mail-shim.js'
-import { GMAIL_TOOLS } from '../src/host/connectors/gmail.js'
+import { GMAIL_SEND_TOOLS, GMAIL_TOOLS, GMAIL_WRITE_TOOLS } from '../src/host/connectors/gmail.js'
 import { QQMAIL_TOOLS } from '../src/host/connectors/qqmail.js'
 
 const grant = resource => ({ kind: 'grant', payload: { version: 1, client: { id: 'client-1' }, resource, tokens: { access: `access-${resource}`, refresh: `refresh-${resource}`, expiresAt: Date.now() + 3_600_000 } } })
@@ -72,6 +72,9 @@ test('old tokens, grants and mail accounts migrate once and leave the old values
   assert.equal(state.connectors.github.readOnly, false)
   assert.equal(state.connectors.vercel.readOnly, true)
   assert.equal(state.connectors.cloudflare.oauth.resource, 'https://mcp.cloudflare.test')
+  assert.equal(state.connectors.cloudflare.readOnly, false)
+  assert.equal(state.connectors.neon.readOnly, false)
+  assert.equal(state.connectors['neon-2'].readOnly, true)
   assert.equal(state.connectors.neon.legacy.projectId, 'p1')
   assert.equal(state.connectors['neon-2'].legacy.role, 'member')
   for (const name of ['GITHUB_TOKEN', 'VERCEL_TOKEN', 'GMAIL_APP_PASSWORD', 'QQMAIL_AUTH_CODE']) assert.equal(store[name], defaultSecrets[name])
@@ -135,4 +138,35 @@ test('the Gmail and QQ Mail shims keep the old read tool names', () => {
   const qqmail = createMailShim({ provider: 'qqmail', credential: 'old', account: { mailbox: 'me@qq.com' }, redact: String })
   assert.equal(qqmail.compat, 'mail-shim')
   assert.deepEqual(qqmail.tools.map(tool => tool.name), QQMAIL_TOOLS)
+})
+
+test('the Gmail and QQ Mail shims add their old write tools only above the old read level', () => {
+  const fields = { GMAIL_ADDRESS: 'me@gmail.com', GMAIL_APP_PASSWORD: 'app-password' }
+  const read = createMailShim({ provider: 'gmail', secrets: fields, level: 'read', redact: String })
+  assert.deepEqual(read.tools.map(tool => tool.name), GMAIL_TOOLS)
+  read.close()
+  const write = createMailShim({ provider: 'gmail', secrets: fields, level: 'write', approve: async () => {}, redact: String })
+  assert.deepEqual(write.tools.map(tool => tool.name), [...GMAIL_TOOLS, ...GMAIL_WRITE_TOOLS, ...GMAIL_SEND_TOOLS])
+  write.close()
+
+  const qq = createMailShim({ provider: 'qqmail', secrets: { QQMAIL_ADDRESS: 'me@qq.com', QQMAIL_AUTH_CODE: 'code' }, level: 'read', redact: String })
+  assert.deepEqual(qq.tools.map(tool => tool.name), QQMAIL_TOOLS)
+  qq.close()
+})
+
+test('after migrating, switching back to legacy still has every old field and secret', async () => {
+  const state = legacyState()
+  const levels = Object.fromEntries(Object.entries(state.connectors).map(([id, saved]) => [id, saved.level]))
+  const { rt, store } = runtime({ state, secrets: defaultSecrets, grants: defaultGrants })
+  await migrateConnectors(rt)
+  for (const [id, level] of Object.entries(levels)) {
+    assert.equal(state.connectors[id].level, level)
+    assert.equal(state.connectors[id].legacy.level, level)
+  }
+  for (const [name, value] of Object.entries(defaultSecrets)) assert.equal(store[name], value)
+  // A second bridge start does not touch them again; a legacy start reads the same values.
+  const again = await migrateConnectors(rt)
+  assert.equal(again.changed, false)
+  assert.equal(state.connectors.gmail.level, 'read')
+  assert.equal(state.connectors.qqmail.level, 'write')
 })
