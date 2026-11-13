@@ -15,8 +15,8 @@ const BOT_TYPE = '3'
 const TEXT_LIMIT = 1800
 const POLL_TIMEOUT_MS = 35_000
 
-const qrBase = env => String(env.config?.qr ?? env.config?.api ?? QR_BASE).replace(/\/+$/, '/')
-const base = (env, fields) => String(fields.baseUrl || env.config?.api || QR_BASE).replace(/\/+$/, '/')
+const qrBase = env => String(env.config?.qr ?? env.config?.api ?? QR_BASE).replace(/\/+$/, '') + '/'
+const base = (env, fields) => String(fields.baseUrl || env.config?.api || QR_BASE).replace(/\/+$/, '') + '/'
 const baseInfo = () => ({ channel_version: 'ds-bot' })
 
 const logins = new Map() // loginId → { qrcode, baseUrl, expiresAt, result }
@@ -69,7 +69,7 @@ export default {
   // The token is proven by a short getupdates poll: ret 0 is a valid bot.
   async check(fields, env) {
     const answer = await request(env, base(env, fields), fields.token, 'getupdates', { get_updates_buf: '', timeout_ms: 0 }, 8_000)
-    if (Number(answer.ret) !== 0) throw fail(`WeChat answered ${answer.ret}`, { permanent: true })
+    if (Number(answer.ret ?? 0) !== 0) throw fail(`WeChat answered ${answer.ret}`, { permanent: true })
     return { account: { id: String(fields.ilinkBotId ?? ''), name: 'WeChat' } }
   },
 
@@ -131,7 +131,7 @@ export default {
             await sleep(3000)
             continue
           }
-          if (Number(answer.ret) !== 0) {
+          if (Number(answer.ret ?? 0) !== 0) {
             env.log?.warn?.('ds-bot im: weixin getupdates answered %s', answer.ret)
             if (Number(answer.ret) === 401 || Number(answer.ret) === 403) {
               handlers.onStatus({ state: 'error', error: `WeChat answered ${answer.ret}` })
