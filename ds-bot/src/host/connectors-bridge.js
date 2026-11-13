@@ -7,6 +7,7 @@
 // routes by connector id. The legacy API is kept at `rt.connectorCompat`, never registered
 // beside the bridge API: two views under one name would overwrite each other.
 import { createLegacyHost } from './connectors-legacy-host.js'
+import { migrateConnectors } from './connectors-migration.js'
 
 const rowsOf = view => {
   if (Array.isArray(view)) return { connectors: view, mail: undefined }
@@ -45,6 +46,15 @@ export function createBridgeHost(rt, { upstream, legacy }) {
 }
 
 export function install(rt) {
+  // P2: prepare the upstream namespaces once, without changing which host serves the
+  // tools. The migration is additive and safe to run on every bridge start.
+  if (rt.config?.connectorMigration !== false) {
+    // The store loads the team asynchronously; migrate once it is there, then persist the
+    // additive namespaces. A failed migration leaves the legacy state untouched.
+    void Promise.resolve(rt.load?.()).then(() => migrateConnectors(rt))
+      .then(result => result.changed ? rt.save?.() : undefined)
+      .catch(error => rt.warn?.('ds-bot: connector migration failed: %s', error))
+  }
   const legacy = createLegacyHost(rt)
   const host = createBridgeHost(rt, { legacy })
   // The old view stays reachable for compatibility endpoints only, under its own name.
