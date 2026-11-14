@@ -123,6 +123,8 @@ function convertHostErrors(pairs) {
 
 // src/client/locales/ja.js
 var JA = {
+  "Unread": "未読",
+  "Folder color": "フォルダーの色",
   "Android beta": "Android ベータ版",
   "Cannot reach the Server. Trying again…": "サーバーに接続できません。再試行しています…",
   "No phones yet": "スマートフォンはまだありません",
@@ -2394,6 +2396,8 @@ var DSH_JA = {
 
 // src/client/locales/ko.js
 var KO = {
+  "Unread": "읽지 않음",
+  "Folder color": "폴더 색상",
   "Android beta": "Android 베타",
   "Cannot reach the Server. Trying again…": "서버에 연결할 수 없습니다. 다시 시도하는 중…",
   "No phones yet": "아직 휴대폰이 없습니다",
@@ -4710,6 +4714,8 @@ var DSH_KO = {
 
 // src/client/locales/es.js
 var ES = {
+  "Unread": "No leído",
+  "Folder color": "Color de la carpeta",
   "Android beta": "Android beta",
   "Cannot reach the Server. Trying again…": "No se puede conectar con el servidor. Reintentando…",
   "No phones yet": "Aún no hay teléfonos",
@@ -7026,6 +7032,8 @@ var DSH_ES = {
 
 // src/client/locales/fr.js
 var FR = {
+  "Unread": "Non lu",
+  "Folder color": "Couleur du dossier",
   "Android beta": "Android bêta",
   "Cannot reach the Server. Trying again…": "Impossible de joindre le serveur. Nouvel essai…",
   "No phones yet": "Aucun téléphone pour l’instant",
@@ -9297,6 +9305,8 @@ var DSH_FR = {
 
 // src/client/locales/de.js
 var DE = {
+  "Unread": "Ungelesen",
+  "Folder color": "Ordnerfarbe",
   "Android beta": "Android-Beta",
   "Cannot reach the Server. Trying again…": "Server nicht erreichbar. Neuer Versuch…",
   "No phones yet": "Noch keine Telefone",
@@ -11839,6 +11849,8 @@ var ZH = {
   "Main Bot": "主 Bot",
   "Main Bots": "主 Bot",
   Working: "进行中",
+  "Folder color": "分组颜色",
+  Unread: "未读",
   "Waiting for your answer": "等你回答",
   "Waiting for {names}": "等 {names} 交回",
   "Unread activity": "有未读",
@@ -14444,12 +14456,13 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     },
     saveBotFolder: (payload) => after(call2("bot-folder-save", payload)),
     deleteBotFolder: (payload) => after(call2("bot-folder-delete", payload)),
+    colorBotFolder: (payload) => after(call2("bot-folder-color", payload)),
     pinBotFolder: (payload) => after(call2("bot-folder-pin", payload)),
     dissolveBotFolder: (payload) => after(call2("bot-folder-dissolve", payload)),
     ungroupBot: (id) => after(call2("bot-folder-assign", { name: "", botIds: [id] })),
     // The pane starts at the rail's edge, so a floating drawer would stick out from under it.
-    openNewChat: (mode, sectionId = null) => {
-      ui2.set((state) => ({ ...state, newChat: mode, newChatSection: sectionId ?? null, menu: null, palette: null, leftDrawer: false }));
+    openNewChat: (mode) => {
+      ui2.set((state) => ({ ...state, newChat: mode, menu: null, palette: null, leftDrawer: false }));
     },
     openPalette: (query = "") => {
       ui2.set((state) => ({ ...state, palette: { query, token: Date.now() }, newChat: null, menu: null }));
@@ -14535,11 +14548,6 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     quote: (sessionId, text) => ui2.set((state) => ({ ...state, quote: { sessionId, text, token: Date.now() } })),
     clearQuote: (token) => ui2.set((state) => state.quote?.token === token ? { ...state, quote: null } : state),
     setFlags: (id, flags) => after(call2("set-flags", { id, ...flags })),
-    saveSection: (payload) => after(call2("section-save", payload)),
-    reorderSections: (ids) => after(call2("section-order", { ids })),
-    deleteSection: (id) => after(call2("section-delete", { id })),
-    beginSectionRename: (id) => ui2.set((state) => ({ ...state, renameSection: id })),
-    endSectionRename: () => ui2.set((state) => state.renameSection ? { ...state, renameSection: null } : state),
     deleteRoom: (id) => after(call2("delete-room", { id })),
     openMenu: (menu) => {
       ui2.set((state) => ({ ...state, menu, palette: null }));
@@ -14548,7 +14556,7 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
       ui2.set((state) => state.menu ? { ...state, menu: null } : state);
     },
     closeOverlay: () => {
-      ui2.set((state) => ({ ...state, newChat: null, newChatSection: null, exchange: null, details: state.newChat || state.exchange ? state.details : null }));
+      ui2.set((state) => ({ ...state, newChat: null, exchange: null, details: state.newChat || state.exchange ? state.details : null }));
     },
     createBot: (payload) => after(call2("create-bot", payload)),
     // The avatar library: photos the user imported once, kept by the host.
@@ -25966,13 +25974,12 @@ function startModel(roster) {
   const usable = modelsFor(roster.models).filter((model) => model.needsKey !== true);
   return (usable.find((model) => model.ref === roster.prefs?.defaultBotModel) ?? usable.find((model) => model.ref === roster.defaultModel) ?? usable[0])?.ref ?? "";
 }
-function createPayload({ name, look, image, model, effort, brief, ownLook = false, sectionId }) {
+function createPayload({ name, look, image, model, effort, brief, ownLook = false }) {
   const badge = !image && !ownLook && isLocalRoute(model) ? agentAvatar(String(model).split("/")[0]) : void 0;
   const payload = { name, color: look.color, avatar: image ? { shape: look.shape, image } : badge !== void 0 ? { shape: look.shape, image: badge.image } : { shape: look.shape } };
   if (model) payload.model = model;
   if (effort !== void 0) payload.effort = effort;
   if (brief) payload.brief = brief;
-  if (sectionId) payload.sectionId = sectionId;
   return payload;
 }
 function avatarAfter(bot, target) {
@@ -29258,17 +29265,76 @@ var BOARD_CSS = [
   BOARD_SIDEBAR_CSS
 ].join("\n");
 
+// src/shared/bot-folders.js
+var FOLDER_COLORS = ["blue", "orange", "green", "violet", "rose"];
+var isFolderColor = (color) => FOLDER_COLORS.includes(color);
+
 // src/client/bot-folders.js
 var import_react40 = require("react");
-function BotFolderSection({ folder, roster, actions, useUi, renderRow }) {
+function FolderColorPicker({ color, onChange, disabled = false }) {
+  return (0, import_react40.createElement)(
+    "div",
+    { className: "bt-folder-colors", role: "group", "aria-label": t("Folder color") },
+    (0, import_react40.createElement)("span", { className: "bt-folder-colors-label" }, t("Folder color")),
+    (0, import_react40.createElement)("div", { className: "bt-folder-colors-options" }, [null, ...FOLDER_COLORS].map((value) => {
+      const label = value ? t(value[0].toUpperCase() + value.slice(1)) : t("None");
+      return (0, import_react40.createElement)(
+        "button",
+        {
+          key: value ?? "none",
+          type: "button",
+          className: "bt-folder-color-choice",
+          disabled,
+          "aria-label": label,
+          title: label,
+          "aria-pressed": (color ?? null) === value,
+          onClick: () => onChange(value)
+        },
+        (0, import_react40.createElement)("span", { style: { background: value ? inkFill(value) : "var(--bt-hover)" }, "aria-hidden": true })
+      );
+    }))
+  );
+}
+function folderStatus({ statuses, hasQuestion, hasApproval, hasRoomWork, markedUnread, activeSession }) {
+  if (hasQuestion || hasApproval) return "alert";
+  if (hasRoomWork || statuses.some(([, running]) => running)) return "working";
+  if (markedUnread || statuses.some(([id, , unread]) => unread && id !== activeSession)) return "unread";
+  return null;
+}
+function BotFolderSection({ folder, roster, actions, useUi, renderRow, rowProps = {}, markedUnread = {} }) {
   const key = `ds-bot:folder:${roster.workspaceId ?? roster.mainBotId}:${folder.id}`;
-  const [closed, setClosed] = (0, import_react40.useState)(false);
+  const [closed, setClosed] = (0, import_react40.useState)(folder.collapsed === true);
   const panelId = (0, import_react40.useId)();
   const menuOpen = useUi ? useUi((value) => value.menu?.kind === "bot-folder" && value.menu.id === folder.id) : false;
+  const bots = (0, import_react40.useMemo)(() => folder.botIds.map((id) => roster.byId?.[id] ?? roster.bots?.find((bot) => bot.id === id)).filter((bot) => bot && !bot.hidden), [folder.botIds, roster]);
+  const ids = bots.map(currentPart);
+  const activeSession = rowProps.useSessions ? rowProps.useSessions((list) => ids.find((id) => (list.byId[id]?.retainedBy?.mainView ?? 0) > 0) ?? "") : "";
+  const statusBits = rowProps.useSessionStatus ? rowProps.useSessionStatus((map) => JSON.stringify(ids.map((id) => [
+    id,
+    map.get(id)?.running === true,
+    map.get(id)?.completionUnread === true || map.get(id)?.pendingInteraction !== void 0
+  ]))) : "[]";
+  const workBits = rowProps.useWork ? rowProps.useWork((work) => {
+    const botIds = new Set(folder.botIds);
+    const approval = (work.approvals ?? []).some((item) => botIds.has(item.botId));
+    const roomWork = Object.values(work.rooms ?? {}).some((list) => list.some((item) => botIds.has(item.botId)));
+    return `${approval ? 1 : 0}|${roomWork ? 1 : 0}`;
+  }) : "0|0";
+  const [hasApproval, hasRoomWork] = workBits.split("|").map((value) => value === "1");
+  const status = folderStatus({
+    statuses: JSON.parse(statusBits),
+    hasApproval,
+    hasRoomWork,
+    activeSession,
+    hasQuestion: bots.some((bot) => roster.questions?.[currentPart(bot)] !== void 0),
+    markedUnread: bots.some((bot) => markedUnread[bot.id] && currentPart(bot) !== activeSession)
+  });
+  const statusLabel = status === "alert" ? t("Waiting for you") : status === "working" ? t("Working") : status === "unread" ? t("Unread") : "";
   (0, import_react40.useEffect)(() => {
     const read = () => {
       try {
-        setClosed(localStorage.getItem(key) === "closed");
+        const value = localStorage.getItem(key);
+        setClosed(value === null ? folder.collapsed === true : value === "closed");
       } catch {
       }
     };
@@ -29287,23 +29353,51 @@ function BotFolderSection({ folder, roster, actions, useUi, renderRow }) {
     } catch {
     }
   };
+  const openMenu = (event) => {
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    actions.openMenu({ kind: "bot-folder", id: folder.id, x: rect.right, y: rect.bottom, align: "end" });
+  };
+  const statusMark = status ? (0, import_react40.createElement)("span", { className: "bt-bot-folder-status", "data-kind": status, role: "img", title: statusLabel, "aria-label": statusLabel }, status === "alert" ? "?" : null) : null;
+  const marker = folder.color ? (0, import_react40.createElement)("span", { className: "bt-bot-folder-color", style: { background: inkFill(folder.color) }, "aria-hidden": true }) : null;
+  const rail = rowProps.wide === false;
   return (0, import_react40.createElement)(
     "section",
-    { className: "bt-bot-folder", "data-bot-folder-id": folder.id },
-    (0, import_react40.createElement)(
+    { className: `bt-bot-folder${rail ? " bt-bot-folder-rail" : ""}`, "data-bot-folder-id": folder.id, "data-collapsed": closed },
+    rail ? (0, import_react40.createElement)(
+      "div",
+      { className: "bt-bot-folder-rail-head" },
+      (0, import_react40.createElement)(
+        "button",
+        { type: "button", className: "bt-bot-folder-rail-toggle", "aria-label": statusLabel ? `${folder.name}: ${statusLabel}` : folder.name, title: folder.name, "aria-expanded": !closed, "aria-controls": panelId, onClick: toggle, onContextMenu: openMenu },
+        marker,
+        bots.length > 1 ? (0, import_react40.createElement)(RoomAvatar, { room: { id: folder.id, name: folder.name, members: bots.map((bot) => bot.id) }, roster, size: 38 }) : bots.length === 1 ? (0, import_react40.createElement)(BotMark, { bot: bots[0], size: 36 }) : (0, import_react40.createElement)(FolderIcon),
+        statusMark
+      ),
+      (0, import_react40.createElement)("button", { type: "button", className: "bt-bot-folder-edit", "aria-label": t("Folder {name} actions", { name: folder.name }), onClick: openMenu }, (0, import_react40.createElement)(DotsIcon))
+    ) : (0, import_react40.createElement)(
       "div",
       { className: "bt-bot-folder-head" },
       (0, import_react40.createElement)(
         "button",
-        { type: "button", className: "bt-bot-folder-toggle", "aria-expanded": !closed, "aria-controls": panelId, onClick: toggle, title: folder.name },
+        { type: "button", className: "bt-bot-folder-toggle", "aria-expanded": !closed, "aria-controls": panelId, onClick: toggle, onContextMenu: openMenu, title: folder.name },
+        marker,
         (0, import_react40.createElement)("span", { className: "bt-bot-folder-name" }, folder.name),
         folder.pinned ? (0, import_react40.createElement)("span", { className: "bt-bot-folder-pin", "aria-hidden": true, title: t("Pinned") }, (0, import_react40.createElement)(PinMarkIcon)) : null,
+        closed ? (0, import_react40.createElement)(
+          "span",
+          { className: "bt-bot-folder-preview" },
+          bots.length ? (0, import_react40.createElement)(
+            "span",
+            { className: "bt-bot-folder-pile", "aria-hidden": true },
+            bots.slice(0, 3).map((bot) => (0, import_react40.createElement)("span", { key: bot.id, className: "bt-bot-folder-pile-item" }, (0, import_react40.createElement)(BotMark, { bot, size: 18 }))),
+            bots.length > 3 ? (0, import_react40.createElement)("span", { className: "bt-bot-folder-more" }, `+${bots.length - 3}`) : null
+          ) : null,
+          statusMark
+        ) : null,
         (0, import_react40.createElement)("span", { className: "bt-bot-folder-chevron", "data-open": !closed || void 0 }, (0, import_react40.createElement)(ChevronRightIcon))
       ),
-      (0, import_react40.createElement)("button", { type: "button", className: "bt-bot-folder-edit", "aria-label": t("Folder {name} actions", { name: folder.name }), title: t("Folder {name} actions", { name: folder.name }), "aria-haspopup": "menu", "aria-expanded": menuOpen, onClick: (event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        actions.openMenu({ kind: "bot-folder", id: folder.id, x: rect.right, y: rect.bottom, align: "end" });
-      } }, (0, import_react40.createElement)(DotsIcon))
+      (0, import_react40.createElement)("button", { type: "button", className: "bt-bot-folder-edit", "aria-label": t("Folder {name} actions", { name: folder.name }), title: t("Folder {name} actions", { name: folder.name }), "aria-haspopup": "menu", "aria-expanded": menuOpen, onClick: openMenu }, (0, import_react40.createElement)(DotsIcon))
     ),
     (0, import_react40.createElement)(
       "div",
@@ -29321,6 +29415,7 @@ function BotFoldersDialog({ start, roster, actions }) {
   const [folderId, setFolderId] = (0, import_react40.useState)(initial?.id ?? "");
   const [version, setVersion] = (0, import_react40.useState)(initial?.version);
   const [name, setName] = (0, import_react40.useState)(initial?.name ?? "");
+  const [color, setColor] = (0, import_react40.useState)(initial?.color ?? null);
   const [picked, setPicked] = (0, import_react40.useState)(initial?.botIds ?? (start.botId ? [start.botId] : []));
   const [query, setQuery] = (0, import_react40.useState)("");
   const [busy, setBusy] = (0, import_react40.useState)(false);
@@ -29343,6 +29438,7 @@ function BotFoldersDialog({ start, roster, actions }) {
     setFolderId(id);
     setVersion(folder?.version);
     setName(folder?.name ?? "");
+    setColor(folder?.color ?? null);
     setPicked([.../* @__PURE__ */ new Set([...folder?.botIds ?? [], ...start.botId ? [start.botId] : []])]);
     setError("");
   };
@@ -29361,7 +29457,7 @@ function BotFoldersDialog({ start, roster, actions }) {
   };
   const save = (event) => {
     event.preventDefault();
-    void run2(() => actions.saveBotFolder({ id: folderId || void 0, version, name, botIds: picked }));
+    void run2(() => actions.saveBotFolder({ id: folderId || void 0, version, name, color, botIds: picked }));
   };
   const wanted = query.trim().toLowerCase();
   const bots = roster.bots.filter((bot) => bot.id !== roster.mainBotId && `${bot.name} ${bot.role ?? ""}`.toLowerCase().includes(wanted));
@@ -29399,6 +29495,7 @@ function BotFoldersDialog({ start, roster, actions }) {
           folders.map((folder) => (0, import_react40.createElement)("option", { key: folder.id, value: folder.id }, folder.name))
         )),
         (0, import_react40.createElement)("label", { className: "bt-bot-folders-field" }, t("Folder name"), (0, import_react40.createElement)("input", { value: name, maxLength: 48, required: true, placeholder: "connector", onChange: (event) => setName(event.target.value) })),
+        (0, import_react40.createElement)(FolderColorPicker, { color, onChange: setColor, disabled: busy || Boolean(roster.readOnly) }),
         (0, import_react40.createElement)("label", { className: "bt-bot-folders-field" }, t("Folder members"), (0, import_react40.createElement)("input", { type: "search", value: query, placeholder: t("Search Bots"), onChange: (event) => setQuery(event.target.value) })),
         (0, import_react40.createElement)(
           "div",
@@ -29433,6 +29530,33 @@ var BOT_FOLDERS_CSS = `
 .bt-bot-folder-pin{display:flex;flex:none;color:var(--bt-ink-2)}
 .bt-bot-folder-pin svg{width:12px;height:12px}
 .bt-bot-folder-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-bot-folder-color{width:6px;height:6px;border-radius:50%;flex:none}
+.bt-bot-folder-preview{display:inline-flex;align-items:center;gap:7px;margin-left:auto;flex:none}
+.bt-bot-folder-preview+.bt-bot-folder-chevron{margin-left:0}
+.bt-bot-folder-pile{display:inline-flex;align-items:center;animation:bt-bot-folder-pile-in ${SPRING_POP.duration}ms ${SPRING_POP.easing}}
+.bt-bot-folder-pile-item{display:inline-flex;flex:none;border-radius:50%;background:var(--bt-sidebar);box-shadow:0 0 0 1.5px var(--bt-sidebar)}
+.bt-bot-folder-pile-item+.bt-bot-folder-pile-item{margin-left:-5px}
+.bt-bot-folder-more{font-size:11px;line-height:16px;color:var(--bt-ink-3);margin-left:4px}
+.bt-bot-folder-status{width:8px;height:8px;border-radius:50%;flex:none;background:var(--bt-accent)}
+.bt-bot-folder-status[data-kind=working]{background:var(--bt-green)}
+.bt-bot-folder-status[data-kind=alert]{width:12px;height:12px;display:inline-flex;align-items:center;justify-content:center;background:var(--bt-accent);color:var(--bt-accent-ink);font-size:9px;line-height:12px}
+.bt-bot-folder-rail-head{position:relative;display:flex;align-items:center;justify-content:center;min-height:58px}
+.bt-bot-folder-rail-toggle{display:flex;align-items:center;justify-content:center;position:relative;width:56px;height:56px;border:0;border-radius:16px;background:transparent;color:var(--bt-ink-2);cursor:pointer}
+.bt-bot-folder-rail-toggle:hover{background:var(--bt-hover)}
+.bt-bot-folder-rail-toggle .bt-bot-folder-color{position:absolute;left:2px;top:5px}
+.bt-bot-folder-rail-toggle .bt-bot-folder-status{position:absolute;right:3px;bottom:4px}
+.bt-bot-folder-rail-head .bt-bot-folder-edit{position:absolute;right:0;top:0;width:18px;height:18px}
+.bt-bot-folder-rail-toggle:focus-visible,.bt-folder-colors .bt-folder-color-choice:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-folder-colors{display:flex;flex-direction:column;gap:6px;padding:8px 0}
+.bt-menu .bt-folder-colors{padding:6px 10px}
+.bt-folder-colors-label{color:var(--bt-ink-2);font-size:12px}
+.bt-folder-colors-options{display:flex;align-items:center;gap:5px}
+.bt-folder-colors .bt-folder-color-choice{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid transparent;border-radius:50%;background:transparent;cursor:pointer;padding:0}
+.bt-folder-colors .bt-folder-color-choice span{width:17px;height:17px;border:1px solid var(--bt-line);border-radius:50%}
+.bt-folder-colors .bt-folder-color-choice[aria-pressed=true]{border-color:var(--bt-ink-2)}
+.bt-folder-colors .bt-folder-color-choice:disabled{opacity:.45;cursor:default}
+@keyframes bt-bot-folder-pile-in{from{opacity:0;transform:translateX(4px) scale(.88)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.bt-bot-folder-pile{animation:none}}
 .bt-bot-folder-toggle:hover,.bt-bot-folder-edit:hover{color:var(--bt-ink)}
 .bt-bot-folder-empty:hover{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-bot-folder-chevron{display:flex;flex:none;margin-left:auto}
@@ -29765,220 +29889,6 @@ function AgentRow({ agent, actions, useSessions, useSessionStatus, useUi, wide, 
     )
   );
 }
-function renderSidebarEntry(entry, rowProps, markedUnread, onDragStart) {
-  return entry.kind === "bot" ? (0, import_react41.createElement)(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, onDragStart }) : entry.kind === "room" ? (0, import_react41.createElement)(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, onDragStart }) : (0, import_react41.createElement)(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true, onDragStart });
-}
-function SectionBlock({ section, entries: entries2, rowProps, markedUnread, renaming, dropTarget, onDragStart, onDragOverSec, onDropSec }) {
-  const { roster, actions, useSessions, useSessionStatus, useWork, wide } = rowProps;
-  const input = (0, import_react41.useRef)(null);
-  (0, import_react41.useLayoutEffect)(() => {
-    if (!renaming) return;
-    input.current?.focus();
-    input.current?.select();
-  }, [renaming]);
-  const visibleEntries = entries2.filter((entry) => !entry.item.hidden || entry.kind === "bot" && isMainOf(roster, entry.item.id));
-  const botsInSec = (0, import_react41.useMemo)(() => {
-    const seen = /* @__PURE__ */ new Set();
-    const list = [];
-    for (const entry of visibleEntries) {
-      if (entry.kind === "bot") {
-        if (!seen.has(entry.item.id)) {
-          seen.add(entry.item.id);
-          list.push(entry.item);
-        }
-      } else if (entry.kind === "room") {
-        for (const memberId of entry.item.members ?? []) {
-          const bot = roster.byId[memberId];
-          if (bot && !seen.has(bot.id)) {
-            seen.add(bot.id);
-            list.push(bot);
-          }
-        }
-      }
-    }
-    return list;
-  }, [visibleEntries, roster.byId]);
-  const sessionIds = (0, import_react41.useMemo)(() => entries2.flatMap((entry) => entry.kind === "bot" ? [currentPart(entry.item)] : entry.kind === "room" ? [entry.item.sessionId ?? entry.item.id] : entry.item.sessions ?? []), [entries2]);
-  const activeSession = useSessions((list) => sessionIds.find((id) => (list.byId[id]?.retainedBy?.mainView ?? 0) > 0) ?? "");
-  const activeEntry = (0, import_react41.useMemo)(() => {
-    if (activeSession === "") return void 0;
-    return entries2.find((entry) => entry.kind === "bot" ? currentPart(entry.item) === activeSession : entry.kind === "room" ? (entry.item.sessionId ?? entry.item.id) === activeSession : (entry.item.sessions ?? []).includes(activeSession));
-  }, [entries2, activeSession]);
-  const statusBits = useSessionStatus((map) => JSON.stringify(sessionIds.map((id) => [
-    id,
-    map.get(id)?.running === true ? 1 : 0,
-    map.get(id)?.completionUnread === true || map.get(id)?.pendingInteraction !== void 0 ? 1 : 0
-  ])));
-  const workBits = useWork ? useWork((work) => {
-    const botIds = new Set(entries2.filter((e) => e.kind === "bot").map((e) => e.item.id));
-    const roomIds = new Set(entries2.filter((e) => e.kind === "room").map((e) => e.item.id));
-    const approval = (work.approvals ?? []).some((a) => botIds.has(a.botId) || roomIds.has(a.roomId));
-    const roomWorking = Object.entries(work.rooms ?? {}).some(([rId, list]) => roomIds.has(rId) && list.some((e) => e.botId !== void 0) || list.some((e) => botIds.has(e.botId)));
-    return `${approval ? 1 : 0}|${roomWorking ? 1 : 0}`;
-  }) : "0|0";
-  const parsedStatuses = JSON.parse(statusBits);
-  const [hasApproval, hasRoomWork] = workBits.split("|").map((v) => v === "1");
-  const hasQuestion = entries2.some((entry) => entry.kind === "bot" && roster.questions?.[currentPart(entry.item)] !== void 0);
-  const hasAlert = hasQuestion || hasApproval;
-  const hasWorking = hasRoomWork || parsedStatuses.some(([, run2]) => run2 === 1);
-  const hasUnread = parsedStatuses.some(([id, , unread]) => unread === 1 && id !== activeSession) || entries2.some((entry) => markedUnread[entry.item.id] === true && entry !== activeEntry);
-  const statusKind = hasAlert ? "alert" : hasWorking ? "working" : hasUnread ? "unread" : null;
-  const toggle = () => {
-    void Promise.resolve(actions.saveSection({ id: section.id, collapsed: !section.collapsed })).catch((error) => actions.reportError(error, "section"));
-  };
-  const openSecMenu = (kind, x, y) => actions.openMenu({ kind, id: section.id, x, y });
-  if (!wide) {
-    if (section.collapsed) {
-      const folderRoom = { id: section.id, name: section.name, members: botsInSec.map((bot) => bot.id) };
-      return (0, import_react41.createElement)(
-        "div",
-        { className: "bt-rail-sec", "data-sec-id": section.id },
-        (0, import_react41.createElement)(
-          "div",
-          { className: "bt-rail-sec-div", title: section.name, onClick: toggle },
-          (0, import_react41.createElement)("span", { className: "bt-rail-sec-pill", style: section.color ? { background: inkFill(section.color) } : void 0 })
-        ),
-        (0, import_react41.createElement)(
-          "button",
-          {
-            type: "button",
-            className: "bt-rail-folder",
-            "aria-label": section.name,
-            title: `${section.name} (${visibleEntries.length})`,
-            "aria-current": activeEntry ? "page" : void 0,
-            onClick: toggle,
-            onContextMenu: (event) => {
-              event.preventDefault();
-              openSecMenu("section", event.clientX, event.clientY);
-            }
-          },
-          botsInSec.length > 0 ? (0, import_react41.createElement)(RoomAvatar, { room: folderRoom, roster, size: 38 }) : (0, import_react41.createElement)(FolderIcon),
-          statusKind ? (0, import_react41.createElement)("span", { className: `bt-dot${statusKind === "alert" ? " bt-dot-wait" : ""}`, style: statusKind === "working" ? { background: "var(--bt-green)" } : void 0, "aria-hidden": true }) : null
-        )
-      );
-    }
-    return (0, import_react41.createElement)(
-      import_react41.Fragment,
-      null,
-      (0, import_react41.createElement)(
-        "div",
-        { className: "bt-rail-sec-div", "data-sec-id": section.id, title: section.name, onClick: toggle },
-        (0, import_react41.createElement)("span", { className: "bt-rail-sec-pill", style: section.color ? { background: inkFill(section.color) } : void 0 })
-      ),
-      entries2.map((entry) => renderSidebarEntry(entry, rowProps, markedUnread))
-    );
-  }
-  const commitRename = (keep) => {
-    const value = input.current?.value ?? "";
-    actions.endSectionRename();
-    if (!keep || value.trim() === "" || value.trim() === section.name) return;
-    void Promise.resolve(actions.saveSection({ id: section.id, name: value.trim() })).catch((error) => actions.reportError(error, "section-rename"));
-  };
-  const bodyEntries = section.collapsed && activeEntry ? entries2.filter((entry) => entry !== activeEntry) : entries2;
-  return (0, import_react41.createElement)(
-    "div",
-    {
-      className: "bt-sec",
-      "data-sec-id": section.id,
-      "data-collapsed": section.collapsed ? "true" : "false",
-      "data-drop": dropTarget === section.id ? "true" : void 0,
-      onDragOver: onDragOverSec ? (event) => onDragOverSec(event, section.id) : void 0,
-      onDrop: onDropSec ? (event) => onDropSec(event, section.id) : void 0
-    },
-    renaming ? (0, import_react41.createElement)(
-      "div",
-      { className: "bt-sec-edit" },
-      (0, import_react41.createElement)("input", {
-        ref: input,
-        defaultValue: section.name,
-        maxLength: 32,
-        "aria-label": t("Rename section"),
-        onKeyDown: (event) => {
-          if (event.nativeEvent.isComposing) return;
-          if (event.key === "Enter") commitRename(true);
-          else if (event.key === "Escape") commitRename(false);
-        },
-        onBlur: () => commitRename(true)
-      })
-    ) : (0, import_react41.createElement)(
-      "div",
-      { className: "bt-sec-head-wrap" },
-      (0, import_react41.createElement)(
-        "button",
-        {
-          type: "button",
-          className: "bt-sec-head",
-          "aria-expanded": !section.collapsed,
-          onClick: toggle,
-          onDoubleClick: (event) => {
-            event.stopPropagation();
-            actions.beginSectionRename(section.id);
-          },
-          onContextMenu: (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openSecMenu("section", event.clientX, event.clientY);
-          }
-        },
-        (0, import_react41.createElement)("span", { className: "bt-sec-chev", "aria-hidden": true }, (0, import_react41.createElement)(ChevronRightIcon)),
-        section.color ? (0, import_react41.createElement)("span", { className: "bt-sec-dot", style: { background: inkFill(section.color) }, "aria-hidden": true }) : null,
-        (0, import_react41.createElement)("span", { className: "bt-sec-title" }, section.name),
-        (0, import_react41.createElement)("span", { className: `bt-sec-count${!section.collapsed ? " bt-sec-count-hide" : ""}` }, visibleEntries.length),
-        (0, import_react41.createElement)(
-          "span",
-          { className: "bt-sec-tail" },
-          section.collapsed && botsInSec.length > 0 ? (0, import_react41.createElement)(
-            "span",
-            { className: "bt-sec-pile", "aria-hidden": true },
-            botsInSec.slice(0, 3).map((bot) => (0, import_react41.createElement)("span", { key: bot.id, className: "bt-sec-pile-item" }, (0, import_react41.createElement)(BotMark, { bot, size: 18 }))),
-            botsInSec.length > 3 ? (0, import_react41.createElement)("span", { className: "bt-sec-pile-more" }, `+${botsInSec.length - 3}`) : null
-          ) : null,
-          section.collapsed && statusKind ? (0, import_react41.createElement)("span", { className: "bt-sec-status", "data-kind": statusKind, "aria-hidden": true }, statusKind === "alert" ? "?" : null) : null
-        )
-      ),
-      (0, import_react41.createElement)(
-        "span",
-        { className: "bt-sec-acts" },
-        (0, import_react41.createElement)("button", {
-          type: "button",
-          className: "bt-sec-act",
-          "aria-label": t("Add to {name}", { name: section.name }),
-          title: t("Add to {name}", { name: section.name }),
-          onClick: (event) => {
-            event.stopPropagation();
-            const rect = event.currentTarget.getBoundingClientRect();
-            openSecMenu("section-add", rect.left, rect.bottom + 4);
-          }
-        }, (0, import_react41.createElement)(PlusIcon)),
-        (0, import_react41.createElement)("button", {
-          type: "button",
-          className: "bt-sec-act",
-          "aria-label": t("{name} actions", { name: section.name }),
-          title: t("{name} actions", { name: section.name }),
-          onClick: (event) => {
-            event.stopPropagation();
-            const rect = event.currentTarget.getBoundingClientRect();
-            openSecMenu("section", rect.left, rect.bottom + 4);
-          }
-        }, (0, import_react41.createElement)(DotsIcon))
-      )
-    ),
-    (0, import_react41.createElement)(
-      "div",
-      {
-        className: "bt-sec-body",
-        inert: section.collapsed ? true : void 0,
-        "aria-hidden": section.collapsed ? true : void 0
-      },
-      (0, import_react41.createElement)(
-        "div",
-        { className: "bt-sec-body-in" },
-        bodyEntries.map((entry) => renderSidebarEntry(entry, rowProps, markedUnread, onDragStart))
-      )
-    ),
-    section.collapsed && activeEntry ? (0, import_react41.createElement)("div", { className: "bt-sec-peek" }, renderSidebarEntry(activeEntry, rowProps, markedUnread, onDragStart)) : null
-  );
-}
 function useListGlide(listRef, layout, key) {
   const tops = (0, import_react41.useRef)({ layout, map: /* @__PURE__ */ new Map() });
   (0, import_react41.useLayoutEffect)(() => {
@@ -30030,7 +29940,6 @@ function TeamSidebar(props) {
   const listRef = (0, import_react41.useRef)(null);
   const roster = useRoster((value) => value);
   const markedUnread = useUi((value) => value.unread);
-  const renameSection = useUi((value) => value.renameSection);
   const leftDrawer = useUi((value) => value.leftDrawer === true);
   const details = useUi((value) => value.details ?? null);
   const view = useUi((value) => value.view ?? "details");
@@ -30074,43 +29983,13 @@ function TeamSidebar(props) {
   const mains = (0, import_react41.useMemo)(() => (roster.mainBotIds ?? []).map((id) => roster.byId[id]).filter(Boolean), [roster]);
   const main = mains[0] ?? roster.byId?.[roster.mainBotId];
   const atList = props.useNavLevel?.((value) => value === "list") ?? false;
-  const sections = roster.sections ?? [];
   const glideKey = (0, import_react41.useMemo)(
-    () => `${sections.map((s) => `${s.id}:${s.collapsed ? 1 : 0}`).join(",")}|${order.map((entry) => `${entry.item.id}:${entry.item.sectionId ?? ""}`).join(",")}`,
-    [sections, order]
+    () => order.map((entry) => entry.item.id).join(",") + "|" + (roster.botFolders ?? []).map((folder) => folder.id + ":" + folder.botIds.join(",")).join("|"),
+    [order, roster.botFolders]
   );
   useListGlide(listRef, wideContent, glideKey);
   useLandOnMainBot(roster, useSessions, actions);
   useReportReady(roster.ready, roster);
-  const [dragId, setDragId] = (0, import_react41.useState)(null);
-  const [dropTarget, setDropTarget] = (0, import_react41.useState)(null);
-  const onDragStart = (event, id) => {
-    setDragId(id);
-    event.dataTransfer?.setData?.("text/plain", id);
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-  };
-  const onDragOverSec = (event, secId) => {
-    if (!dragId) return;
-    event.preventDefault();
-    if (dropTarget !== secId) setDropTarget(secId);
-  };
-  const onDropSec = (event, secId) => {
-    event.preventDefault();
-    const id = dragId;
-    setDragId(null);
-    setDropTarget(null);
-    if (!id) return;
-    void Promise.resolve(actions.setFlags(id, { sectionId: secId })).catch((error) => actions.reportError(error, "section"));
-    if (secId && sections.find((s) => s.id === secId)?.collapsed) {
-      void Promise.resolve(actions.saveSection({ id: secId, collapsed: false })).catch(() => {
-      });
-    }
-  };
-  const createNewSection = () => {
-    void Promise.resolve(actions.saveSection({})).then((sec) => {
-      if (sec?.id) actions.beginSectionRename(sec.id);
-    }).catch((error) => actions.reportError(error, "section"));
-  };
   const openWidth = drag?.width ?? frameSnap.sidebarWidth;
   const ourWidth = shown === "rail" ? RAIL_WIDTH : openWidth;
   const pushed = mode === "open" ? openWidth : mode === "hidden" ? 0 : RAIL_WIDTH;
@@ -30331,7 +30210,6 @@ function TeamSidebar(props) {
     (0, import_react41.createElement)("span", { className: "bt-brand" }, (0, import_react41.createElement)(BrandMark, { size: 22 }), (0, import_react41.createElement)(BrandName)),
     (0, import_react41.createElement)(BoardEntry, { actions, pending: roster.boardPending ?? 0 }),
     (0, import_react41.createElement)(UpdateButton, { useUpdate: props.useUpdate, actions }),
-    (0, import_react41.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New section"), title: t("New section"), onClick: createNewSection }, (0, import_react41.createElement)(FolderIcon)),
     (0, import_react41.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("Search"), title: t("Search"), onClick: () => actions.openPalette() }, (0, import_react41.createElement)(SearchIcon)),
     (0, import_react41.createElement)("button", { type: "button", className: "bt-round", "aria-label": t("New…"), title: t("New…"), onClick: () => actions.openNewChat("new") }, (0, import_react41.createElement)(PlusIcon)),
     (0, import_react41.createElement)("button", { type: "button", className: "bt-round bt-side-collapse", "aria-label": t("Collapse sidebar"), title: t("Collapse sidebar"), onClick: onToggle }, (0, import_react41.createElement)(SidebarIcon))
@@ -30356,12 +30234,7 @@ function TeamSidebar(props) {
     { className: wideContent ? "bt-side" : "bt-side bt-rail", onKeyDown: typeToSearch },
     top,
     wideContent && roster.readOnly ? (0, import_react41.createElement)("div", { className: "bt-hint bt-read-only", role: "status" }, hostText(roster.readOnly)) : null,
-    (0, import_react41.createElement)(BotList, { listRef, mains, order, roster, markedUnread, rowProps, drag: { onDragStart, dragging: dragId, onDragEnd: () => {
-      setDragId(null);
-      setDropTarget(null);
-    }, onDragLeave: (event) => {
-      if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null);
-    }, dropTarget, onDragOverSec, onDropSec, renamingSection: renameSection } }),
+    (0, import_react41.createElement)(BotList, { listRef, mains, order, roster, markedUnread, rowProps }),
     foot
   );
   return (0, import_react41.createElement)(
@@ -30371,55 +30244,26 @@ function TeamSidebar(props) {
     shown === "hidden" ? null : (0, import_react41.createElement)(LeftColumn, { mode: shown, width: ourWidth, onGrip: startDrag, leaving }, content)
   );
 }
-function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTime, drag }) {
+function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTime }) {
   const stamp = (entry) => showTime ? relativeShort(entry.at) : void 0;
   const folders = splitBotFolders(order, roster.botFolders);
   const row = (entry) => entry.kind === "bot" ? (0, import_react41.createElement)(BotRow, { key: entry.item.id, ...rowProps, bot: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) }) : entry.kind === "room" ? (0, import_react41.createElement)(RoomRow, { key: entry.item.id, ...rowProps, room: entry.item, marked: markedUnread[entry.item.id] === true, time: stamp(entry) }) : (0, import_react41.createElement)(AgentRow, { key: entry.item.id, ...rowProps, agent: entry.item, marked: markedUnread[entry.item.id] === true });
   const tops = (mains ?? []).map((bot) => (0, import_react41.createElement)(BotRow, { key: bot.id, ...rowProps, bot, marked: markedUnread[bot.id] === true, time: void 0 }));
-  const sections = roster.sections ?? [];
-  const sectionSet = new Set(sections.map((section) => section.id));
-  const ungrouped = order.filter((entry) => !entry.item.sectionId || !sectionSet.has(entry.item.sectionId));
-  const ungroupedFolders = splitBotFolders(ungrouped, roster.botFolders);
   const folderRows = (folderList) => [
     folderList.pinned.map(row),
-    folderList.folders.map((folder) => (0, import_react41.createElement)(BotFolderSection, { key: folder.id, folder, roster, actions: rowProps.actions, useUi: rowProps.useUi, renderRow: row })),
+    folderList.folders.map((folder) => (0, import_react41.createElement)(BotFolderSection, { key: folder.id, folder, roster, actions: rowProps.actions, useUi: rowProps.useUi, renderRow: row, rowProps, markedUnread })),
     folderList.loose.map(row)
   ];
-  const dragProps = drag ?? {};
-  const groupedRows = sections.length > 0 ? [
-    (0, import_react41.createElement)("div", {
-      key: "ungrouped",
-      className: "bt-sec-ungrouped",
-      "data-dragging": dragProps.dragging ? "true" : void 0,
-      "data-drop": dragProps.dropTarget === "__none__" ? "true" : void 0,
-      onDragOver: (event) => dragProps.onDragOverSec?.(event, "__none__"),
-      onDrop: (event) => dragProps.onDropSec?.(event, null)
-    }, folderRows(ungroupedFolders)),
-    ...sections.map((section) => (0, import_react41.createElement)(SectionBlock, {
-      key: section.id,
-      section,
-      entries: order.filter((entry) => entry.item.sectionId === section.id),
-      rowProps,
-      markedUnread,
-      renaming: dragProps.renamingSection === section.id,
-      dropTarget: dragProps.dropTarget,
-      onDragStart: dragProps.onDragStart,
-      onDragOverSec: dragProps.onDragOverSec,
-      onDropSec: dragProps.onDropSec
-    }))
-  ] : null;
   return (0, import_react41.createElement)(
     "div",
     {
       ref: listRef,
       className: "bt-list",
       role: "region",
-      "aria-label": t("Bot list"),
-      onDragEnd: drag ? drag.onDragEnd : void 0,
-      onDragLeave: drag ? drag.onDragLeave : void 0
+      "aria-label": t("Bot list")
     },
     mains === void 0 || mains.length === 0 ? roster.ready ? null : (0, import_react41.createElement)("div", { className: "bt-hint" }, t("Setting up your Main Bot…")) : rowProps.wide ? mains.length === 1 ? tops[0] : (0, import_react41.createElement)(MainStrip, { count: mains.length }, tops) : tops,
-    rowProps.wide ? groupedRows ?? folderRows(folders) : ungrouped.map((entry) => renderSidebarEntry(entry, rowProps, markedUnread, dragProps.onDragStart)),
+    folderRows(folders),
     rowProps.wide ? (0, import_react41.createElement)("button", { type: "button", className: "bt-bot-folder-empty", onClick: () => rowProps.actions.openBotFolders() }, t("New Bot folder")) : null
   );
 }
@@ -31224,71 +31068,6 @@ ${BOT_FOLDERS_CSS}
 .bt-nav-page .bt-row{min-height:60px}
 .bt-nav-page .bt-tile-wrap{padding:8px 0 12px}
 .bt-row-time{flex:none;margin-left:auto;padding-left:8px;font-size:12px;line-height:18px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums}
-/* Sidebar sections: collapsible header with a 3D character pile and live status when
-   folded, active conversation peek, drag-and-drop highlight, and 88px rail cluster. */
-.bt-sec-ungrouped{display:flex;flex-direction:column;gap:3px;border-radius:10px;transition:min-height .14s ease,background-color .14s ease,box-shadow .14s ease}
-.bt-sec-ungrouped[data-dragging=true]:empty{min-height:28px;margin-bottom:2px;box-shadow:inset 0 0 0 1px var(--bt-line-2)}
-.bt-sec-ungrouped[data-drop=true]{background:color-mix(in srgb,var(--bt-accent) 9%,transparent);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--bt-accent) 65%,transparent)}
-.bt-sec{display:flex;flex-direction:column;margin-top:6px;border-radius:12px;transition:background-color .14s ease,box-shadow .14s ease}
-.bt-sec[data-drop=true]{background:color-mix(in srgb,var(--bt-accent) 9%,transparent);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--bt-accent) 65%,transparent)}
-.bt-sec-head-wrap{position:relative;display:flex;align-items:center}
-.bt-sec-head{display:flex;align-items:center;gap:6px;height:30px;padding:0 8px 0 6px;border:0;border-radius:8px;background:transparent;color:var(--bt-ink-2);font-family:var(--bt-font);font-size:12px;line-height:16px;font-weight:600;cursor:pointer;width:100%;text-align:left;transition:background-color .12s ease,color .12s ease}
-.bt-sec-head-wrap:hover .bt-sec-head{background:var(--bt-hover);color:var(--bt-ink)}
-.bt-sec-head:focus-visible{outline:2px solid var(--bt-accent);outline-offset:-2px}
-.bt-sec-chev{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:none;color:var(--bt-ink-3);transition:transform ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing},color .12s ease}
-.bt-sec-head-wrap:hover .bt-sec-chev{color:var(--bt-ink-2)}
-.bt-sec[data-collapsed=false] .bt-sec-chev{transform:rotate(90deg)}
-.bt-sec-chev svg{width:12px;height:12px}
-.bt-sec-dot{width:6px;height:6px;border-radius:50%;corner-shape:round;flex:none}
-.bt-sec-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
-.bt-sec-count{font-size:11px;line-height:16px;font-weight:500;color:var(--bt-ink-3);font-variant-numeric:tabular-nums;flex:none}
-.bt-sec-head-wrap:hover .bt-sec-count-hide{display:none}
-.bt-sec-tail{margin-left:auto;display:inline-flex;align-items:center;gap:6px;flex:none}
-.bt-sec-head-wrap:hover .bt-sec-tail{padding-right:44px}
-.bt-sec-pile{display:inline-flex;align-items:center;animation:bt-sec-pile-in ${SPRING_POP.duration}ms ${SPRING_POP.easing}}
-@keyframes bt-sec-pile-in{from{opacity:0;transform:translateX(6px) scale(.82)}to{opacity:1;transform:none}}
-.bt-sec-pile-item{display:inline-flex;border-radius:50%;corner-shape:round;background:var(--bt-sidebar);box-shadow:0 0 0 1.5px var(--bt-sidebar)}
-.bt-sec-pile-item+.bt-sec-pile-item{margin-left:-5px}
-.bt-sec-pile-more{font-size:11px;line-height:16px;font-weight:600;color:var(--bt-ink-3);margin-left:3px;font-variant-numeric:tabular-nums}
-.bt-sec-status{width:8px;height:8px;border-radius:50%;corner-shape:round;flex:none}
-.bt-sec-status[data-kind=working]{background:var(--bt-green);box-shadow:0 0 0 2px color-mix(in srgb,var(--bt-green) 22%,transparent)}
-.bt-sec-status[data-kind=alert]{width:12px;height:12px;background:var(--bt-accent);color:var(--bt-accent-ink);font-size:8.5px;line-height:12px;font-weight:600;display:inline-flex;align-items:center;justify-content:center}
-.bt-sec-status[data-kind=unread]{background:var(--bt-accent)}
-.bt-sec-acts{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:none;align-items:center;gap:2px}
-.bt-sec-head-wrap:hover .bt-sec-acts,.bt-sec-acts:focus-within{display:inline-flex}
-.bt-sec-act{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--bt-ink-3);cursor:pointer;transition:background-color .12s ease,color .12s ease,transform ${SPRING_TAP.duration}ms ${SPRING_TAP.easing}}
-.bt-sec-act:hover{background:var(--bt-active);color:var(--bt-ink)}
-.bt-sec-act:active{transform:scale(.9)}
-.bt-sec-act:focus-visible{outline:2px solid var(--bt-accent);outline-offset:-2px}
-.bt-sec-act svg{width:13px;height:13px}
-.bt-sec-edit{display:flex;align-items:center;height:30px;padding:0 4px}
-.bt-sec-edit input{width:100%;height:24px;padding:0 8px;border:0;border-radius:6px;background:var(--bt-card);color:var(--bt-ink);font:inherit;font-size:12px;line-height:16px;font-weight:600;outline:none;box-shadow:inset 0 0 0 1.5px var(--bt-accent)}
-.bt-sec-body{display:grid;grid-template-rows:1fr;transition:grid-template-rows ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
-.bt-sec[data-collapsed=true] .bt-sec-body{grid-template-rows:0fr}
-.bt-sec-body-in{overflow:hidden;min-height:0;display:flex;flex-direction:column;gap:3px;position:relative}
-.bt-sec[data-collapsed=false] .bt-sec-body-in{padding-top:2px}
-.bt-sec[data-collapsed=false]:hover .bt-sec-body-in::before{content:'';position:absolute;left:10px;top:6px;bottom:6px;width:1.5px;border-radius:999px;background:var(--bt-line-2);opacity:.55;pointer-events:none}
-.bt-sec-peek{margin-top:2px}
-.bt-rail-sec{display:flex;flex-direction:column;align-items:center;gap:4px;width:100%}
-.bt-rail-sec-div{display:flex;align-items:center;justify-content:center;width:100%;padding:5px 0 2px;cursor:pointer}
-.bt-rail-sec-pill{width:22px;height:3px;border-radius:999px;background:var(--bt-line-2);transition:width .14s ease,background-color .14s ease}
-.bt-rail-sec-div:hover .bt-rail-sec-pill{width:30px;background:var(--bt-ink-3)}
-.bt-rail-folder{position:relative;display:flex;align-items:center;justify-content:center;width:56px;height:56px;padding:0;border:0;border-radius:16px;background:color-mix(in srgb,var(--bt-ink) 5%,transparent);color:var(--bt-ink-2);box-shadow:inset 0 0 0 .5px var(--bt-line-2);cursor:pointer;transition:background-color .12s ease,transform ${SPRING_TAP.duration}ms ${SPRING_TAP.easing}}
-.bt-rail-folder:hover{background:var(--bt-hover);color:var(--bt-ink)}
-.bt-rail-folder:active{transform:scale(.95)}
-.bt-rail-folder:focus-visible{outline:2px solid var(--bt-accent);outline-offset:-2px}
-.bt-rail-folder[aria-current=page]{background:var(--bt-active);box-shadow:inset 0 0 0 1.5px var(--bt-accent)}
-.bt-menu-sub-head{padding:4px 8px 2px;font-size:11px;line-height:16px;font-weight:600;color:var(--bt-ink-3);user-select:none}
-.bt-menu-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:left}
-.bt-menu-hint{margin-left:auto;font-size:11px;line-height:16px;color:var(--bt-ink-3);flex:none}
-.bt-menu-check{margin-left:auto;color:var(--bt-accent);display:inline-flex;flex:none}
-.bt-menu-colors{display:flex;align-items:center;gap:6px;padding:4px 8px 6px}
-.bt-menu-color-dot{width:16px;height:16px;border-radius:50%;corner-shape:round;border:0;padding:0;cursor:pointer;box-shadow:inset 0 0 0 1px var(--bt-line-2)}
-.bt-menu-color-dot[aria-pressed=true]{outline:2px solid var(--bt-ink);outline-offset:1.5px}
-.bt-menu-color-dot:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
-.bt-sec-add-menu{max-width:260px}
-.bt-sec-add-list{display:flex;flex-direction:column;gap:2px;max-height:240px;overflow-y:auto}
-@media (prefers-reduced-motion:reduce){.bt-sec-body,.bt-sec-chev,.bt-sec-act,.bt-rail-folder{transition:none}.bt-sec-pile{animation:none}}
 `;
 
 // src/client/permission-picker.js
@@ -31646,7 +31425,7 @@ function CreateBot({ roster, actions, start, brief = "", onBack, canGoBack, onCr
     setError("");
     setBusy(true);
     try {
-      const bot = await actions.createBot(createPayload({ name: finalName, look, image, model: chosen, effort: local ? void 0 : effort, brief, ownLook, sectionId: start?.sectionId }));
+      const bot = await actions.createBot(createPayload({ name: finalName, look, image, model: chosen, effort: local ? void 0 : effort, brief, ownLook }));
       onCreated(bot);
     } catch (failure) {
       setError(failure?.message ?? String(failure));
@@ -40361,7 +40140,7 @@ ${shown}`, { axis: "y", ...QUICK_EDGES });
 
 // src/client/new-chat.js
 var import_react64 = require("react");
-function NewChat({ mode, sectionId = null, paneLeft, roster, actions }) {
+function NewChat({ mode, paneLeft, roster, actions }) {
   const [query, setQuery] = (0, import_react64.useState)("");
   const [picked, setPicked] = (0, import_react64.useState)([]);
   const [group, setGroup] = (0, import_react64.useState)(mode === "group");
@@ -40370,7 +40149,7 @@ function NewChat({ mode, sectionId = null, paneLeft, roster, actions }) {
   const [busy, setBusy] = (0, import_react64.useState)(false);
   const [error, setError] = (0, import_react64.useState)("");
   const [cursor, setCursor] = (0, import_react64.useState)(0);
-  const [draft, setDraft] = (0, import_react64.useState)(mode === "create" ? { name: "", fromList: false, sectionId } : null);
+  const [draft, setDraft] = (0, import_react64.useState)(mode === "create" ? { name: "", fromList: false } : null);
   const inputRef = (0, import_react64.useRef)(null);
   const close = () => actions.closeOverlay();
   useEscape(close);
@@ -40412,8 +40191,8 @@ function NewChat({ mode, sectionId = null, paneLeft, roster, actions }) {
       pick2(bot);
       return;
     }
-    if (bot.hidden || sectionId && bot.sectionId !== sectionId) {
-      await actions.setFlags(bot.id, { ...bot.hidden ? { hidden: false } : {}, ...sectionId ? { sectionId } : {} });
+    if (bot.hidden) {
+      await actions.setFlags(bot.id, { hidden: false });
     }
     if (message.trim()) await actions.send(bot.id, message.trim());
     actions.openSession(bot.id);
@@ -40422,7 +40201,7 @@ function NewChat({ mode, sectionId = null, paneLeft, roster, actions }) {
   const createBot = () => {
     if (busy) return;
     setError("");
-    setDraft({ name: query.trim() !== "" && !exact ? query.trim() : "", fromList: true, sectionId });
+    setDraft({ name: query.trim() !== "" && !exact ? query.trim() : "", fromList: true });
   };
   const created = (bot) => {
     close();
@@ -40432,7 +40211,7 @@ function NewChat({ mode, sectionId = null, paneLeft, roster, actions }) {
   const makeGroup = async () => {
     if (admin === null || picked.length === 0) return;
     const text = message.trim();
-    const room2 = await actions.createRoom([admin, ...picked], { admin, ...sectionId ? { sectionId } : {}, ...text ? {} : { greet: true } });
+    const room2 = await actions.createRoom([admin, ...picked], { admin, ...text ? {} : { greet: true } });
     if (text) await actions.send(room2.id, text);
     actions.openSession(room2.id);
     close();
@@ -40446,13 +40225,12 @@ function NewChat({ mode, sectionId = null, paneLeft, roster, actions }) {
     }
     if (text === "" || picked.length === 0) return;
     if (picked.length === 1) {
-      if (sectionId) await actions.setFlags(picked[0], { sectionId });
       await actions.send(picked[0], text);
       actions.openSession(picked[0]);
       close();
       return;
     }
-    const room2 = await actions.createRoom(picked, sectionId ? { sectionId } : {});
+    const room2 = await actions.createRoom(picked, {});
     await actions.send(room2.id, text);
     actions.openSession(room2.id);
     close();
@@ -41099,24 +40877,6 @@ function VoiceMode({ sessionId, paneLeft, roster, actions, useSessions, useSessi
 
 // src/client/context-menu.js
 var import_react67 = require("react");
-var SECTION_COLORS = ["blue", "orange", "green", "violet", "rose"];
-function sectionMoveItems(entry, roster, actions) {
-  const sections = roster.sections ?? [];
-  return [
-    ...sections.map((sec) => [
-      sec.name,
-      FolderIcon,
-      () => actions.setFlags(entry.id, { sectionId: entry.sectionId === sec.id ? null : sec.id }),
-      false,
-      entry.sectionId === sec.id
-    ]),
-    entry.sectionId ? [t("Remove from section"), FolderIcon, () => actions.setFlags(entry.id, { sectionId: null })] : null,
-    [t("Move to new section…"), PlusIcon, async () => {
-      const sec = await actions.saveSection({ items: [entry.id] });
-      if (sec?.id) actions.beginSectionRename(sec.id);
-    }]
-  ].filter(Boolean);
-}
 function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
   useEscape(() => actions.closeMenu());
   const ref = (0, import_react67.useRef)(null);
@@ -41164,10 +40924,14 @@ function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
           actions.closeMenu();
           void Promise.resolve(run2()).catch((error) => actions.reportError(error, "folder-menu"));
         }
-      }, (0, import_react67.createElement)(Icon), label))
+      }, (0, import_react67.createElement)(Icon), label)),
+      (0, import_react67.createElement)("div", { className: "bt-menu-sep", role: "separator" }),
+      (0, import_react67.createElement)(FolderColorPicker, { color: folder.color, disabled: Boolean(roster.readOnly), onChange: (color) => {
+        actions.closeMenu();
+        void Promise.resolve(actions.colorBotFolder({ id: folder.id, version: folder.version, color })).catch((error) => actions.reportError(error, "folder-color"));
+      } })
     );
   }
-  if (menu.kind === "section" || menu.kind === "section-add") return (0, import_react67.createElement)(SectionMenu, { menu, roster, actions, leaving });
   const bot = roster.byId[menu.id];
   const room2 = roster.roomsById[menu.id];
   const entry = bot ?? room2;
@@ -41182,7 +40946,6 @@ function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
       isTile ? null : [entry.pinned ? t("Unpin") : t("Pin"), PinIcon, () => actions.setFlags(menu.id, { pinned: !entry.pinned })],
       [t("Mark as Unread"), UnreadIcon, () => actions.markUnread(menu.id)]
     ],
-    isTile ? [] : sectionMoveItems(entry, roster, actions),
     [
       bot ? [t("Rename Bot"), PencilIcon, () => actions.renameBot(bot.id)] : null,
       bot ? [t("Edit Bot"), GearIcon, () => actions.openSettings("bots", bot.id)] : null,
@@ -41224,160 +40987,6 @@ function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
     ))
   );
 }
-function SectionMenu({ menu, roster, actions, leaving }) {
-  const ref = (0, import_react67.useRef)(null);
-  const trigger = (0, import_react67.useRef)(typeof document === "undefined" ? null : document.activeElement);
-  (0, import_react67.useEffect)(() => {
-    const onKey = (event) => {
-      stepMenuFocus(ref.current, event, trigger.current);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, []);
-  const [place, setPlace] = (0, import_react67.useState)({ left: menu.x, top: menu.y });
-  const tick = useViewport();
-  (0, import_react67.useLayoutEffect)(() => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return;
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, viewBottom() - box.height - 8)) });
-  }, [menu.x, menu.y, tick]);
-  const sections = roster.sections ?? [];
-  const index = sections.findIndex((sec2) => sec2.id === menu.id);
-  const sec = sections[index];
-  if (sec === void 0) return null;
-  if (menu.kind === "section-add") {
-    const candidates = [
-      ...roster.bots.filter((bot) => bot.id !== roster.mainBotId && !bot.hidden).map((bot) => ({ kind: "bot", item: bot })),
-      ...roster.rooms.filter((room2) => !room2.hidden).map((room2) => ({ kind: "room", item: room2 }))
-    ];
-    return (0, import_react67.createElement)(
-      "div",
-      { ref, className: "bt-menu bt-sec-add-menu", role: "menu", "aria-label": t("Add to {name}", { name: sec.name }), style: place, "data-leaving": leaving || void 0 },
-      (0, import_react67.createElement)("button", {
-        type: "button",
-        role: "menuitem",
-        onClick: () => {
-          actions.closeMenu();
-          actions.openNewChat("create", sec.id);
-        }
-      }, (0, import_react67.createElement)(PlusIcon), (0, import_react67.createElement)("span", { className: "bt-menu-label" }, t("Create new Bot"))),
-      (0, import_react67.createElement)("button", {
-        type: "button",
-        role: "menuitem",
-        onClick: () => {
-          actions.closeMenu();
-          actions.openNewChat("group", sec.id);
-        }
-      }, (0, import_react67.createElement)(PeopleIcon), (0, import_react67.createElement)("span", { className: "bt-menu-label" }, t("Create group chat"))),
-      candidates.length > 0 ? (0, import_react67.createElement)(
-        import_react67.Fragment,
-        null,
-        (0, import_react67.createElement)("div", { className: "bt-menu-sep", role: "separator" }),
-        (0, import_react67.createElement)("div", { className: "bt-menu-sub-head" }, t("Add existing")),
-        (0, import_react67.createElement)(
-          "div",
-          { className: "bt-sec-add-list" },
-          candidates.map(({ kind, item }) => {
-            const inside = item.sectionId === sec.id;
-            const otherSec = item.sectionId && !inside ? sections.find((s) => s.id === item.sectionId)?.name : void 0;
-            return (0, import_react67.createElement)(
-              "button",
-              {
-                key: item.id,
-                type: "button",
-                role: "menuitem",
-                onClick: () => {
-                  actions.closeMenu();
-                  void Promise.resolve(actions.setFlags(item.id, { sectionId: inside ? null : sec.id })).catch((error) => actions.reportError(error, "menu"));
-                }
-              },
-              kind === "room" ? (0, import_react67.createElement)(RoomAvatar, { room: item, roster, size: 18 }) : (0, import_react67.createElement)(BotMark, { bot: item, size: 18 }),
-              (0, import_react67.createElement)("span", { className: "bt-menu-label" }, item.name),
-              inside ? (0, import_react67.createElement)("span", { className: "bt-menu-check" }, (0, import_react67.createElement)(CheckIcon)) : otherSec ? (0, import_react67.createElement)("span", { className: "bt-menu-hint" }, otherSec) : null
-            );
-          })
-        )
-      ) : null
-    );
-  }
-  const move = (delta) => {
-    const next = sections.map((entry) => entry.id);
-    const target = index + delta;
-    if (target < 0 || target >= next.length) return;
-    const [picked] = next.splice(index, 1);
-    next.splice(target, 0, picked);
-    void Promise.resolve(actions.reorderSections(next)).catch((error) => actions.reportError(error, "menu"));
-  };
-  return (0, import_react67.createElement)(
-    "div",
-    { ref, className: "bt-menu", role: "menu", "aria-label": t("{name} actions", { name: sec.name }), style: place, "data-leaving": leaving || void 0 },
-    (0, import_react67.createElement)("button", {
-      type: "button",
-      role: "menuitem",
-      onClick: () => {
-        actions.closeMenu();
-        actions.beginSectionRename(sec.id);
-      }
-    }, (0, import_react67.createElement)(PencilIcon), (0, import_react67.createElement)("span", { className: "bt-menu-label" }, t("Rename section"))),
-    (0, import_react67.createElement)("button", {
-      type: "button",
-      role: "menuitem",
-      onClick: () => {
-        actions.closeMenu();
-        actions.openNewChat("create", sec.id);
-      }
-    }, (0, import_react67.createElement)(PlusIcon), (0, import_react67.createElement)("span", { className: "bt-menu-label" }, t("Create new Bot"))),
-    (0, import_react67.createElement)("div", { className: "bt-menu-sep", role: "separator" }),
-    (0, import_react67.createElement)("div", { className: "bt-menu-sub-head" }, t("Section color")),
-    (0, import_react67.createElement)(
-      "div",
-      { className: "bt-menu-colors" },
-      (0, import_react67.createElement)("button", {
-        type: "button",
-        className: "bt-menu-color-dot",
-        "aria-label": t("None"),
-        title: t("None"),
-        "aria-pressed": !sec.color,
-        style: { background: "var(--bt-hover)" },
-        onClick: () => {
-          actions.closeMenu();
-          void Promise.resolve(actions.saveSection({ id: sec.id, color: null })).catch((error) => actions.reportError(error, "menu"));
-        }
-      }),
-      SECTION_COLORS.map((color) => (0, import_react67.createElement)("button", {
-        key: color,
-        type: "button",
-        className: "bt-menu-color-dot",
-        "aria-label": t(color[0].toUpperCase() + color.slice(1)),
-        title: t(color[0].toUpperCase() + color.slice(1)),
-        "aria-pressed": sec.color === color,
-        style: { background: inkFill(color) },
-        onClick: () => {
-          actions.closeMenu();
-          void Promise.resolve(actions.saveSection({ id: sec.id, color })).catch((error) => actions.reportError(error, "menu"));
-        }
-      }))
-    ),
-    index > 0 ? (0, import_react67.createElement)("button", { type: "button", role: "menuitem", onClick: () => {
-      actions.closeMenu();
-      move(-1);
-    } }, (0, import_react67.createElement)(FolderIcon), (0, import_react67.createElement)("span", { className: "bt-menu-label" }, t("Move section up"))) : null,
-    index < sections.length - 1 ? (0, import_react67.createElement)("button", { type: "button", role: "menuitem", onClick: () => {
-      actions.closeMenu();
-      move(1);
-    } }, (0, import_react67.createElement)(FolderIcon), (0, import_react67.createElement)("span", { className: "bt-menu-label" }, t("Move section down"))) : null,
-    (0, import_react67.createElement)("div", { className: "bt-menu-sep", role: "separator" }),
-    (0, import_react67.createElement)("button", {
-      type: "button",
-      role: "menuitem",
-      className: "bt-danger",
-      onClick: () => {
-        actions.closeMenu();
-        void Promise.resolve(actions.deleteSection(sec.id)).catch((error) => actions.reportError(error, "menu"));
-      }
-    }, (0, import_react67.createElement)(TrashIcon), (0, import_react67.createElement)("span", { className: "bt-menu-label" }, t("Ungroup section")))
-  );
-}
 function AgentMenu({ menu, roster, actions, leaving }) {
   const ref = (0, import_react67.useRef)(null);
   const trigger = (0, import_react67.useRef)(typeof document === "undefined" ? null : document.activeElement);
@@ -41401,7 +41010,6 @@ function AgentMenu({ menu, roster, actions, leaving }) {
     [
       [agent.pinned ? t("Unpin") : t("Pin"), PinIcon, () => actions.setFlags(agent.id, { pinned: !agent.pinned })]
     ],
-    sectionMoveItems(agent, roster, actions),
     [
       [t("Remove DSH Agent"), TrashIcon, () => actions.removeAgent(agent.id), true]
     ]
@@ -43002,7 +42610,7 @@ function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useActivity
     null,
     ui2.botFolders ? (0, import_react_dom13.createPortal)((0, import_react70.createElement)(BotFoldersDialog, { key: `${ui2.botFolders.folderId ?? ""}:${ui2.botFolders.botId ?? ""}`, start: ui2.botFolders, roster, actions }), document.body) : null,
     pane ? (0, import_react_dom13.createPortal)((0, import_react70.createElement)(BotPanel, { pane, leaving: shown === null, room: layout.room, overlay: layout.panel === "overlay", roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages, useBrowserHolds }), document.body) : null,
-    ui2.newChat ? (0, import_react_dom13.createPortal)((0, import_react70.createElement)(NewChat, { key: `${ui2.newChat}:${ui2.newChatSection ?? ""}`, mode: ui2.newChat, sectionId: ui2.newChatSection ?? null, paneLeft: layout.column, roster, actions }), document.body) : null,
+    ui2.newChat ? (0, import_react_dom13.createPortal)((0, import_react70.createElement)(NewChat, { key: ui2.newChat, mode: ui2.newChat, paneLeft: layout.column, roster, actions }), document.body) : null,
     ui2.palette ? (0, import_react_dom13.createPortal)((0, import_react70.createElement)(CommandPalette, { key: ui2.palette.token, start: ui2.palette.query, token: ui2.palette.token, roster, actions, useSessions }), document.body) : null,
     ui2.exchange ? (0, import_react_dom13.createPortal)((0, import_react70.createElement)(ExchangeDialog, { pair: ui2.exchange, paneLeft: layout.column, at: ui2.exchangeAt ?? void 0, roster, actions }), document.body) : null,
     ui2.voice ? (0, import_react_dom13.createPortal)((0, import_react70.createElement)(VoiceMode, { key: ui2.voice, sessionId: ui2.voice, paneLeft: layout.column, roster, actions, useSessions, useSessionStatus }), document.body) : null,

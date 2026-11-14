@@ -61,7 +61,7 @@ You can do all your talking and work with one bot, in one window. You don't need
 
 Bots also have memory. A bot remembers what you like and uses it in later work. You can manage its memory on the bot's details page, or just tell the bot.
 
-Each bot can have its own working folder and permission preset — just tell the bot when you want to switch folders. While a bot is working, you can send a message to steer it right away, or type `/side` to ask a side question without interrupting its task; it can also draw charts, tables and forms in its replies, or run scheduled tasks. In the sidebar, you can group bots and group chats into collapsible sections by work.
+Each bot can have its own working folder and permission preset — just tell the bot when you want to switch folders. While a bot is working, you can send a message to steer it right away, or type `/side` to ask a side question without interrupting its task; it can also draw charts, tables and forms in its replies, or run scheduled tasks. The sidebar uses one Bot folder system: choose a folder color and see member avatars plus working, attention and unread indicators while folded. Existing Bot assignments in legacy sections migrate automatically.
 
 ![Bot details: model, memory, usage](docs/images/details.png)
 

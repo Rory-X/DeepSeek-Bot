@@ -1,10 +1,11 @@
+import { migrateSidebarSections } from './bot-folder-migration.js'
 // Store: the saved team (state.json), its migrations, the lock that keeps a second dsh
 // host on the same data from writing it, and the indexes that map a Session to the Bot
 // or group chat it belongs to.
 import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { copyFile, mkdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { LEGACY_THEMES, MAX_EXCHANGES, ROOM_MODES, SECTION_COLORS, SECTION_NAME_MAX, TEXT_KEPT } from './constants.js'
+import { LEGACY_THEMES, MAX_EXCHANGES, ROOM_MODES, TEXT_KEPT } from './constants.js'
 import { replaceFile } from './files.js'
 import { homeLock } from './home-lock.js'
 import { currentColor, headOf, normalize, unquote } from './text.js'
@@ -174,24 +175,7 @@ export function install(rt) {
     }
     state.mainBotIds = state.mainBotIds.filter(id => state.bots[id])
     if (!Array.isArray(state.privateArchives)) state.privateArchives = []
-    if (!Array.isArray(state.sections)) state.sections = []
-    else {
-      const seen = new Set()
-      state.sections = state.sections
-        .filter(sec => sec && typeof sec === 'object' && typeof sec.id === 'string' && sec.id !== '' && typeof sec.name === 'string' && sec.name.trim() !== '' && !seen.has(sec.id) && seen.add(sec.id))
-        .map(sec => ({
-          id: sec.id,
-          name: sec.name.trim().slice(0, SECTION_NAME_MAX),
-          ...(sec.collapsed === true ? { collapsed: true } : {}),
-          ...(SECTION_COLORS.includes(sec.color) ? { color: sec.color } : {}),
-        }))
-    }
-    const sectionIds = new Set(state.sections.map(sec => sec.id))
-    for (const entry of [...Object.values(state.bots), ...Object.values(state.rooms), ...Object.values(state.agents)]) {
-      if (entry.sectionId !== undefined && (typeof entry.sectionId !== 'string' || !sectionIds.has(entry.sectionId) || entry.id === state.mainBotIds[0])) {
-        delete entry.sectionId
-      }
-    }
+    if (migrateSidebarSections(state)) migrated = true
     // Teams from before the whale was stored at setup: their first Bot, while still a
     // Main Bot, gets it once wherever it has no look of its own. After that the whale is
     // an ordinary look the user can change, and it never passes to another Bot.

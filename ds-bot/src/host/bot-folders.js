@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { own } from './store.js'
+import { FOLDER_COLORS, isFolderColor } from '../shared/bot-folders.js'
 
 const invalid = message => Object.assign(new Error(message), { code: 'bot/invalid' })
 const keyOf = name => name.normalize('NFKC').toLowerCase()
@@ -14,6 +15,7 @@ export function folderView(state) {
   const used = new Set()
   return Object.values(state.botFolders ?? {}).filter(folder => folder && typeof folder.id === 'string' && typeof folder.name === 'string').map(folder => ({
     ...folder,
+    ...(folder.color !== undefined && !isFolderColor(folder.color) ? { color: undefined } : {}),
     botIds: (Array.isArray(folder.botIds) ? folder.botIds : []).filter(id => {
       if (!own(state.bots, id) || id === state.mainBotIds[0] || used.has(id)) return false
       used.add(id)
@@ -37,6 +39,12 @@ export function install(rt) {
       let folder = body.id ? own(folders, body.id) : undefined
       if (body.id && !folder) throw invalid('This Bot folder no longer exists.')
       if (body.version !== undefined && folder?.version !== body.version) throw invalid('This folder changed. Reopen it to review the latest members.')
+      if (body.color !== undefined && body.color !== null && body.color !== '' && !isFolderColor(body.color)) throw invalid('Choose a folder color from the palette.')
+      const setColor = target => {
+        if (body.color === undefined) return
+        if (body.color === null || body.color === '') delete target.color
+        else target.color = body.color
+      }
       const members = value => {
         if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !own(rt.state.bots, id))) throw invalid('Choose existing Bots for the folder.')
         if (value.includes(rt.state.mainBotIds[0])) throw invalid('The primary Main Bot stays at the top of the list.')
@@ -58,6 +66,7 @@ export function install(rt) {
             folders[folder.id] = folder
           }
           folder.name = name
+          setColor(folder)
           folder.botIds = kind === 'save' ? ids : [...new Set([...folder.botIds, ...ids])]
           folder.version += 1
         }
@@ -66,6 +75,11 @@ export function install(rt) {
           const keep = other.botIds.filter(id => !ids.includes(id))
           if (keep.length !== other.botIds.length) { other.botIds = keep; other.version += 1 }
         }
+      } else if (kind === 'color') {
+        if (body.color === undefined) throw invalid('Choose a folder color from the palette.')
+        if (!folder) throw invalid('Choose a Bot folder.')
+        setColor(folder)
+        folder.version += 1
       } else if (kind === 'pin') {
         if (!folder) throw invalid('Choose a Bot folder.')
         if (typeof body.pinned !== 'boolean') throw invalid('Choose whether the folder is pinned.')
@@ -106,12 +120,13 @@ export function install(rt) {
   }))
   rt.teamTools.push(defineTool({
     name: 'organize_bots',
-    description: 'Main Bot only. Organize existing Bots in sidebar folders based on their roles and work. assign creates or reuses a named folder and moves all specified Bots into it atomically; folder "" moves them out. A Bot belongs to at most one folder. rename changes a folder name; pin and unpin change its priority among folders; dissolve removes a folder even when populated, returning its Bots to normal list order; delete removes only an empty folder. These actions retain Bots, chats and their work. This never starts, stops, deletes, or messages a Bot and never creates a group chat.',
+    description: 'Main Bot only. Organize existing Bots in sidebar folders based on their roles and work. assign creates or reuses a named folder and moves all specified Bots into it atomically; folder "" moves them out. A Bot belongs to at most one folder. rename changes a folder name; color changes its marker (none clears it); pin and unpin change its priority among folders; dissolve removes a folder even when populated, returning its Bots to normal list order; delete removes only an empty folder. These actions retain Bots, chats and their work. This never starts, stops, deletes, or messages a Bot and never creates a group chat.',
     parameters: {
-      action: { type: 'string', required: true, enum: ['assign', 'rename', 'pin', 'unpin', 'dissolve', 'delete'] },
+      action: { type: 'string', required: true, enum: ['assign', 'rename', 'color', 'pin', 'unpin', 'dissolve', 'delete'] },
       folder: { type: 'string', required: true, description: 'Folder name. For assign, an empty string removes the Bots from their folders.' },
       bots: { type: 'array', items: { type: 'string' }, description: 'Exact Bot names or IDs from list_bots. Required for assign; [] creates an empty folder.' },
       new_name: { type: 'string', description: 'New folder name for rename.' },
+      color: { type: 'string', enum: ['none', ...FOLDER_COLORS], description: 'Folder marker color; none clears it. Used by color or assign.' },
     }, output,
     async execute(args, exec) {
       await rt.load()
@@ -129,7 +144,7 @@ export function install(rt) {
           return bot.id
         })
       }
-      const result = await mutate(args.action === 'unpin' ? 'pin' : args.action, { id: args.action === 'assign' ? undefined : folder.id, name: args.action === 'rename' ? args.new_name : folderName, botIds, pinned: args.action === 'pin' }, exec.agent.id)
+      const result = await mutate(args.action === 'unpin' ? 'pin' : args.action, { id: args.action === 'assign' ? undefined : folder.id, name: args.action === 'rename' ? args.new_name : folderName, botIds, color: args.color === 'none' ? null : args.color, pinned: args.action === 'pin' }, exec.agent.id)
       return JSON.stringify({ ok: true, folder: result })
     },
   }))

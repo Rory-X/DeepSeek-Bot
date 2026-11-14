@@ -8,11 +8,12 @@ import { runInNewContext } from 'node:vm'
 import { build } from 'esbuild'
 import { createRuntime } from '../index.js'
 import { fakeContext } from './fake-ctx.js'
+import { migrateSidebarSections } from '../src/host/bot-folder-migration.js'
 
 const PLUGIN = dirname(dirname(fileURLToPath(import.meta.url)))
 const { outputFiles } = await build({
   stdin: {
-    contents: "export { ContextMenu } from './src/client/context-menu.js'\nexport { TeamSidebar } from './src/client/sidebar.js'",
+    contents: "export { ContextMenu } from './src/client/context-menu.js'\nexport { TeamSidebar } from './src/client/sidebar.js'\nexport { BotFolderSection, FolderColorPicker, folderStatus } from './src/client/bot-folders.js'",
     resolveDir: PLUGIN,
   },
   bundle: true, format: 'cjs', platform: 'browser', write: false, logLevel: 'silent',
@@ -40,7 +41,7 @@ runInNewContext(outputFiles[0].text, {
   window: { innerWidth: 1280, innerHeight: 800, addEventListener() {}, removeEventListener() {} },
   document: { body: {}, documentElement: { hasAttribute: () => false }, addEventListener() {}, removeEventListener() {} },
 })
-const { ContextMenu, TeamSidebar } = mod.exports
+const { ContextMenu, BotFolderSection, FolderColorPicker, folderStatus } = mod.exports
 
 function start(saved) {
   const home = mkdtempSync(join(tmpdir(), 'ds-bot-sections-'))
@@ -93,236 +94,138 @@ const baseTeam = () => ({
   },
 })
 
-test('sections can be created, renamed, colored, collapsed, reordered, and ungrouped without deleting Bots', async (t) => {
-  const { call, stop } = start(baseTeam())
-  t.after(stop)
 
-  const created = await call('section-save', { name: '短视频矩阵', color: 'orange', items: ['writer', 'r1'] })
-  assert.equal(created.ok, true)
-  const sec1 = created.value
-  assert.equal(sec1.name, '短视频矩阵')
-  assert.equal(sec1.color, 'orange')
-
-  const created2 = await call('section-save', { name: '私域运营', color: 'green', items: ['editor'] })
-  assert.equal(created2.ok, true)
-  const sec2 = created2.value
-
-  let state = (await call('state', {})).value
-  assert.deepEqual(state.sections.map(s => s.name), ['短视频矩阵', '私域运营'])
-  assert.equal(state.bots.find(b => b.id === 'writer').sectionId, sec1.id)
-  assert.equal(state.rooms.find(r => r.id === 'r1').sectionId, sec1.id)
-  assert.equal(state.bots.find(b => b.id === 'editor').sectionId, sec2.id)
-
-  // Duplicate section name is refused
-  const clash = await call('section-save', { id: sec2.id, name: '短视频矩阵' })
-  assert.equal(clash.ok, false)
-
-  // Collapse, rename, and clear color
-  const updated = await call('section-save', { id: sec1.id, name: '短视频组', collapsed: true, color: null })
-  assert.equal(updated.ok, true)
-  assert.equal(updated.value.name, '短视频组')
-  assert.equal(updated.value.collapsed, true)
-  assert.equal(updated.value.color, undefined)
-
-  // Reorder sections
-  const reordered = await call('section-order', { ids: [sec2.id, sec1.id] })
-  assert.equal(reordered.ok, true)
-  assert.deepEqual(reordered.value.sections.map(s => s.id), [sec2.id, sec1.id])
-
-  // Move via set-flags
-  await call('set-flags', { id: 'writer', sectionId: sec2.id })
-  state = (await call('state', {})).value
-  assert.equal(state.bots.find(b => b.id === 'writer').sectionId, sec2.id)
-
-  // Ungrouping a section keeps all Bots and rooms and clears their sectionId
-  const del = await call('section-delete', { id: sec2.id })
-  assert.equal(del.ok, true)
-  assert.deepEqual(del.value.sections.map(s => s.id), [sec1.id])
-  assert.equal(del.value.bots.find(b => b.id === 'writer').sectionId, undefined)
-  assert.equal(del.value.bots.find(b => b.id === 'editor').sectionId, undefined)
+test('legacy sections migrate Bots and colors into one folder system and survive a restart', async t => {
+  const saved = baseTeam()
+  saved.sections = [{ id: 'old', name: 'Writing', color: 'orange', collapsed: true }, { id: 'empty', name: 'New section 2' }]
+  saved.bots.writer.sectionId = 'old'
+  saved.rooms.r1.sectionId = 'old'
+  const first = start(saved)
+  t.after(first.stop)
+  const state = (await first.call('state', { fast: true })).value
+  assert.deepEqual(state.sections, [])
+  assert.equal(state.botFolders.length, 1)
+  assert.deepEqual(state.botFolders[0].botIds, ['writer'])
+  assert.equal(state.botFolders[0].color, 'orange')
+  assert.equal(state.botFolders[0].collapsed, true)
+  const disk = JSON.parse(readFileSync(join(first.home, 'state.json'), 'utf8'))
+  assert.equal(disk.rooms.r1.name, saved.rooms.r1.name)
+  assert.deepEqual(disk.legacySidebarSections.find(s => s.id === 'old').roomIds, ['r1'])
+  assert.equal(disk.bots.writer.sectionId, undefined)
+  const second = start(disk)
+  t.after(second.stop)
+  assert.deepEqual((await second.call('state', { fast: true })).value.botFolders, state.botFolders)
 })
 
-test('a rejected section update leaves its name, color, and collapsed state unchanged', async (t) => {
-  const { call, stop, home } = start(baseTeam())
-  t.after(stop)
-
-  const { value: section } = await call('section-save', { name: 'Video', color: 'orange' })
-  const rejected = await call('section-save', {
-    id: section.id, name: 'Publishing', collapsed: true, color: 'invalid',
-  })
-  assert.equal(rejected.ok, false)
-  assert.equal(rejected.error.message, 'Unknown section color')
-  assert.deepEqual((await call('state', {})).value.sections, [section])
-
-  assert.equal((await call('set-flags', { id: 'writer', pinned: true })).ok, true)
-  const saved = JSON.parse(readFileSync(join(home, 'state.json'), 'utf8'))
-  assert.deepEqual(saved.sections, [section])
+test('existing fork membership and chosen colors win over legacy sections without duplicate Bots', () => {
+  const state = baseTeam()
+  state.botFolders = { ours: { id: 'ours', name: 'Team', botIds: ['writer'], color: 'blue', version: 4 } }
+  state.sections = [{ id: 'old', name: 'Writing', color: 'orange' }]
+  state.bots.writer.sectionId = 'old'
+  state.bots.editor.sectionId = 'old'
+  assert.equal(migrateSidebarSections(state), true)
+  assert.equal(state.botFolders.ours.color, 'blue')
+  assert.deepEqual(state.botFolders.ours.botIds, ['writer'])
+  const imported = Object.values(state.botFolders).find(f => f.id !== 'ours')
+  assert.deepEqual(imported.botIds, ['editor'])
+  assert.equal(imported.color, 'orange')
+  const before = structuredClone(state)
+  assert.equal(migrateSidebarSections(state), false)
+  assert.deepEqual(state, before)
 })
 
-test('first Main Bot never joins a section, and duplicating a Bot keeps its sectionId', async (t) => {
-  const { call, stop } = start(baseTeam())
-  t.after(stop)
-
-  const sec = (await call('section-save', { name: '研发组', items: ['chief', 'writer'] })).value
-  let state = (await call('state', {})).value
-  assert.equal(state.bots.find(b => b.id === 'chief').sectionId, undefined)
-  assert.equal(state.bots.find(b => b.id === 'writer').sectionId, sec.id)
-
-  // Duplicating writer keeps sectionId on the copy
-  const copy = (await call('duplicate-bot', { id: 'writer' })).value
-  assert.equal(copy.sectionId, sec.id)
-
-  // Promoting writer to first Main Bot clears its sectionId
-  await call('set-main', { id: 'writer', main: true, primary: true })
-  state = (await call('state', {})).value
-  assert.equal(state.mainBotId, 'writer')
-  assert.equal(state.bots.find(b => b.id === 'writer').sectionId, undefined)
+test('a legacy color enriches an existing fork folder and empty sections create no empty folders', () => {
+  const state = baseTeam()
+  state.botFolders = { ours: { id: 'ours', name: 'Team', botIds: ['writer'], version: 2 } }
+  state.sections = [{ id: 'old', name: 'Old', color: 'green' }, { id: 'empty', name: 'Empty' }]
+  state.bots.writer.sectionId = 'old'
+  state.bots.chief.sectionId = 'old'
+  migrateSidebarSections(state)
+  assert.equal(Object.keys(state.botFolders).length, 1)
+  assert.equal(state.botFolders.ours.color, 'green')
+  assert.equal(state.botFolders.ours.version, 3)
+  assert.deepEqual(state.botFolders.ours.botIds, ['writer'])
+  assert.equal(state.bots.chief.sectionId, undefined)
 })
 
-test('Main Bot tools create_bot, update_bot, create_group, update_group, and list_bots support sections', async (t) => {
-  const { call, tool, stop } = start(baseTeam())
-  t.after(stop)
-  const mainExec = { agent: { id: 'chief', session: { id: 'chief' } } }
-  const workerExec = { agent: { id: 'writer', session: { id: 'writer' } } }
-
-  // create_bot with section creates the section automatically
-  const createOut = await tool('create_bot').execute({
-    name: 'Designer',
-    role: 'UI',
-    instructions: 'Design UI.',
-    section: '短视频线',
-  }, mainExec)
-  assert.match(createOut, /Created Designer/)
-
-  let state = (await call('state', {})).value
-  const sec = state.sections.find(s => s.name === '短视频线')
-  assert.ok(sec)
-  assert.equal(state.bots.find(b => b.name === 'Designer').sectionId, sec.id)
-
-  // Non-Main Bot cannot move itself between sidebar sections
-  const denied = await tool('update_bot').execute({ section: '短视频线' }, workerExec)
-  assert.match(denied, /Only the user or a Main Bot can move/)
-
-  // Main Bot moves Writer and Video Room into the section
-  await tool('update_bot').execute({ bot: 'Writer', section: '短视频线' }, mainExec)
-  const groupOut = await tool('update_group').execute({ group: 'Video Room', section: '短视频线' }, mainExec)
-  assert.match(groupOut, /moved it to section "短视频线"/)
-
-  // list_bots shows section tags
-  const listed = await tool('list_bots').execute({}, mainExec)
-  assert.match(listed, /Writer \(Copy, section "短视频线"/)
-  assert.match(listed, /"Video Room" — members: .*section: 短视频线/)
-
-  // Clearing section with empty string
-  await tool('update_bot').execute({ bot: 'Writer', section: '' }, mainExec)
-  await tool('update_group').execute({ group: 'Video Room', section: '' }, mainExec)
-  state = (await call('state', {})).value
-  assert.equal(state.bots.find(b => b.id === 'writer').sectionId, undefined)
-  assert.equal(state.rooms.find(r => r.id === 'r1').sectionId, undefined)
-})
-
-test('loading state.json drops orphan sectionIds that point to missing sections', async (t) => {
-  const saved = {
-    ...baseTeam(),
-    sections: [{ id: 'sec-valid', name: 'Valid', collapsed: true, color: 'blue' }],
+test('retired mutation routes cannot create invisible sections or alter the Bot roster', async t => {
+  const app = start(baseTeam())
+  t.after(app.stop)
+  const before = (await app.call('state', { fast: true })).value
+  for (const endpoint of ['section-save', 'section-order', 'section-delete']) {
+    const response = await app.call(endpoint, { name: 'Invisible', items: ['writer'] })
+    assert.equal(response.ok, false)
+    assert.equal(response.error.code, 'bot/retired')
   }
-  saved.bots.writer.sectionId = 'sec-valid'
-  saved.bots.editor.sectionId = 'sec-missing'
-  saved.bots.chief.sectionId = 'sec-valid'
-  const { call, stop } = start(saved)
-  t.after(stop)
-
-  const state = (await call('state', {})).value
-  assert.equal(state.bots.find(b => b.id === 'writer').sectionId, 'sec-valid')
-  assert.equal(state.bots.find(b => b.id === 'editor').sectionId, undefined)
-  assert.equal(state.bots.find(b => b.id === 'chief').sectionId, undefined)
+  const after = (await app.call('state', { fast: true })).value
+  assert.deepEqual(after.sections, [])
+  assert.deepEqual(after.bots.map(b => b.id), before.bots.map(b => b.id))
 })
 
-test('section-add menu offers both creating a new Bot/group in the section and adding existing ones', async () => {
-  const opened = []
-  const flagged = []
-  const chief = { id: 'chief', name: 'Chief', createdAt: 1 }
-  const writer = { id: 'writer', name: 'Writer', sectionId: 'sec-1', createdAt: 2 }
-  const editor = { id: 'editor', name: 'Editor', createdAt: 3 }
-  const room = { id: 'r1', name: 'Video Room', members: ['writer', 'editor'], createdAt: 4 }
-  const roster = {
-    mainBotId: 'chief',
-    mainBotIds: ['chief'],
-    bots: [chief, writer, editor],
-    rooms: [room],
-    sections: [{ id: 'sec-1', name: '短视频矩阵', collapsed: true, color: 'orange' }],
-    byId: { chief, writer, editor },
-    roomsById: { r1: room },
-    agentsById: {},
-    exchangeTurns: {},
-    ready: true,
-  }
-  const actions = {
-    closeMenu() {},
-    openNewChat: (mode, secId) => opened.push([mode, secId]),
-    setFlags: (id, patch) => flagged.push([id, patch]),
-    reportError() {},
-  }
-  const tree = ContextMenu({
-    menu: { kind: 'section-add', id: 'sec-1', x: 100, y: 100 },
-    roster,
-    actions,
-  })
-  const buttons = []
-  const walk = (node) => {
-    if (Array.isArray(node)) { node.forEach(walk); return }
-    if (!node || typeof node !== 'object') return
-    if (typeof node.type === 'function' && node.type !== react.Fragment) {
-      walk(node.type(node.props ?? {}))
-      return
-    }
-    if (node.type === 'button' && node.props?.role === 'menuitem') buttons.push(node)
-    walk(node.props?.children)
-  }
-  walk(tree)
-  // 2 create buttons (Create new Bot, Create group chat) + 3 existing candidates (Writer, Editor, Video Room)
-  assert.equal(buttons.length, 5)
-  buttons[0].props.onClick()
-  buttons[1].props.onClick()
-  assert.deepEqual(opened, [['create', 'sec-1'], ['group', 'sec-1']])
+const nodes = (tree, predicate, out = []) => {
+  if (Array.isArray(tree)) { for (const node of tree) nodes(node, predicate, out); return out }
+  if (!tree || typeof tree !== 'object') return out
+  if (tree.type === FolderColorPicker) return nodes(FolderColorPicker(tree.props), predicate, out)
+  if (predicate(tree)) out.push(tree)
+  nodes(tree.props?.children, predicate, out)
+  return out
+}
 
-  // Writer is already in sec-1, so clicking toggles it out (null); Editor is not, so clicking moves it into sec-1
+test('folded fork folders show the color, three Bot avatars, overflow and aggregated working status', () => {
+  const bots = ['a', 'b', 'c', 'd'].map(id => ({ id, name: id, sessionId: id }))
+  const roster = { byId: Object.fromEntries(bots.map(b => [b.id, b])), bots, questions: {}, workspaceId: 'test' }
+  const tree = BotFolderSection({ folder: { id: 'folder', name: 'Team', botIds: bots.map(b => b.id), collapsed: true, color: 'orange', entries: bots.map(b => ({ kind: 'bot', item: b })) },
+    roster, actions: {}, renderRow: row => ({ type: 'div', props: { 'data-member': row.item.id } }),
+    rowProps: { wide: true, useSessions: pick => pick({ byId: {} }), useSessionStatus: pick => pick(new Map([['a', { running: true }]])), useWork: pick => pick({}) } })
+  assert.equal(nodes(tree, n => n.props?.className === 'bt-bot-folder-color').length, 1)
+  assert.equal(nodes(tree, n => n.props?.bot && n.props?.size === 18).length, 3)
+  assert.equal(nodes(tree, n => n.props?.className === 'bt-bot-folder-more')[0].props.children[0], '+1')
+  assert.equal(nodes(tree, n => n.props?.['data-kind'] === 'working').length, 1)
+  assert.equal(nodes(tree, n => n.props?.className === 'bt-bot-folder-rows')[0].props.hidden, true)
+  assert.equal(nodes(tree, n => n.props?.['data-member']).length, 4, 'rows stay mounted for live state')
+})
+
+test('folder status prioritizes questions and approvals, then working, then unread outside the active chat', () => {
+  const base = { statuses: [['a', false, true]], activeSession: 'a' }
+  assert.equal(folderStatus(base), null)
+  assert.equal(folderStatus({ ...base, activeSession: '' }), 'unread')
+  assert.equal(folderStatus({ ...base, hasRoomWork: true }), 'working')
+  assert.equal(folderStatus({ ...base, hasRoomWork: true, hasQuestion: true }), 'alert')
+  assert.equal(folderStatus({ ...base, hasApproval: true }), 'alert')
+})
+
+test('the folder palette supports choosing and clearing color, and disables edits for read-only teams', () => {
+  const picked = []
+  const tree = FolderColorPicker({ color: 'blue', onChange: color => picked.push(color) })
+  const buttons = nodes(tree, n => n.type === 'button')
+  assert.equal(buttons.length, 6)
+  assert.equal(buttons[1].props['aria-pressed'], true)
   buttons[2].props.onClick()
-  buttons[3].props.onClick()
-  assert.deepEqual(JSON.parse(JSON.stringify(flagged)), [['writer', { sectionId: null }], ['editor', { sectionId: 'sec-1' }]])
+  buttons[0].props.onClick()
+  assert.deepEqual(picked, ['orange', null])
+  assert.ok(nodes(FolderColorPicker({ color: null, onChange() {}, disabled: true }), n => n.type === 'button').every(n => n.props.disabled))
+})
 
-  // Collapsed section in TeamSidebar keeps the active conversation peeking out
-  // once, and marks the folded body inert + aria-hidden.
-  const sidebarTree = TeamSidebar({
-    wide: true,
-    actions: { ...actions, openSession: id => id, openAgent: id => id, openAgentSession: id => id, newAgentSession: id => id },
-    useRoster: pick => pick(roster),
-    useUi: pick => pick({ unread: {} }),
-    useRegistry: pick => pick({}),
-    useSessions: pick => pick({ ids: ['writer'], byId: { writer: { id: 'writer', retainedBy: { mainView: 1 } } } }),
-    useSessionStatus: pick => pick(new Map()),
-    useSessionRetainInfo: (id, pick) => pick(id === 'writer' ? { retainedBy: { mainView: 1 } } : {}),
-    useActivity: pick => pick({}),
-    useWork: pick => pick({}),
-    useUpdate: () => ({}),
-  })
-  let peekFound = false
-  let bodyInert = false
-  let writerRows = 0
-  const walkSidebar = (node) => {
-    if (Array.isArray(node)) { node.forEach(walkSidebar); return }
-    if (!node || typeof node !== 'object') return
-    if (typeof node.type === 'function' && node.type !== react.Fragment) {
-      walkSidebar(node.type(node.props ?? {}))
-      return
-    }
-    if (node.props?.className === 'bt-sec-peek') peekFound = true
-    if (node.props?.className === 'bt-sec-body' && node.props?.inert === true && node.props?.['aria-hidden'] === true) bodyInert = true
-    if (node.props?.['data-bot-id'] === 'writer') writerRows += 1
-    walkSidebar(node.props?.children)
-  }
-  walkSidebar(sidebarTree)
-  assert.equal(peekFound, true)
-  assert.equal(bodyInert, true)
-  assert.equal(writerRows, 1)
+test('legacy section menus are absent after retirement', () => {
+  const roster = { byId: {}, roomsById: {}, agentsById: {} }
+  for (const kind of ['section', 'section-add']) assert.equal(ContextMenu({ menu: { kind, id: 'retired', x: 10, y: 10 }, roster, actions: { closeMenu() {} } }), null)
+})
+
+test('one Bot in the narrow folder preview has no synthetic group-chat guest', () => {
+  const writer = baseTeam().bots.writer
+  const tree = BotFolderSection({ folder: { id: 'one', name: 'One', botIds: ['writer'], entries: [], collapsed: true },
+    roster: { byId: { writer }, questions: {} }, actions: {}, renderRow: () => null, rowProps: { wide: false } })
+  assert.equal(nodes(tree, node => node.props?.bot?.id === 'writer' && node.props?.size === 36).length, 1)
+  assert.equal(nodes(tree, node => node.props?.room?.members).length, 0)
+})
+
+test('migration tolerates corrupt old folder records and preserves the first valid owner', () => {
+  const state = baseTeam()
+  state.botFolders = { broken: null, invalid: { id: 'invalid', name: null }, one: { id: 'one', name: 'One', botIds: ['writer'] }, duplicate: { id: 'duplicate', name: 'Duplicate', botIds: ['writer'] } }
+  state.sections = [{ id: 'old', name: 'Old', color: 'orange' }]
+  state.bots.writer.sectionId = 'old'
+  migrateSidebarSections(state)
+  assert.equal(state.botFolders.one.color, 'orange')
+  assert.equal(state.botFolders.one.version, 1)
+  assert.equal(state.botFolders.duplicate.color, undefined)
 })

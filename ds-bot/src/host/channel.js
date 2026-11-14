@@ -313,6 +313,7 @@ export function install(rt) {
         case 'bot-folder-save':
         case 'bot-folder-assign':
         case 'bot-folder-delete':
+        case 'bot-folder-color':
         case 'bot-folder-pin':
         case 'bot-folder-dissolve':
           return ok(await rt.botFolderMutate(endpoint.slice('bot-folder-'.length), body))
@@ -478,16 +479,9 @@ export function install(rt) {
           await rt.load()
           return ok(await rt.setFlags(body.id, body))
         case 'section-save':
-          await rt.load()
-          return ok(await rt.saveSection(body))
         case 'section-order':
-          await rt.load()
-          await rt.reorderSections(body.ids)
-          return ok(view())
         case 'section-delete':
-          await rt.load()
-          await rt.deleteSection(body.id)
-          return ok(view())
+          return fail('Sidebar sections have been merged into Bot folders. Use Organize Bots.', 'bot/retired')
         case 'delete-room':
           await rt.load()
           await rt.deleteRoom(body.id)

@@ -1,5 +1,7 @@
 # ds-bot
 
+This fork uses one Bot folder system for sidebar organization. Folder colors, folded Bot avatar previews and aggregate work indicators are managed with **Organize Bots**. The separate upstream Section controls are retired; existing Bot assignments and colors migrate without deleting chats.
+
 The DS Bot plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh). It turns dsh into a team of long-lived Bots that talk to you, to each other and in group chats. See the [project page](../README.md) for an overview, install steps and screenshots.
 
 > Early release (v0.2). Features, tools and the saved data format can still change.

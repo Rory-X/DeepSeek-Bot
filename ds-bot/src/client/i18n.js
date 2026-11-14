@@ -43,6 +43,8 @@ const ZH = {
   'Main Bot': '主 Bot',
   'Main Bots': '主 Bot',
   Working: '进行中',
+  'Folder color': '分组颜色',
+  Unread: '未读',
   'Waiting for your answer': '等你回答',
   'Waiting for {names}': '等 {names} 交回',
   'Unread activity': '有未读',

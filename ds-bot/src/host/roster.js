@@ -1,8 +1,8 @@
 // Roster: creating, changing, and deleting Bots and group chats, the Main Bot role, and
 // the first Main Bot of a new team.
-import { randomUUID } from 'node:crypto'
+
 import { mkdir } from 'node:fs/promises'
-import { MAX_AVATAR_IMAGE, ROOM_MAX_MEMBERS, ROOM_MODES, ROOM_NAME_MAX, ROOM_NOTICE_MAX, SECTION_COLORS, SECTION_NAME_MAX } from './constants.js'
+import { MAX_AVATAR_IMAGE, ROOM_MAX_MEMBERS, ROOM_MODES, ROOM_NAME_MAX, ROOM_NOTICE_MAX } from './constants.js'
 import { currentColor, isColor, normalize, unquote } from './text.js'
 import { nameProblem } from '../shared/mentions.js'
 
@@ -138,41 +138,9 @@ export function install(rt) {
     return `${stem} ${index}`
   }
 
-  function cleanSectionName(text, selfId) {
-    const next = unquote(text).replace(/\s+/g, ' ').slice(0, SECTION_NAME_MAX)
-    if (next === '') throw new Error('Enter a section name')
-    if ((state.sections ?? []).some(sec => sec.id !== selfId && normalize(sec.name) === normalize(next))) {
-      throw new Error(`Another section is already called "${next}"`)
-    }
-    return next
-  }
-
-  function freshSectionName(base = 'New section') {
-    const stem = unquote(base).replace(/\s+/g, ' ').slice(0, SECTION_NAME_MAX - 4) || 'New section'
-    const taken = name => (state.sections ?? []).some(sec => normalize(sec.name) === normalize(name))
-    if (!taken(stem)) return stem
-    let index = 2
-    while (taken(`${stem} ${index}`)) index += 1
-    return `${stem} ${index}`
-  }
-
-  // Resolves a section by id (`sectionId`) or by name/id (`section`, creating one when
-  // a new name is given); `null` or an empty string clears the entry's section.
-  function resolveSectionInput({ section, sectionId }, { allowCreate = true } = {}) {
-    if (section === undefined && sectionId === undefined) return undefined
-    const raw = section !== undefined ? section : sectionId
-    if (raw === null || raw === '' || /^(none|null|无|未分组)$/i.test(String(raw).trim())) return null
-    const list = (state.sections ??= [])
-    const byId = list.find(sec => sec.id === raw)
-    if (byId !== undefined) return byId.id
-    if (section === undefined) throw new Error('Unknown section')
-    const byName = list.find(sec => normalize(sec.name) === normalize(raw))
-    if (byName !== undefined) return byName.id
-    const clean = cleanSectionName(raw)
-    if (!allowCreate) return clean
-    const created = { id: `sec-${randomUUID().slice(0, 8)}`, name: clean }
-    list.push(created)
-    return created.id
+  function resolveSectionInput({ section, sectionId }) {
+    if (section !== undefined || sectionId !== undefined) throw new Error('Sidebar sections have been merged into Bot folders. Use Organize Bots.')
+    return undefined
   }
 
   // `pickModel` leaves the model to the user: the chat opens on a model card, and the
@@ -490,92 +458,9 @@ export function install(rt) {
     if (entry === undefined) throw new Error('Unknown conversation')
     if (typeof pinned === 'boolean') entry.pinned = pinned
     if (typeof hidden === 'boolean') entry.hidden = hidden
-    if (sectionId !== undefined) {
-      if (sectionId === null || sectionId === '' || id === state.mainBotIds[0]) delete entry.sectionId
-      else if (typeof sectionId === 'string' && (state.sections ?? []).some(sec => sec.id === sectionId)) entry.sectionId = sectionId
-      else throw new Error('Unknown section')
-    }
+    if (sectionId !== undefined) throw new Error('Sidebar sections have been merged into Bot folders. Use Organize Bots.')
     await rt.save()
     return entry
-  }
-
-  async function saveSection({ id, name, collapsed, color, items, add, remove } = {}) {
-    if (color !== undefined && color !== null && color !== '' && !SECTION_COLORS.includes(color)) {
-      throw new Error('Unknown section color')
-    }
-    const list = (state.sections ??= [])
-    let sec
-    if (id !== undefined && id !== null && id !== '') {
-      sec = list.find(entry => entry.id === id)
-      if (sec === undefined) throw new Error('Unknown section')
-      if (name !== undefined) sec.name = cleanSectionName(name, sec.id)
-      if (typeof collapsed === 'boolean') {
-        if (collapsed) sec.collapsed = true
-        else delete sec.collapsed
-      }
-      if (color !== undefined) {
-        if (color === null || color === '') delete sec.color
-        else sec.color = color
-      }
-    } else {
-      const clean = name !== undefined && String(name).trim() !== '' ? cleanSectionName(name) : freshSectionName()
-      sec = {
-        id: `sec-${randomUUID().slice(0, 8)}`,
-        name: clean,
-        ...(collapsed === true ? { collapsed: true } : {}),
-        ...(SECTION_COLORS.includes(color) ? { color } : {}),
-      }
-      list.push(sec)
-    }
-    const entryOf = entryId => (entryId === state.mainBotIds[0] ? undefined : rt.botOf(entryId) ?? rt.roomOf(entryId) ?? rt.own(state.agents, entryId))
-    if (Array.isArray(items)) {
-      const keep = new Set(items)
-      for (const entry of [...Object.values(state.bots), ...Object.values(state.rooms), ...Object.values(state.agents)]) {
-        if (entry.sectionId === sec.id && !keep.has(entry.id)) delete entry.sectionId
-      }
-      for (const itemId of keep) {
-        const entry = entryOf(itemId)
-        if (entry !== undefined) entry.sectionId = sec.id
-      }
-    }
-    for (const itemId of add ?? []) {
-      const entry = entryOf(itemId)
-      if (entry !== undefined) entry.sectionId = sec.id
-    }
-    for (const itemId of remove ?? []) {
-      const entry = entryOf(itemId)
-      if (entry !== undefined && entry.sectionId === sec.id) delete entry.sectionId
-    }
-    await rt.save()
-    return sec
-  }
-
-  async function reorderSections(ids) {
-    if (!Array.isArray(ids)) throw new Error('Section order must be an array of section ids')
-    const list = (state.sections ??= [])
-    const byId = new Map(list.map(sec => [sec.id, sec]))
-    const next = []
-    for (const id of ids) {
-      const sec = byId.get(id)
-      if (sec !== undefined) {
-        next.push(sec)
-        byId.delete(id)
-      }
-    }
-    for (const sec of byId.values()) next.push(sec)
-    state.sections = next
-    await rt.save()
-    return state.sections
-  }
-
-  async function deleteSection(id) {
-    const list = (state.sections ??= [])
-    if (!list.some(sec => sec.id === id)) throw new Error('Unknown section')
-    state.sections = list.filter(sec => sec.id !== id)
-    for (const entry of [...Object.values(state.bots), ...Object.values(state.rooms), ...Object.values(state.agents)]) {
-      if (entry.sectionId === id) delete entry.sectionId
-    }
-    await rt.save()
   }
 
   // ---------------------------------------------------------------------------
@@ -947,7 +832,6 @@ export function install(rt) {
 
   Object.assign(rt, {
     ensureWorkspace, keepTeamFolder, createSession, createBot, duplicateBot, updateBot, setFlags,
-    saveSection, reorderSections, deleteSection,
     roomBusy, autoRoomName, retitleRoom, createRoom, updateRoom, deleteRoom,
     setMain, deleteBot, bootstrap, releaseKickoff, greetingOut, holdKickoffAgain, userWrote, userAnswered,
   })

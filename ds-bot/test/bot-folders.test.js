@@ -190,3 +190,32 @@ test('dissolving a populated folder retains every Bot and other folders', async 
   assert.deepEqual(rt.state.bots, bots)
   assert.deepEqual(rt.botFoldersView(), [other])
 })
+
+test('folder colors validate atomically, preserve membership, honor versions and can be cleared', async () => {
+  const rt = fixture()
+  const folder = await rt.botFolderMutate('save', { name: 'Team', botIds: ['auth'], color: 'blue' })
+  const before = structuredClone(rt.state.botFolders)
+  await assert.rejects(rt.botFolderMutate('save', { id: folder.id, name: 'Team', botIds: ['gmail'], color: 'url(bad)' }), /color/)
+  assert.deepEqual(rt.state.botFolders, before)
+  const colored = await rt.botFolderMutate('color', { id: folder.id, version: folder.version, color: 'green' })
+  assert.deepEqual(colored.botIds, ['auth'])
+  await assert.rejects(rt.botFolderMutate('color', { id: folder.id, version: folder.version, color: null }), /changed/)
+  const edited = await rt.botFolderMutate('save', { id: colored.id, version: colored.version, name: 'Team', botIds: ['auth', 'gmail'] })
+  assert.equal(edited.color, 'green')
+  const cleared = await rt.botFolderMutate('color', { id: folder.id, version: edited.version, color: null })
+  assert.equal(cleared.color, undefined)
+})
+
+test('Main Bot color changes keep every Bot and enforce the same rights as folder membership edits', async () => {
+  const rt = fixture()
+  await rt.botFolderMutate('assign', { name: 'Team', botIds: five })
+  const tool = rt.teamTools.find(t => t.name === 'organize_bots')
+  const args = { action: 'color', folder: 'Team', color: 'rose' }
+  await assert.rejects(tool.execute(args, { agent: { id: 'auth' } }), /Only a Main Bot/)
+  const before = structuredClone(rt.state.bots)
+  await tool.execute(args, { agent: { id: 'chief' } })
+  assert.equal(rt.botFoldersView()[0].color, 'rose')
+  await tool.execute({ ...args, color: 'none' }, { agent: { id: 'chief' } })
+  assert.equal(rt.botFoldersView()[0].color, undefined)
+  assert.deepEqual(rt.state.bots, before)
+})

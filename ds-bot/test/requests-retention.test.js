@@ -33,8 +33,14 @@ async function start(requests) {
   const ctx = fakeContext()
   const rt = createRuntime(ctx, { home, github: false, diagnosticsFile: false })
   await rt.load()
-  // The prune runs on the load's own turn; one macrotask later it is done.
-  await new Promise(resolve => setTimeout(resolve, 30))
+  // Boot pruning updates memory before its asynchronous save reaches disk.
+  // Wait for the durable state, rather than assuming a 30ms filesystem write.
+  await new Promise(resolve => setImmediate(resolve))
+  const deadline = Date.now() + 2000
+  while (JSON.stringify(saved(home).requests) !== JSON.stringify(rt.state.requests) && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  assert.deepEqual(saved(home).requests, JSON.parse(JSON.stringify(rt.state.requests)), 'boot pruning must reach disk')
   const stop = async () => {
     await ctx.dispose()
     rmSync(home, { recursive: true, force: true, maxRetries: 5 })

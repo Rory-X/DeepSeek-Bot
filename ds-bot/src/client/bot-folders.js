@@ -1,15 +1,56 @@
-import { createElement as h, useEffect, useId, useRef, useState } from 'react'
-import { ChevronRightIcon, DotsIcon, CloseIcon, PinMarkIcon } from './icons.js'
+import { createElement as h, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { ChevronRightIcon, DotsIcon, CloseIcon, PinMarkIcon, FolderIcon } from './icons.js'
 import { useEscape } from './overlay-hooks.js'
 import { hostText, t } from './i18n.js'
+import { BotMark, RoomAvatar } from './mark.js'
+import { inkFill } from './inks.js'
+import { currentPart } from './text.js'
+import { SPRING_POP } from './motion.js'
+import { FOLDER_COLORS } from '../shared/bot-folders.js'
 
-export function BotFolderSection({ folder, roster, actions, useUi, renderRow }) {
+export function FolderColorPicker({ color, onChange, disabled = false }) {
+  return h('div', { className: 'bt-folder-colors', role: 'group', 'aria-label': t('Folder color') },
+    h('span', { className: 'bt-folder-colors-label' }, t('Folder color')),
+    h('div', { className: 'bt-folder-colors-options' }, [null, ...FOLDER_COLORS].map(value => {
+      const label = value ? t(value[0].toUpperCase() + value.slice(1)) : t('None')
+      return h('button', { key: value ?? 'none', type: 'button', className: 'bt-folder-color-choice', disabled,
+        'aria-label': label, title: label, 'aria-pressed': (color ?? null) === value, onClick: () => onChange(value) },
+      h('span', { style: { background: value ? inkFill(value) : 'var(--bt-hover)' }, 'aria-hidden': true }))
+    })))
+}
+
+export function folderStatus({ statuses, hasQuestion, hasApproval, hasRoomWork, markedUnread, activeSession }) {
+  if (hasQuestion || hasApproval) return 'alert'
+  if (hasRoomWork || statuses.some(([, running]) => running)) return 'working'
+  if (markedUnread || statuses.some(([id, , unread]) => unread && id !== activeSession)) return 'unread'
+  return null
+}
+
+export function BotFolderSection({ folder, roster, actions, useUi, renderRow, rowProps = {}, markedUnread = {} }) {
   const key = `ds-bot:folder:${roster.workspaceId ?? roster.mainBotId}:${folder.id}`
-  const [closed, setClosed] = useState(false)
+  const [closed, setClosed] = useState(folder.collapsed === true)
   const panelId = useId()
   const menuOpen = useUi ? useUi(value => value.menu?.kind === 'bot-folder' && value.menu.id === folder.id) : false
+  const bots = useMemo(() => folder.botIds.map(id => roster.byId?.[id] ?? roster.bots?.find(bot => bot.id === id)).filter(bot => bot && !bot.hidden), [folder.botIds, roster])
+  const ids = bots.map(currentPart)
+  const activeSession = rowProps.useSessions ? rowProps.useSessions(list => ids.find(id => (list.byId[id]?.retainedBy?.mainView ?? 0) > 0) ?? '') : ''
+  const statusBits = rowProps.useSessionStatus ? rowProps.useSessionStatus(map => JSON.stringify(ids.map(id => [id,
+    map.get(id)?.running === true,
+    map.get(id)?.completionUnread === true || map.get(id)?.pendingInteraction !== undefined,
+  ]))) : '[]'
+  const workBits = rowProps.useWork ? rowProps.useWork(work => {
+    const botIds = new Set(folder.botIds)
+    const approval = (work.approvals ?? []).some(item => botIds.has(item.botId))
+    const roomWork = Object.values(work.rooms ?? {}).some(list => list.some(item => botIds.has(item.botId)))
+    return `${approval ? 1 : 0}|${roomWork ? 1 : 0}`
+  }) : '0|0'
+  const [hasApproval, hasRoomWork] = workBits.split('|').map(value => value === '1')
+  const status = folderStatus({ statuses: JSON.parse(statusBits), hasApproval, hasRoomWork, activeSession,
+    hasQuestion: bots.some(bot => roster.questions?.[currentPart(bot)] !== undefined),
+    markedUnread: bots.some(bot => markedUnread[bot.id] && currentPart(bot) !== activeSession) })
+  const statusLabel = status === 'alert' ? t('Waiting for you') : status === 'working' ? t('Working') : status === 'unread' ? t('Unread') : ''
   useEffect(() => {
-    const read = () => { try { setClosed(localStorage.getItem(key) === 'closed') } catch {} }
+    const read = () => { try { const value = localStorage.getItem(key); setClosed(value === null ? folder.collapsed === true : value === 'closed') } catch {} }
     read()
     const changed = event => { if (event.key === key || event.key === null) read() }
     window.addEventListener('storage', changed)
@@ -20,16 +61,34 @@ export function BotFolderSection({ folder, roster, actions, useUi, renderRow }) 
     setClosed(next)
     try { localStorage.setItem(key, next ? 'closed' : 'open') } catch {}
   }
-  return h('section', { className: 'bt-bot-folder', 'data-bot-folder-id': folder.id },
+  const openMenu = event => {
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+    actions.openMenu({ kind: 'bot-folder', id: folder.id, x: rect.right, y: rect.bottom, align: 'end' })
+  }
+  const statusMark = status ? h('span', { className: 'bt-bot-folder-status', 'data-kind': status, role: 'img', title: statusLabel, 'aria-label': statusLabel }, status === 'alert' ? '?' : null) : null
+  const marker = folder.color ? h('span', { className: 'bt-bot-folder-color', style: { background: inkFill(folder.color) }, 'aria-hidden': true }) : null
+  const rail = rowProps.wide === false
+  return h('section', { className: `bt-bot-folder${rail ? ' bt-bot-folder-rail' : ''}`, 'data-bot-folder-id': folder.id, 'data-collapsed': closed },
+    rail ? h('div', { className: 'bt-bot-folder-rail-head' },
+      h('button', { type: 'button', className: 'bt-bot-folder-rail-toggle', 'aria-label': statusLabel ? `${folder.name}: ${statusLabel}` : folder.name, title: folder.name, 'aria-expanded': !closed, 'aria-controls': panelId, onClick: toggle, onContextMenu: openMenu },
+        marker,
+        bots.length > 1 ? h(RoomAvatar, { room: { id: folder.id, name: folder.name, members: bots.map(bot => bot.id) }, roster, size: 38 })
+          : bots.length === 1 ? h(BotMark, { bot: bots[0], size: 36 }) : h(FolderIcon),
+        statusMark),
+      h('button', { type: 'button', className: 'bt-bot-folder-edit', 'aria-label': t('Folder {name} actions', { name: folder.name }), onClick: openMenu }, h(DotsIcon))) :
     h('div', { className: 'bt-bot-folder-head' },
-      h('button', { type: 'button', className: 'bt-bot-folder-toggle', 'aria-expanded': !closed, 'aria-controls': panelId, onClick: toggle, title: folder.name },
+      h('button', { type: 'button', className: 'bt-bot-folder-toggle', 'aria-expanded': !closed, 'aria-controls': panelId, onClick: toggle, onContextMenu: openMenu, title: folder.name },
+        marker,
         h('span', { className: 'bt-bot-folder-name' }, folder.name),
         folder.pinned ? h('span', { className: 'bt-bot-folder-pin', 'aria-hidden': true, title: t('Pinned') }, h(PinMarkIcon)) : null,
+        closed ? h('span', { className: 'bt-bot-folder-preview' },
+          bots.length ? h('span', { className: 'bt-bot-folder-pile', 'aria-hidden': true },
+            bots.slice(0, 3).map(bot => h('span', { key: bot.id, className: 'bt-bot-folder-pile-item' }, h(BotMark, { bot, size: 18 }))),
+            bots.length > 3 ? h('span', { className: 'bt-bot-folder-more' }, `+${bots.length - 3}`) : null) : null,
+          statusMark) : null,
         h('span', { className: 'bt-bot-folder-chevron', 'data-open': !closed || undefined }, h(ChevronRightIcon))),
-      h('button', { type: 'button', className: 'bt-bot-folder-edit', 'aria-label': t('Folder {name} actions', { name: folder.name }), title: t('Folder {name} actions', { name: folder.name }), 'aria-haspopup': 'menu', 'aria-expanded': menuOpen, onClick: event => {
-        const rect = event.currentTarget.getBoundingClientRect()
-        actions.openMenu({ kind: 'bot-folder', id: folder.id, x: rect.right, y: rect.bottom, align: 'end' })
-      } }, h(DotsIcon))),
+      h('button', { type: 'button', className: 'bt-bot-folder-edit', 'aria-label': t('Folder {name} actions', { name: folder.name }), title: t('Folder {name} actions', { name: folder.name }), 'aria-haspopup': 'menu', 'aria-expanded': menuOpen, onClick: openMenu }, h(DotsIcon))),
     h('div', { id: panelId, hidden: closed, className: 'bt-bot-folder-rows' },
       // Keep rows mounted so unread-clearing and active-chat tracking continue when folded.
       folder.entries.map(renderRow),
@@ -43,6 +102,7 @@ export function BotFoldersDialog({ start, roster, actions }) {
   const [folderId, setFolderId] = useState(initial?.id ?? '')
   const [version, setVersion] = useState(initial?.version)
   const [name, setName] = useState(initial?.name ?? '')
+  const [color, setColor] = useState(initial?.color ?? null)
   const [picked, setPicked] = useState(initial?.botIds ?? (start.botId ? [start.botId] : []))
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
@@ -61,6 +121,7 @@ export function BotFoldersDialog({ start, roster, actions }) {
     setFolderId(id)
     setVersion(folder?.version)
     setName(folder?.name ?? '')
+    setColor(folder?.color ?? null)
     setPicked([...new Set([...(folder?.botIds ?? []), ...(start.botId ? [start.botId] : [])])])
     setError('')
   }
@@ -72,7 +133,7 @@ export function BotFoldersDialog({ start, roster, actions }) {
   }
   const save = event => {
     event.preventDefault()
-    void run(() => actions.saveBotFolder({ id: folderId || undefined, version, name, botIds: picked }))
+    void run(() => actions.saveBotFolder({ id: folderId || undefined, version, name, color, botIds: picked }))
   }
   const wanted = query.trim().toLowerCase()
   const bots = roster.bots.filter(bot => bot.id !== roster.mainBotId && `${bot.name} ${bot.role ?? ''}`.toLowerCase().includes(wanted))
@@ -94,6 +155,7 @@ export function BotFoldersDialog({ start, roster, actions }) {
           h('option', { value: '' }, t('New Bot folder')),
           folders.map(folder => h('option', { key: folder.id, value: folder.id }, folder.name)))),
         h('label', { className: 'bt-bot-folders-field' }, t('Folder name'), h('input', { value: name, maxLength: 48, required: true, placeholder: 'connector', onChange: event => setName(event.target.value) })),
+        h(FolderColorPicker, { color, onChange: setColor, disabled: busy || Boolean(roster.readOnly) }),
         h('label', { className: 'bt-bot-folders-field' }, t('Folder members'), h('input', { type: 'search', value: query, placeholder: t('Search Bots'), onChange: event => setQuery(event.target.value) })),
         h('div', { className: 'bt-bot-folders-members' }, bots.map(bot => h('label', { key: bot.id, className: 'bt-bot-folders-member' },
           h('input', { type: 'checkbox', checked: picked.includes(bot.id), onChange: event => setPicked(current => event.target.checked ? [...current, bot.id] : current.filter(id => id !== bot.id)) }),
@@ -114,6 +176,33 @@ export const BOT_FOLDERS_CSS = `
 .bt-bot-folder-pin{display:flex;flex:none;color:var(--bt-ink-2)}
 .bt-bot-folder-pin svg{width:12px;height:12px}
 .bt-bot-folder-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt-bot-folder-color{width:6px;height:6px;border-radius:50%;flex:none}
+.bt-bot-folder-preview{display:inline-flex;align-items:center;gap:7px;margin-left:auto;flex:none}
+.bt-bot-folder-preview+.bt-bot-folder-chevron{margin-left:0}
+.bt-bot-folder-pile{display:inline-flex;align-items:center;animation:bt-bot-folder-pile-in ${SPRING_POP.duration}ms ${SPRING_POP.easing}}
+.bt-bot-folder-pile-item{display:inline-flex;flex:none;border-radius:50%;background:var(--bt-sidebar);box-shadow:0 0 0 1.5px var(--bt-sidebar)}
+.bt-bot-folder-pile-item+.bt-bot-folder-pile-item{margin-left:-5px}
+.bt-bot-folder-more{font-size:11px;line-height:16px;color:var(--bt-ink-3);margin-left:4px}
+.bt-bot-folder-status{width:8px;height:8px;border-radius:50%;flex:none;background:var(--bt-accent)}
+.bt-bot-folder-status[data-kind=working]{background:var(--bt-green)}
+.bt-bot-folder-status[data-kind=alert]{width:12px;height:12px;display:inline-flex;align-items:center;justify-content:center;background:var(--bt-accent);color:var(--bt-accent-ink);font-size:9px;line-height:12px}
+.bt-bot-folder-rail-head{position:relative;display:flex;align-items:center;justify-content:center;min-height:58px}
+.bt-bot-folder-rail-toggle{display:flex;align-items:center;justify-content:center;position:relative;width:56px;height:56px;border:0;border-radius:16px;background:transparent;color:var(--bt-ink-2);cursor:pointer}
+.bt-bot-folder-rail-toggle:hover{background:var(--bt-hover)}
+.bt-bot-folder-rail-toggle .bt-bot-folder-color{position:absolute;left:2px;top:5px}
+.bt-bot-folder-rail-toggle .bt-bot-folder-status{position:absolute;right:3px;bottom:4px}
+.bt-bot-folder-rail-head .bt-bot-folder-edit{position:absolute;right:0;top:0;width:18px;height:18px}
+.bt-bot-folder-rail-toggle:focus-visible,.bt-folder-colors .bt-folder-color-choice:focus-visible{outline:2px solid var(--bt-accent);outline-offset:2px}
+.bt-folder-colors{display:flex;flex-direction:column;gap:6px;padding:8px 0}
+.bt-menu .bt-folder-colors{padding:6px 10px}
+.bt-folder-colors-label{color:var(--bt-ink-2);font-size:12px}
+.bt-folder-colors-options{display:flex;align-items:center;gap:5px}
+.bt-folder-colors .bt-folder-color-choice{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid transparent;border-radius:50%;background:transparent;cursor:pointer;padding:0}
+.bt-folder-colors .bt-folder-color-choice span{width:17px;height:17px;border:1px solid var(--bt-line);border-radius:50%}
+.bt-folder-colors .bt-folder-color-choice[aria-pressed=true]{border-color:var(--bt-ink-2)}
+.bt-folder-colors .bt-folder-color-choice:disabled{opacity:.45;cursor:default}
+@keyframes bt-bot-folder-pile-in{from{opacity:0;transform:translateX(4px) scale(.88)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.bt-bot-folder-pile{animation:none}}
 .bt-bot-folder-toggle:hover,.bt-bot-folder-edit:hover{color:var(--bt-ink)}
 .bt-bot-folder-empty:hover{background:var(--bt-hover);color:var(--bt-ink)}
 .bt-bot-folder-chevron{display:flex;flex:none;margin-left:auto}

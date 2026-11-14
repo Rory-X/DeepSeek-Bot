@@ -111,7 +111,7 @@ export function Overlays({ useRoster, useUi, useSessions, useSessionStatus, useA
   return h(Fragment, null,
     ui.botFolders ? createPortal(h(BotFoldersDialog, { key: `${ui.botFolders.folderId ?? ''}:${ui.botFolders.botId ?? ''}`, start: ui.botFolders, roster, actions }), document.body) : null,
     pane ? createPortal(h(BotPanel, { pane, leaving: shown === null, room: layout.room, overlay: layout.panel === 'overlay', roster, actions, useSessions, useSessionStatus, useActivity, useWork, useBrowserTabs, useBrowserPages, useBrowserHolds }), document.body) : null,
-    ui.newChat ? createPortal(h(NewChat, { key: `${ui.newChat}:${ui.newChatSection ?? ''}`, mode: ui.newChat, sectionId: ui.newChatSection ?? null, paneLeft: layout.column, roster, actions }), document.body) : null,
+    ui.newChat ? createPortal(h(NewChat, { key: ui.newChat, mode: ui.newChat, paneLeft: layout.column, roster, actions }), document.body) : null,
     ui.palette ? createPortal(h(CommandPalette, { key: ui.palette.token, start: ui.palette.query, token: ui.palette.token, roster, actions, useSessions }), document.body) : null,
     ui.exchange ? createPortal(h(ExchangeDialog, { pair: ui.exchange, paneLeft: layout.column, at: ui.exchangeAt ?? undefined, roster, actions }), document.body) : null,
     ui.voice ? createPortal(h(VoiceMode, { key: ui.voice, sessionId: ui.voice, paneLeft: layout.column, roster, actions, useSessions, useSessionStatus }), document.body) : null,
