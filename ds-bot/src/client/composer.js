@@ -56,7 +56,7 @@ export function useDictation(onText) {
   return { listening, note, start, stop }
 }
 
-export function ComposerVoice({ sessionId, inputActions, actions, useRoster }) {
+export function ComposerVoice({ sessionId, inputActions, actions, useRoster, useUi }) {
   const enterToSend = useRoster(state => sendsOnEnter(state.prefs))
   const composerRoot = useRef(null)
   useEffect(() => {
@@ -69,6 +69,23 @@ export function ComposerVoice({ sessionId, inputActions, actions, useRoster }) {
   const dictation = useDictation((text, final) => {
     if (final && inputActions) inputActions.insertText(text, inputActions.captureInsertion())
   })
+  // Older callers keep the reply in `state.quote`; the quote dock owns `state.quotes`.
+  // Reading both keeps a pending reply from disappearing when the two surfaces coexist.
+  const legacyQuote = useUi === undefined ? null : useUi(state => (state.quote?.sessionId === sessionId ? state.quote : null))
+  useEffect(() => {
+    if (!legacyQuote || !inputActions) return
+    actions.clearQuote(legacyQuote.token)
+    const excerpt = legacyQuote.text.replace(/\s+/g, ' ').trim()
+    const line = `> ${excerpt.length > 200 ? `${excerpt.slice(0, 200)}…` : excerpt}\n\n`
+    inputActions.insertText(line, inputActions.captureInsertion())
+    const box = document.querySelector('[class*="_centerCol"] [role=textbox][contenteditable=true]')
+    if (box instanceof HTMLElement) {
+      box.focus()
+      const selection = window.getSelection()
+      selection?.selectAllChildren(box)
+      selection?.collapseToEnd()
+    }
+  }, [legacyQuote?.token])
   if (sessionId === undefined) return null
   // With the Voice Input plugin on, its own microphone sits in this composer.
   const pluginMic = actions.speech() !== undefined

@@ -1,6 +1,6 @@
 # Vendored deep-view
 
-- vendored for: ds-bot `0.3.1`
+- vendored for: ds-bot `0.3.8`
 - package: deep-view `0.1.2` — https://github.com/Fei2411/deep-view
 - license: Apache-2.0 (see LICENSE in this directory)
 - source: npm tarball sha1 `6a0207ee0b6e9a8d96dc5f682ab66a6f6be2e124`, gitHead `dab178d026332bdb2016afe71e57eddf0747b850`

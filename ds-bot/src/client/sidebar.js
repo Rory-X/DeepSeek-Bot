@@ -250,14 +250,16 @@ function AgentRow({ agent, actions, useSessions, useSessionStatus, useUi, wide, 
       preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
     wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true })
       : !wide && unread && !active ? h('span', { className: 'bt-dot', 'aria-hidden': true }) : null),
-    h('div', { className: 'bt-agent-sub', 'data-open': open || undefined },
+    // The rail has no Session list. Left in, its text is wider than the rail, so this wrapper
+    // filled the rail and the 56px row sat at its left edge instead of the centre.
+    wide ? h('div', { className: 'bt-agent-sub', 'data-open': open || undefined },
       h('div', { className: 'bt-agent-sub-in' },
         h('button', { type: 'button', className: 'bt-agent-sub-row bt-agent-new', style: { '--i': 0 }, onClick: () => { void actions.newAgentSession(agent.id).catch(error => actions.reportError(error, 'agent-session')) } },
           h(PlusIcon), h('span', { className: 'bt-agent-sub-title' }, t('New session'))),
         sessions.map((session, index) => h(AgentSessionRow, {
           key: session.id, session, agent, actions, index: index + 1,
           renaming: renaming === session.id,
-        })))))
+        })))) : null)
 }
 
 function useListGlide(listRef, layout, key) {
@@ -309,7 +311,8 @@ function TitleToggle({ hidden, onToggle }) {
 // The Bot-API-down hint cannot send the user to Settings → Feedback: its
 // diagnostics request needs the same API. What still works in this state is
 // the last error this window recorded, and the engine's own startup output —
-// its console, or the app's startup error box (#516).
+// its console, or the app's startup error box (#516). With no Bot team there is
+// nothing to use on this surface, so the hint also offers the classic view.
 const bootHint = () => {
   const last = clientErrors().at(-1)?.text
   return last === undefined
@@ -319,6 +322,14 @@ const bootHint = () => {
 // A phone shows the list as a page of its own, so the column is hidden there whatever the
 // saved preference says: a `rail` would keep its 88px under the chat and push it sideways.
 export const columnPref = (onPhone, pref) => (onPhone ? 'hidden' : pref)
+
+function BootFailed({ actions }) {
+  return h('div', { className: 'bt-hint bt-boot-failed', role: 'alert' },
+    h('div', null, bootHint()),
+    typeof actions.setSurface === 'function'
+      ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => actions.setSurface('agent') }, t('Switch to classic Agent mode'))
+      : null)
+}
 
 export function TeamSidebar(props) {
   const { wide, useRoster, useUi, useSessions, actions } = props
@@ -537,7 +548,7 @@ export function TeamSidebar(props) {
         toggleRef.current()
       }
     }
-    if (collapsed) { requested.current = false; quiet(false); return undefined }
+    if (collapsed) { clearTimeout(requestLapse.current); requested.current = false; quiet(false); return undefined }
     if (requested.current) return undefined
     requested.current = true
     quiet(true)
@@ -545,7 +556,7 @@ export function TeamSidebar(props) {
     clearTimeout(requestLapse.current)
     requestLapse.current = setTimeout(() => { requested.current = false; quiet(false); setLapsed(value => value + 1) }, 300)
     return undefined
-  }, [wide, frameSnap.viewport, lapsed])
+  }, [wide, frameSnap.viewport, frameSnap.collapsed, lapsed])
 
   // The drawer closes on a row pick, on Escape and on a press outside it.
   useEffect(() => {
@@ -628,7 +639,7 @@ export function TeamSidebar(props) {
         h(BoardEntry, { actions, pending: roster.boardPending ?? 0 }),
         h(UpdateButton, { useUpdate: props.useUpdate, actions }),
         h('button', { type: 'button', className: 'bt-round bt-side-collapse', 'aria-label': t('Collapse sidebar'), title: t('Collapse sidebar'), onClick: onToggle }, h(SidebarIcon)),
-        main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true }) : roster.ready ? null : h('div', { className: 'bt-hint' }, bootFailed ? bootHint() : t('Setting up your Main Bot…')),
+        main ? h(BotRow, { ...rowProps, bot: main, marked: markedUnread[main.id] === true }) : roster.ready ? null : bootFailed ? h(BootFailed, { actions }) : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…')),
         h('span', { className: 'bt-rail-sep', 'aria-hidden': true }))
   // The foot stands in for the shell's hidden footer: the account avatar, and on
   // the rail the new-chat button above it.
@@ -641,7 +652,7 @@ export function TeamSidebar(props) {
   const content = h('div', { className: wideContent ? 'bt-side' : 'bt-side bt-rail', onKeyDown: typeToSearch },
     top,
     wideContent && roster.readOnly ? h('div', { className: 'bt-hint bt-read-only', role: 'status' }, hostText(roster.readOnly)) : null,
-    h(BotList, { listRef, mains, order, roster, markedUnread, rowProps }),
+    BotList({ listRef, mains, order, roster, markedUnread, rowProps, bootFailed }),
     foot)
   return h(Fragment, null,
     h(TitleToggle, { hidden: mode === 'hidden', onToggle }),
@@ -650,7 +661,7 @@ export function TeamSidebar(props) {
 
 // The Bot and group list. The sidebar and the phone's list page both render it, so the
 // two views cannot disagree about order, marks or rows.
-function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTime }) {
+function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTime, bootFailed = false }) {
   const stamp = entry => (showTime ? relativeShort(entry.at) : undefined)
   const folders = splitBotFolders(order, roster.botFolders)
   const row = entry => (entry.kind === 'bot'
@@ -668,7 +679,7 @@ function BotList({ listRef, mains, order, roster, markedUnread, rowProps, showTi
     ref: listRef, className: 'bt-list', role: 'region', 'aria-label': t('Bot list'),
   },
     mains === undefined || mains.length === 0
-      ? roster.ready ? null : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…'))
+      ? roster.ready ? null : bootFailed ? h(BootFailed, { actions: rowProps.actions }) : h('div', { className: 'bt-hint' }, t('Setting up your Main Bot…'))
       : rowProps.wide
         ? mains.length === 1 ? tops[0] : h(MainStrip, { count: mains.length }, tops)
         : tops,
@@ -1390,13 +1401,13 @@ ${BOT_FOLDERS_CSS}
 .bt-round.bt-update{position:relative;color:var(--bt-accent,#4D6BFE);animation:bt-update-in ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
 .bt-round.bt-update svg{width:17px;height:17px}
 .bt-round.bt-update[data-phase=installed]{color:var(--bt-ink-2)}
-@keyframes bt-update-in{from{opacity:0;transform:scale(.6);filter:blur(4px)}}
+@keyframes bt-update-in{from{opacity:0;transform:scale(.6);filter:var(--bt-fx-blur-4,blur(4px))}}
 .bt-update[data-phase=installing] .bt-cloud-arrow{animation:bt-cloud-drop 1.1s cubic-bezier(.45,0,.55,1) infinite}
 @keyframes bt-cloud-drop{0%{transform:translateY(-3px);opacity:0}35%{opacity:1}70%{transform:translateY(1px);opacity:1}100%{transform:translateY(2px);opacity:0}}
 .bt-update-dot{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:#E5484D;box-shadow:0 0 0 1.5px var(--bt-sidebar)}
 .bt-update-pop{position:fixed;z-index:60;width:280px;padding:14px 14px 12px;border-radius:16px;background:var(--bt-glass-bg);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);border:.5px solid var(--bt-glass-rim);box-shadow:var(--bt-glass-shadow);color:var(--bt-ink);box-sizing:border-box;transform-origin:top left;font-family:var(--bt-font);animation:bt-update-pop ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
 .bt-update-pop[data-leaving]{animation:bt-pop-out .12s cubic-bezier(.4,0,1,1) forwards;pointer-events:none}
-@keyframes bt-update-pop{from{opacity:0;transform:scale(.96);filter:blur(4px)}}
+@keyframes bt-update-pop{from{opacity:0;transform:scale(.96);filter:var(--bt-fx-blur-4,blur(4px))}}
 .bt-update-title{font-size:14px;line-height:20px;font-weight:600}
 .bt-update-text{margin-top:2px;font-size:12px;line-height:18px;color:var(--bt-ink-2)}
 .bt-update-error{margin-top:8px;font-size:12px;line-height:17px;color:var(--bt-danger);overflow-wrap:anywhere;max-height:90px;overflow:auto}
@@ -1430,7 +1441,7 @@ ${BOT_FOLDERS_CSS}
 .bt-agent-edit{padding:3px 10px 3px 4px}
 .bt-agent-edit input{width:100%;border:0;border-radius:6px;background:var(--bt-hover);color:var(--bt-ink);font:inherit;font-size:13px;line-height:20px;padding:2px 8px;outline:none;box-shadow:inset 0 0 0 .5px var(--bt-line-2)}
 .bt-agent-sub[data-open] .bt-agent-sub-row{animation:bt-agent-row-in .24s ease both;animation-delay:calc(var(--i, 0)*30ms)}
-@keyframes bt-agent-row-in{from{opacity:0;filter:blur(4px)}to{opacity:1;filter:blur(0)}}
+@keyframes bt-agent-row-in{from{opacity:0;filter:var(--bt-fx-blur-4,blur(4px))}to{opacity:1;filter:none}}
 @media (prefers-reduced-motion:reduce){.bt-agent-sub{transition:none}.bt-agent-sub .bt-agent-sub-row{animation:none}}
 
 /* The phone's list page. It is the only copy of the list while it is up: the sidebar

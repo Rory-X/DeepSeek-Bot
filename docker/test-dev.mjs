@@ -214,7 +214,7 @@ try {
   docker(['exec', releaseName, 'sh', '-eu', '-c', `
     test ! -L /data/profiles/web/node_modules/ds-bot
     test -f /data/profiles/web/node_modules/ds-bot/index.js
-    test -f /data/profiles/web/node_modules/deep-view/package.json
+    test -f /data/profiles/web/node_modules/ds-bot/vendor/deep-view/package.json
     test -f /data/profiles/web/node_modules/extra-plugin/index.js
     test -f /data/profiles/web/node_modules/left-pad/index.js
     test ! -e /data/profiles/web/package.json.release

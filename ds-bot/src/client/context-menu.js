@@ -1,5 +1,6 @@
 import { createElement as h, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FolderColorPicker } from './bot-folders.js'
+import { isMuted, toggleMuted } from './notifications.js'
 import { isMainOf } from './sources.js'
 import { currentPart } from './text.js'
 import { GearIcon, PinIcon, UnreadIcon, PencilIcon, StarLineIcon, CopyIcon, HideIcon, TrashIcon, DuplicateIcon, CheckIcon, SignOutIcon } from './icons.js'
@@ -60,6 +61,7 @@ export function ContextMenu({ menu, roster, actions, useWork, leaving = false })
     [
       isTile ? null : [entry.pinned ? t('Unpin') : t('Pin'), PinIcon, () => actions.setFlags(menu.id, { pinned: !entry.pinned })],
       [t('Mark as Unread'), UnreadIcon, () => actions.markUnread(menu.id)],
+      [isMuted(entry.id) ? t('Unmute notifications') : t('Mute notifications'), UnreadIcon, () => toggleMuted(entry.id)],
     ],
     [
       bot ? [t('Rename Bot'), PencilIcon, () => actions.renameBot(bot.id)] : null,

@@ -217,11 +217,12 @@ Agent logos
 
 Agent logos (ds-bot/src/client/agent-logos.js)
 The logos name the agent CLI a Bot runs on. Each is a trademark of its owner:
-Claude (Anthropic), Cursor (Anysphere), Gemini (Google), OpenCode (SST),
+Claude (Anthropic), Cursor (Anysphere), Gemini and Antigravity (Google), OpenCode (SST),
 Cline (Cline Bot Inc.), Qwen (Alibaba Cloud), Devin (Cognition AI),
+GitHub Copilot (GitHub), Kimi (Moonshot AI), MiniMax (MiniMax), Mistral AI (Mistral AI),
 OpenAI (OpenAI). DS Bot is not affiliated with or endorsed by these owners.
 Vector marks from Simple Icons (https://simpleicons.org), CC0-1.0.
-Devin and OpenAI marks from the vendors' application icons.
+Devin, OpenAI and Antigravity marks from the vendors' application icons.
 
 
 ==============================================================================
@@ -235,7 +236,7 @@ https://github.com/Fei2411/deep-view
 
 Vendored unmodified (LICENSE, package.json, src/core/, src/react/) from the npm
 tarball with sha1 6a0207ee0b6e9a8d96dc5f682ab66a6f6be2e124 (gitHead
-dab178d026332bdb2016afe71e57eddf0747b850), so DS Bot keeps zero runtime
-dependencies and installs offline from a single tarball. Only ds-bot's own
-import specifiers point into this directory; the vendored sources are unchanged.
+dab178d026332bdb2016afe71e57eddf0747b850), so DS Bot does not need deep-view
+from npm and installs offline from a single tarball. Only ds-bot's own import
+specifiers point into this directory; the vendored sources are unchanged.
 The Apache-2.0 license text is kept as ds-bot/vendor/deep-view/LICENSE.
