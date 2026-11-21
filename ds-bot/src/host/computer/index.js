@@ -224,7 +224,10 @@ export function install(rt) {
   }
 
   // ---- Masking: who sees the tools ----
-  const denyNames = agent => (typeof ctx.tools?.schemas === 'function' ? ctx.tools.schemas(agent) : [])
+  const schemasFor = agent => (typeof rt.toolSchemasFor === 'function'
+    ? rt.toolSchemasFor(agent)
+    : typeof ctx.tools?.schemas === 'function' ? ctx.tools.schemas(agent) : [])
+  const denyNames = agent => schemasFor(agent)
     .map(schema => schema.name).filter(name => isComputerTool(name))
   const maskable = agent => {
     const id = agent?.session?.id ?? agent?.id

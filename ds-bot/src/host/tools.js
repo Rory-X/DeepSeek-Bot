@@ -52,6 +52,23 @@ const WORKING_DIRECTORY_TOOL = 'working_directory'
 export function install(rt) {
   const { ctx, state } = rt
 
+  // `ctx.tools.schemas(agent)` projects every visible tool's schema through a deep
+  // snapshot. Save-time refreshes ask for the same agent's schemas many times while
+  // no tool changes; one cache per tools/change generation keeps that work shared
+  // between hideBotUnusedTools, maskConnectorTools and computer.denyNames.
+  let toolSchemaGeneration = 0
+  let toolSchemaCache = new WeakMap()
+  const toolSchemasFor = (agent) => {
+    const reader = ctx.tools?.schemas
+    if (typeof reader !== 'function') return []
+    if (agent === undefined || agent === null) return reader(agent) ?? []
+    const cached = toolSchemaCache.get(agent)
+    if (cached !== undefined && cached.generation === toolSchemaGeneration && cached.reader === reader) return cached.schemas
+    const schemas = reader(agent) ?? []
+    toolSchemaCache.set(agent, { generation: toolSchemaGeneration, reader, schemas })
+    return schemas
+  }
+
   const callerBot = (exec) => rt.botOf(rt.selfOf(exec.agent?.id))
   const callerRoom = (exec) => {
     const roomId = rt.groupOwners.get(exec.agent?.id)?.roomId
@@ -1112,7 +1129,7 @@ export function install(rt) {
     if (prefixes.length === 0 && (held.connectorLifts?.length ?? 0) === 0 && (held.connectorDenied?.size ?? 0) === 0) return
     // schemas(agent) omits tools our current mask already hid. Keep those names
     // while computing the next mask, or the next tools/change would lift it.
-    const served = new Set([...ctx.tools.schemas(agent).map(schema => schema.name), ...(held.connectorDenied ?? [])])
+    const served = new Set([...toolSchemasFor(agent).map(schema => schema.name), ...(held.connectorDenied ?? [])])
     // One restrict() per connector: one per tool would take the scope once for each.
     // A tool two prefixes match is denied once, by the first prefix that names it.
     const deny = new Set()
@@ -1201,11 +1218,15 @@ export function install(rt) {
     scoped.set(id, held)
     filterBotAssembly(agent, held)
     if (held.restricted !== true && typeof agent.ctx?.tools?.restrict === 'function') {
-      maskHiddenTools(agent, held, new Set(ctx.tools.schemas(agent).map(schema => schema.name)))
+      maskHiddenTools(agent, held, new Set(toolSchemasFor(agent).map(schema => schema.name)))
     }
     maskConnectorTools(agent, held)
   }
-  ctx.on('tools/change', () => reapplyToolMasks())
+  ctx.on('tools/change', () => {
+    toolSchemaGeneration += 1
+    toolSchemaCache = new WeakMap()
+    reapplyToolMasks()
+  })
   // A new Bot, part, or group Session gets its Agent before ds-bot records it, so the
   // recording path resolves it again once the session is known as a Bot's; meanwhile
   // the guard refuses the question and delegation tools in any Bot Session, and a
@@ -1261,7 +1282,7 @@ export function install(rt) {
     if (typeof ctx.tools?.schemas !== 'function') return assembled
     try {
       const wanted = new Set(pending)
-      const current = new Map(ctx.tools.schemas(agent).filter(schema => wanted.has(schema.name)).map(schema => [schema.name, schema]))
+      const current = new Map(toolSchemasFor(agent).filter(schema => wanted.has(schema.name)).map(schema => [schema.name, schema]))
       let changed = false
       const tools = (assembled.tools ?? []).map((tool) => {
         const schema = current.get(tool.name)
@@ -1432,5 +1453,5 @@ export function install(rt) {
     }))
   }
 
-  Object.assign(rt, { pickRoom, hideBotUnusedTools, syncScopedTools, addTeamTool, removeTeamTool, reapplyToolMasks })
+  Object.assign(rt, { pickRoom, hideBotUnusedTools, syncScopedTools, addTeamTool, removeTeamTool, reapplyToolMasks, toolSchemasFor })
 }
