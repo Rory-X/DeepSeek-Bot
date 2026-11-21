@@ -59,12 +59,14 @@ export function install(rt) {
   let toolSchemaGeneration = 0
   let toolSchemaCache = new WeakMap()
   const toolSchemasFor = (agent) => {
-    const reader = ctx.tools?.schemas
+    const tools = ctx.tools
+    const reader = tools?.schemas
     if (typeof reader !== 'function') return []
-    if (agent === undefined || agent === null) return reader(agent) ?? []
+    // ToolsService.schemas() reads this.definitions(), so call it on its receiver.
+    if (agent === undefined || agent === null) return reader.call(tools, agent) ?? []
     const cached = toolSchemaCache.get(agent)
     if (cached !== undefined && cached.generation === toolSchemaGeneration && cached.reader === reader) return cached.schemas
-    const schemas = reader(agent) ?? []
+    const schemas = reader.call(tools, agent) ?? []
     toolSchemaCache.set(agent, { generation: toolSchemaGeneration, reader, schemas })
     return schemas
   }

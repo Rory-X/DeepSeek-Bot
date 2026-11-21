@@ -41,14 +41,17 @@ test('tool schemas are cached for one tools/change generation across every mask 
   services.agents.list = () => [agent]
   rt.connectorOffFor = () => ['mcp__notion__']
   let reads = 0
-  ctx.tools.schemas = () => {
+  // ToolsService.schemas() is a method that reads this.definitions(); an arrow
+  // function here would not catch an unbound call.
+  ctx.tools.definitions = () => [
+    { name: 'bash' },
+    { name: 'ask_user_question' },
+    { name: 'mcp__notion__search' },
+    { name: 'cua' },
+  ]
+  ctx.tools.schemas = function schemas() {
     reads += 1
-    return [
-      { name: 'bash' },
-      { name: 'ask_user_question' },
-      { name: 'mcp__notion__search' },
-      { name: 'cua' },
-    ]
+    return this.definitions()
   }
 
   // hideBotUnusedTools reads once; maskConnectorTools in the same generation reuses it.
