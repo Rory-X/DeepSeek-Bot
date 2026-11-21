@@ -41,18 +41,25 @@ test('tool schemas are cached for one tools/change generation across every mask 
   services.agents.list = () => [agent]
   rt.connectorOffFor = () => ['mcp__notion__']
   let reads = 0
-  // ToolsService.schemas() is a method that reads this.definitions(); an arrow
-  // function here would not catch an unbound call.
+  // ToolsService.schemas() is a method that reads this.definitions(), and Cordis
+  // returns a fresh shadow method on every ctx.tools.schemas read. Model both: a
+  // stable arrow fake would miss an unbound call and a reader-identity cache.
   ctx.tools.definitions = () => [
     { name: 'bash' },
     { name: 'ask_user_question' },
     { name: 'mcp__notion__search' },
     { name: 'cua' },
   ]
-  ctx.tools.schemas = function schemas() {
-    reads += 1
-    return this.definitions()
-  }
+  Object.defineProperty(ctx.tools, 'schemas', {
+    configurable: true,
+    get() {
+      return function schemas() {
+        reads += 1
+        return this.definitions()
+      }
+    },
+  })
+  assert.notStrictEqual(ctx.tools.schemas, ctx.tools.schemas)
 
   // hideBotUnusedTools reads once; maskConnectorTools in the same generation reuses it.
   rt.hideBotUnusedTools(agent)

@@ -62,12 +62,16 @@ export function install(rt) {
     const tools = ctx.tools
     const reader = tools?.schemas
     if (typeof reader !== 'function') return []
+    // A traceable tools service returns a fresh shadow method on every read, so its
+    // identity cannot key the cache; there tools/change is the invalidation. A plain
+    // service keeps one function, so a replaced reader also invalidates.
+    const stableReader = tools?.schemas === reader ? reader : undefined
     // ToolsService.schemas() reads this.definitions(), so call it on its receiver.
     if (agent === undefined || agent === null) return reader.call(tools, agent) ?? []
     const cached = toolSchemaCache.get(agent)
-    if (cached !== undefined && cached.generation === toolSchemaGeneration && cached.reader === reader) return cached.schemas
+    if (cached !== undefined && cached.generation === toolSchemaGeneration && (stableReader === undefined || cached.reader === stableReader)) return cached.schemas
     const schemas = reader.call(tools, agent) ?? []
-    toolSchemaCache.set(agent, { generation: toolSchemaGeneration, reader, schemas })
+    toolSchemaCache.set(agent, { generation: toolSchemaGeneration, reader: stableReader, schemas })
     return schemas
   }
 
