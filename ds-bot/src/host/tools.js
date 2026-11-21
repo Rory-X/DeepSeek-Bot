@@ -54,24 +54,33 @@ export function install(rt) {
 
   // `ctx.tools.schemas(agent)` projects every visible tool's schema through a deep
   // snapshot. Save-time refreshes ask for the same agent's schemas many times while
-  // no tool changes; one cache per tools/change generation keeps that work shared
-  // between hideBotUnusedTools, maskConnectorTools and computer.denyNames.
-  let toolSchemaGeneration = 0
+  // its tools stay the same; cache the projection per agent and redo it only when the
+  // definitions it was made from change. tools/change fires for every scoped
+  // registration and restriction, hundreds of times during startup, so it can only
+  // mark an epoch, not empty every agent's cache.
+  let toolSchemaEpoch = 0
   let toolSchemaCache = new WeakMap()
+  const sameDefinitions = (before, after) => before !== undefined && before.length === after.length && before.every((definition, index) => definition === after[index])
   const toolSchemasFor = (agent) => {
     const tools = ctx.tools
     const reader = tools?.schemas
     if (typeof reader !== 'function') return []
-    // A traceable tools service returns a fresh shadow method on every read, so its
-    // identity cannot key the cache; there tools/change is the invalidation. A plain
-    // service keeps one function, so a replaced reader also invalidates.
-    const stableReader = tools?.schemas === reader ? reader : undefined
-    // ToolsService.schemas() reads this.definitions(), so call it on its receiver.
+    // A traceable service returns a fresh shadow method on every read; a plain one
+    // keeps one function, so a replaced reader also invalidates.
+    const stableReader = tools.schemas === reader ? reader : undefined
     if (agent === undefined || agent === null) return reader.call(tools, agent) ?? []
     const cached = toolSchemaCache.get(agent)
-    if (cached !== undefined && cached.generation === toolSchemaGeneration && (stableReader === undefined || cached.reader === stableReader)) return cached.schemas
+    if (cached !== undefined && cached.epoch === toolSchemaEpoch && (stableReader === undefined || cached.reader === stableReader)) return cached.schemas
+    // definitions() resolves the same visible set without the deep schema snapshot;
+    // identical definition objects mean the cached projection is still exact.
+    const definitions = typeof tools.definitions === 'function' ? tools.definitions(agent) : undefined
+    if (cached !== undefined && definitions !== undefined && sameDefinitions(cached.definitions, definitions)) {
+      cached.epoch = toolSchemaEpoch
+      cached.reader = stableReader
+      return cached.schemas
+    }
     const schemas = reader.call(tools, agent) ?? []
-    toolSchemaCache.set(agent, { generation: toolSchemaGeneration, reader: stableReader, schemas })
+    toolSchemaCache.set(agent, { epoch: toolSchemaEpoch, reader: stableReader, definitions: definitions?.slice(), schemas })
     return schemas
   }
 
@@ -1229,8 +1238,7 @@ export function install(rt) {
     maskConnectorTools(agent, held)
   }
   ctx.on('tools/change', () => {
-    toolSchemaGeneration += 1
-    toolSchemaCache = new WeakMap()
+    toolSchemaEpoch += 1
     reapplyToolMasks()
   })
   // A new Bot, part, or group Session gets its Agent before ds-bot records it, so the

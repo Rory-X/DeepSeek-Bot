@@ -17,7 +17,7 @@ const TEAM = {
   questions: {},
 }
 
-test('tool schemas are cached for one tools/change generation across every mask caller', async (t) => {
+test('tool schemas are cached across save refreshes and unrelated tools/change churn', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'ds-bot-schema-cache-'))
   writeFileSync(join(home, 'state.json'), JSON.stringify(TEAM))
   const restricted = []
@@ -44,24 +44,25 @@ test('tool schemas are cached for one tools/change generation across every mask 
   // ToolsService.schemas() is a method that reads this.definitions(), and Cordis
   // returns a fresh shadow method on every ctx.tools.schemas read. Model both: a
   // stable arrow fake would miss an unbound call and a reader-identity cache.
-  ctx.tools.definitions = () => [
+  const definitions = [
     { name: 'bash' },
     { name: 'ask_user_question' },
     { name: 'mcp__notion__search' },
     { name: 'cua' },
   ]
+  ctx.tools.definitions = () => definitions
   Object.defineProperty(ctx.tools, 'schemas', {
     configurable: true,
     get() {
       return function schemas() {
         reads += 1
-        return this.definitions()
+        return this.definitions().map(definition => ({ ...definition }))
       }
     },
   })
   assert.notStrictEqual(ctx.tools.schemas, ctx.tools.schemas)
 
-  // hideBotUnusedTools reads once; maskConnectorTools in the same generation reuses it.
+  // hideBotUnusedTools reads once; maskConnectorTools in the same epoch reuses it.
   rt.hideBotUnusedTools(agent)
   assert.equal(reads, 1)
   assert.equal(rt.toolSchemasFor(agent), rt.toolSchemasFor(agent))
@@ -72,25 +73,32 @@ test('tool schemas are cached for one tools/change generation across every mask 
   rt.refreshComputer()
   assert.equal(reads, 1)
 
-  // Save-time refreshes do not change the tools generation, so they reuse the cache.
+  // Save-time refreshes do not change the tools, so they reuse the cache.
   await rt.save()
   await rt.save()
   await rt.save()
   assert.equal(reads, 1)
 
-  // A tools/change generation invalidates every agent entry and recomputes once.
+  // tools/change fires for every scoped registration and restriction; an event
+  // from elsewhere does not change this agent's definitions, so it keeps the cache.
   const before = rt.toolSchemasFor(agent)
-  ctx.emit('tools/change')
-  assert.equal(reads, 2)
+  for (let i = 0; i < 100; i += 1) ctx.emit('tools/change')
+  assert.equal(reads, 1)
   rt.reapplyToolMasks()
   rt.refreshComputer()
+  assert.equal(reads, 1)
+  assert.equal(rt.toolSchemasFor(agent), before)
+
+  // A real tool change invalidates the entry and projects once more.
+  definitions.push({ name: 'extra_tool' })
+  ctx.emit('tools/change')
   assert.equal(reads, 2)
   const after = rt.toolSchemasFor(agent)
   assert.notEqual(after, before)
   assert.equal(rt.toolSchemasFor(agent), after)
 
-  // A second tools/change bumps the generation again.
+  // A later unrelated tools/change does not recompute the new entry.
   ctx.emit('tools/change')
-  assert.equal(reads, 3)
+  assert.equal(reads, 2)
   assert.ok(restricted.length > 0)
 })
