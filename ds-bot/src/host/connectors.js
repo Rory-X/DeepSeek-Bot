@@ -24,6 +24,7 @@ import { externalConnectors, CONNECTOR_ID, CONNECTOR_LEVELS } from './connectors
 import { chatIdOf, createNotifyTool, NOTIFY_TEST_TEXT, parseChatId } from './notify.js'
 import { createOAuthFlow } from './oauth/flow.js'
 import { createRestTools } from './rest-tools.js'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import { output } from './tools.js'
 import { buildToolIndex, createCallTool, createSearchTool } from './vercel-toolbox.js'
 
@@ -212,7 +213,58 @@ export async function signIn(id, token, { api, fetch: request = fetch } = {}) {
 }
 
 export function install(rt) {
-  Object.assign(rt, createConnectorHost(rt))
+  const host = createConnectorHost(rt)
+  Object.assign(rt, host)
+  if (!Array.isArray(rt.teamTools)) return
+  if (!rt.teamTools.some(tool => tool.name === 'list_connectors')) {
+    rt.teamTools.push(defineTool({
+      name: 'list_connectors',
+      description: 'List the connectors the team can use: name, what it offers, and whether it is connected. Connect one for yourself with request_connector.',
+      parameters: {},
+      output,
+      async execute(_args, exec) {
+        await rt.load()
+        const bot = rt.botOf(rt.selfOf(exec.agent?.id))
+        if (!bot) return 'Only Bots on the team can use list_connectors.'
+        const rows = host.connectorsView()
+        if (!Array.isArray(rows) || rows.length === 0) return 'No connectors are set up.'
+        const lines = rows.map(entry => {
+          const about = entry.description ?? entry.about ?? ''
+          const status = entry.connected ? 'connected' : 'not connected'
+          return `- ${entry.name} (${entry.id})${about ? ` — ${about}` : ''} — ${status}`
+        })
+        return ['Connectors:', ...lines].join('\n')
+      },
+    }))
+  }
+  if (!rt.teamTools.some(tool => tool.name === 'request_connector')) {
+    rt.teamTools.push(defineTool({
+      name: 'request_connector',
+      description: 'Ask the user to connect an outside service when you need a service that is not connected.',
+      parameters: {
+        id: { type: 'string', required: true, description: 'Connector id from list_connectors' },
+        purpose: { type: 'string', required: true, description: 'One short line for the user: what you need it for' },
+      },
+      output,
+      async execute(args, exec) {
+        await rt.load()
+        const id = String(args.id ?? '').trim()
+        const rows = host.connectorsView()
+        const entry = Array.isArray(rows) ? rows.find(item => item.id === id) : undefined
+        if (entry === undefined) return `No connector named ${id}.`
+        const agentId = exec.agent?.id
+        const bot = rt.botOf(rt.selfOf(agentId))
+        if (bot === undefined) return 'Only Bots on the team can use request_connector.'
+        if (entry.connected) return `${entry.name} is already connected.`
+        if (rt.taskOwners?.has(agentId)) return 'Background tasks cannot show connector cards. Finish or report back to your own chat so it can ask the user.'
+        if (rt.groupOwners.has(agentId)) return 'Connector cards only work in your own chat. Tell the group you will ask the user in your own chat, and call request_connector there.'
+        if (!rt.chatOwners.has(agentId)) return 'Connector cards only work in your current own chat.'
+        const readOnly = rt.readOnly()
+        if (readOnly !== undefined) return `No card can be shown now. ${readOnly}`
+        return `Ask the user to connect ${entry.name} under Settings → Connectors.`
+      },
+    }))
+  }
 }
 
 // The connector host itself. `connectors` is the set of definitions to mount; the plugin
@@ -1930,6 +1982,9 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       await refresh(body.id, true)
       return connectorsView()
     },
+    async 'connector-request-cancel'() {
+      return connectorsView()
+    },
   }
 
   // Every endpoint that changes a connector runs in the host queue, whether it mounts,
@@ -1960,6 +2015,7 @@ export function createConnectorHost(rt, connectors = CONNECTORS) {
       secretsLoaded.catch(error => rt.warn('ds-bot: secrets not loaded before the connectors: %s', reason(error))),
       teamLoaded.catch(error => rt.warn('ds-bot: the Bot team not loaded before the connectors: %s', reason(error))),
     ]).then(() => {
+      if (stopped) return
       ensureInstances()
       // Nothing mounts before this pass: the team is loaded, so this is the real first sync
       // and its readiness notes (if any) describe the team, not an empty one.

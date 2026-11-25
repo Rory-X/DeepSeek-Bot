@@ -16,9 +16,9 @@ import { shrink } from '../src/host/preview-worker.js'
 // A team with no model: Sessions are made in memory, a group round runs on answers
 // played back through the session/event listeners, and `history` holds the events
 // each Session's page reads, oldest first.
-function start() {
+function start(config = {}) {
   const home = mkdtempSync(join(tmpdir(), 'ds-bot-mobile-'))
-  const ctx = fakeContext({ services: { attachments: fakeAttachments() } })
+  const ctx = fakeContext({ services: { attachments: fakeAttachments(config.attachmentDirectory) } })
   const sent = []
   const history = {}
   const inboxes = new Map()
@@ -64,7 +64,7 @@ function start() {
     routes[options.path] = options
     return register(options)
   }
-  const rt = createRuntime(ctx, { home })
+  const rt = createRuntime(ctx, { home, ...config })
   const call = async (endpoint, payload) => {
     const response = await routes['/api/bot'].fetch(new Request('http://localhost/api/bot', { method: 'POST', body: JSON.stringify({ endpoint, payload }) }))
     return response.json()
@@ -608,6 +608,21 @@ test('file-download sends a file attachment and refuses an unknown session or at
   assert.deepEqual([unowned.ok, unowned.error.code], [false, 'bot/not-found'])
 })
 
+test('image and file-download serve a DSH Agent Session to the phone', async (t) => {
+  const { rt, call, ctx, history, stop } = start()
+  t.after(stop)
+  await team(call)
+  const own = rt.agentOf
+  rt.agentOf = id => (id === 's-agent' ? { id: 'a1', sessions: ['s-agent'] } : own?.(id))
+  const photo = await ctx.get('attachments').saveImage({ data: Buffer.from('PNG bytes'), mediaType: 'image/png', width: 4, height: 4 })
+  const ref = await ctx.get('attachments').saveFile({ data: Buffer.from('agent notes'), name: 'notes.txt' })
+  history['s-agent'] = [{ seq: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'image', attachment: photo }, { type: 'file', attachment: ref }] } }]
+  const img = await call('image', { sessionId: 's-agent', attachmentId: photo.attachmentId })
+  assert.equal(Buffer.from(img.value.data, 'base64').toString(), 'PNG bytes')
+  const saved = await call('file-download', { sessionId: 's-agent', attachmentId: ref.attachmentId })
+  assert.equal(Buffer.from(saved.value.bytes, 'base64').toString(), 'agent notes')
+})
+
 test('a presented file rides on the closing Bot row so the phone can save it', async (t) => {
   const { rt, stop } = start()
   t.after(stop)
@@ -851,4 +866,159 @@ test('files larger than the secure message limit download through bounded chunks
   const changed = await call('file-download', { sessionId, seq: 9, index: 0, offset: first.value.nextOffset, version: first.value.version })
   assert.equal(changed.error.code, 'bot/not-found')
   assert.equal((await call('file-download', { sessionId, seq: 9, offset: -1 })).error.code, 'bot/invalid')
+})
+
+test('file attachment chunks round-trip through the same client iterator', async t => {
+  const { call, ctx, history, stop } = start()
+  t.after(stop)
+  const { chief } = await team(call)
+  const sessionId = (await call('state', {})).value.bots.find(bot => bot.id === chief).sessionId
+  const bytes = randomBytes(4 * 1024 * 1024 + 7)
+  const ref = await ctx.get('attachments').saveFile({ data: bytes, name: 'data.bin' })
+  history[sessionId] = [{ seq: 3, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'file', attachment: ref }] } }]
+  const chunks = []
+  for await (const part of fileChunks(async (endpoint, payload) => {
+    const result = await call(endpoint, payload)
+    assert.equal(result.ok, true)
+    return result.value
+  }, { sessionId, attachmentId: ref.attachmentId })) chunks.push(Buffer.from(part.data))
+  assert.deepEqual(Buffer.concat(chunks), bytes)
+  assert.ok(ctx.get('attachments').stats.streamBytes > bytes.length)
+})
+
+test('file attachment ranges read each byte once and locate history once', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsb-attachment-ranges-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const { call, ctx, history, rt, stop } = start({ attachmentDirectory: dir })
+  t.after(stop)
+  const { chief } = await team(call)
+  const sessionId = (await call('state', {})).value.bots.find(bot => bot.id === chief).sessionId
+  const attachments = ctx.get('attachments')
+  const bytes = randomBytes(3 * 512 * 1024 + 7)
+  const ref = await attachments.saveFile({ data: bytes, name: 'ranges.bin' })
+  history[sessionId] = [{ seq: 1, type: 'user/message', data: { content: [{ type: 'file', attachment: ref }] } }]
+  let pages = 0
+  const page = ctx.sessionController.page
+  ctx.sessionController.page = (...args) => { pages++; return page(...args) }
+  const chunks = []
+  for await (const part of fileChunks(async (endpoint, payload) => {
+    const result = await call(endpoint, payload)
+    assert.equal(result.ok, true, JSON.stringify(result.error))
+    return result.value
+  }, { sessionId, attachmentId: ref.attachmentId })) chunks.push(Buffer.from(part.data))
+  assert.deepEqual(Buffer.concat(chunks), bytes)
+  assert.equal(pages, 1)
+  assert.equal(attachments.stats.streamBytes, 0)
+  const ask = offset => call('file-download', { sessionId, attachmentId: ref.attachmentId, offset })
+  assert.equal((await ask(bytes.length)).value.done, true)
+  assert.equal((await ask(bytes.length + 1)).error.code, 'bot/not-found')
+  writeFileSync(attachments.fileHostPath(ref), 'truncated')
+  assert.equal((await ask(0)).error.code, 'bot/not-found')
+  rmSync(attachments.fileHostPath(ref))
+  assert.equal((await ask(0)).error.code, 'bot/not-found')
+  writeFileSync(attachments.fileHostPath(ref), bytes)
+  // Keep the requested session recognizable but remove the cached target from its owned parts.
+  rt.chatOf = () => 'replacement-session'
+  rt.partsOf = () => []
+  assert.equal((await ask(0)).error.code, 'bot/not-found')
+  rt.chatOwners.delete(sessionId)
+  rt.botOf = () => undefined
+  assert.equal((await ask(0)).error.code, 'bot/not-found')
+})
+
+test('empty disk attachments return an empty final chunk', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsb-empty-attachment-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const { call, ctx, history, stop } = start({ attachmentDirectory: dir })
+  t.after(stop)
+  const { chief } = await team(call)
+  const sessionId = (await call('state', {})).value.bots.find(bot => bot.id === chief).sessionId
+  const ref = await ctx.get('attachments').saveFile({ data: Buffer.alloc(0), name: 'empty.bin' })
+  history[sessionId] = [{ seq: 1, type: 'user/message', data: { content: [{ type: 'file', attachment: ref }] } }]
+  const result = await call('file-download', { sessionId, attachmentId: ref.attachmentId, offset: 0 })
+  assert.equal(result.ok, true)
+  assert.deepEqual([result.value.bytes, result.value.size, result.value.nextOffset, result.value.done], ['', 0, 0, true])
+})
+
+test('chat with steps computes thinking time from the loaded page without re-reading the session tail', async t => {
+  const { call, ctx, history, stop } = start()
+  t.after(stop)
+  const { chief } = await team(call)
+  const sessionId = (await call('state', {})).value.bots.find(bot => bot.id === chief).sessionId
+  const events = []
+  let seq = 0
+  for (let turn = 1; turn <= 12; turn += 1) {
+    events.push({ seq: seq++, time: turn * 1000, type: 'turn/start', data: { turn } })
+    events.push(user(seq++, `msg ${turn}`))
+    events.push({
+      seq: seq++, time: turn * 1000 + 10, type: 'assistant/message',
+      data: { turn, step: 0, message: { content: [{ type: 'text', text: `reply ${turn}` }] }, stream: [{ type: 'reasoning-chunks', time0: 100, index: 0, dt: [250], texts: ['a', 'b'] }] },
+    })
+    events.push({ seq: seq++, time: turn * 1000 + 20, type: 'tool/call', data: { turn, callId: `c${turn}`, name: 'read_file', arguments: '{}' } })
+    events.push({ seq: seq++, time: turn * 1000 + 30, type: 'tool/result', data: { turn, message: { toolCallId: `c${turn}`, ok: true, content: [] } } })
+    events.push({ seq: seq++, time: turn * 1000 + 40, type: 'turn/end', data: { turn } })
+  }
+  history[sessionId] = events
+  let pageCalls = 0
+  const basePage = ctx.sessionController.page
+  ctx.sessionController.page = async (args, signal) => {
+    pageCalls += 1
+    return basePage(args, signal)
+  }
+  const older = (await call('chat', { botId: chief, cursor: { part: 0, beforeSeq: 24 }, steps: true })).value
+  const stepRows = older.items.filter(item => item.kind === 'steps')
+  assert.ok(stepRows.length >= 3)
+  assert.ok(stepRows.every(row => row.ms === 250))
+  assert.equal(pageCalls, 1)
+})
+
+test('desktop approval settlement emits a live feed event and clears pending approvals on unchanged state poll', async (t) => {
+  const { call, ctx, rt, stop } = start()
+  t.after(stop)
+  const { writer, room } = await team(call)
+  const sessionId = `g-${randomUUID()}`
+  rt.state.rooms[room.id].sessions = { [writer.id]: sessionId }
+  rt.groupOwners.set(sessionId, { botId: writer.id, roomId: room.id })
+  const events = []
+  const untap = rt.subscribeFeed((event, data) => events.push({ event, data }))
+  t.after(untap)
+
+  const [approve] = ctx.listeners.get('approval/request')
+  const controller = new AbortController()
+  const answer = approve({ agent: { id: sessionId }, toolName: 'bash', reason: 'run tests', signal: controller.signal }, () => 'allowed-once')
+  const openState = (await call('state', {})).value
+  assert.equal(openState.work.approvals.length, 1)
+
+  events.length = 0
+  controller.abort()
+  assert.equal(await answer, 'cancelled')
+  await waitFor(() => events.some(e => e.event === 'live'))
+
+  const nextState = (await call('state', { since: openState.revision, live: openState.liveKey })).value
+  assert.equal(nextState.unchanged, true)
+  assert.notEqual(nextState.liveKey, openState.liveKey)
+  assert.deepEqual(nextState.work.approvals, [])
+})
+
+test('browser handoff open and settle emit live feed events and clear browserHolds on unchanged-revision state poll', async (t) => {
+  const { call, rt, stop } = start({ browser: true })
+  t.after(stop)
+  const { chief } = await team(call)
+  const events = []
+  const untap = rt.subscribeFeed((event, data) => events.push({ event, data }))
+  t.after(untap)
+
+  rt.browserChannel.setHold(chief, { by: 'bot', reason: 'verification', note: 'Sign in', callId: 'call-1' })
+  await waitFor(() => events.some(e => e.event === 'live'))
+  const openState = (await call('state', {})).value
+  assert.equal(openState.browserHolds[chief]?.callId, 'call-1')
+
+  events.length = 0
+  rt.browserChannel.setHold(chief, null)
+  await waitFor(() => events.some(e => e.event === 'live'))
+
+  const nextState = (await call('state', { since: openState.revision, live: openState.liveKey })).value
+  assert.equal(nextState.unchanged, true)
+  assert.notEqual(nextState.liveKey, openState.liveKey)
+  assert.deepEqual(nextState.browserHolds, {})
 })

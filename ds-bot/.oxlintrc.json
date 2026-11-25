@@ -6,14 +6,19 @@
   },
   "rules": {
     "no-undef": "error",
-    "no-unused-vars": [
-      "error",
-      {
-        "ignoreRestSiblings": true
-      }
-    ]
+    "no-unused-vars": ["error", { "ignoreRestSiblings": true }]
   },
   "ignorePatterns": [
     "src/host/vendor/**"
+  ],
+  "overrides": [
+    {
+      "files": ["src/client/**/*.js"],
+      "plugins": ["react"],
+      "rules": {
+        "react/rules-of-hooks": "error",
+        "react/exhaustive-deps": "off"
+      }
+    }
   ]
 }

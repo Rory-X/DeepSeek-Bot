@@ -921,6 +921,7 @@ function GroupCard({ rows, actions, readOnly = null, bots = [] }) {
 // The project authorizations of one module are drawn inside its base card; every other
 // connector keeps its own place in the list.
 function connectorGroups(list) {
+  if (!Array.isArray(list)) return []
   const groups = []
   const byBase = new Map()
   for (const connector of list) {

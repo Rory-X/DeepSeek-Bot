@@ -8,6 +8,7 @@ import { PlusIcon, SearchIcon, SidebarIcon, GaugeIcon, ClockIcon, GearIcon, PinM
 import { lookOf, MAIN_LOOK } from './characters.js'
 import { botState, BotMark, BotAvatar, RoomAvatar } from './mark.js'
 import { AgentBadge } from './agent-badge.js'
+import { SidebarTaskPill, taskCountsOf } from './bot-tasks.js'
 import { reducedMotion } from './activity-row.js'
 import { workStateLine } from './member-status.js'
 import { Shimmer, workPhrase } from './cells.js'
@@ -21,6 +22,7 @@ import { useRowMenu } from './hold.js'
 import { BoardEntry } from './project-board.js'
 import { BotFolderSection, BOT_FOLDERS_CSS } from './bot-folders.js'
 import { splitBotFolders } from './bot-folder-order.js'
+import { useEscape } from './overlay-hooks.js'
 
 // -------------------------------------------------------------------------
 // Sidebar
@@ -43,15 +45,42 @@ const nameIfCut = (event) => {
   else row.removeAttribute('title')
 }
 
-// Whether an approval waits for the user: for a Bot, in any of its Sessions; for a group,
-// from any of its members there.
-const useApproval = (useWork, match) => (useWork ? useWork(work => (work.approvals ?? []).some(match)) : false)
+const useFalse = () => false
+const useEmptyArrayJson = () => '[]'
+const useNullJson = () => 'null'
+
+// Whether an approval waits for the user: for a Bot, in its own chat; for a group,
+// from any of its members in that group (both DSH tool approvals and computer-use asks).
+const useApproval = (useWork, useComputer, matchApproval, matchAsk) => {
+  const useReadWork = useWork ?? useFalse
+  const useReadComputer = useComputer ?? useFalse
+  const tool = useReadWork(work => (work.approvals ?? []).some(matchApproval))
+  const app = useReadComputer(comp => Object.values(comp?.asks ?? {}).some(matchAsk))
+  return tool || app
+}
+
+const hasPendingRequest = list => Array.isArray(list) && list.some(entry => entry?.status === 'pending')
+
+// Pending user-action cards stored on the roster for one Bot's DM:
+// skill / AGENTS.md learning proposals, secret / connector / mail approvals,
+// and ask_user / show_view cards.
+export function botPendingOf(roster, bot) {
+  const id = bot.id
+  const part = currentPart(bot)
+  const learning = (roster?.learning?.[id]?.length ?? 0) > 0
+  const cardApproval = hasPendingRequest(roster?.secretRequests?.[id])
+    || hasPendingRequest(roster?.connectorRequests?.[id])
+    || hasPendingRequest(roster?.mailRequests?.[id])
+  const question = roster?.questions?.[part] !== undefined || roster?.views?.[part] !== undefined
+  return { learning, cardApproval, question }
+}
 
 // Work running in group Sessions, as "botId|tool" keys so a row redraws only when it
 // changes: the groups one Bot works in, or the members at work in one group.
 // Picked as text, so a row redraws only when what it shows changes.
 const useGroupWork = (useWork, pick) => {
-  const raw = useWork ? useWork(work => JSON.stringify(pick(work.rooms ?? {}))) : '[]'
+  const useReadWork = useWork ?? useEmptyArrayJson
+  const raw = useReadWork(work => JSON.stringify(pick(work.rooms ?? {})))
   return useMemo(() => JSON.parse(raw), [raw])
 }
 const doingOf = ({ tool, said, note, target, switching, since }) => ({ tool, said, note, target, switching, since })
@@ -64,7 +93,7 @@ const waitingFor = (roster, waits) => {
   return names.length === 0 ? '' : t('Waiting for {names}', { names: names.join(t(' and ')) })
 }
 
-function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, wide, marked, time, onDragStart }) {
+function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useActivity, useWork, useComputer, wide, marked, time, onDragStart }) {
   const id = bot.id
   const part = currentPart(bot)
   const preview = useSessions(list => previewOf(list, part, roster.exchangeTurns[part], roster.chatSummaries?.[part]))
@@ -74,32 +103,56 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   useMarkedUnread(id, active, marked, actions)
   const main = isMainOf(roster, id)
   const tile = isMainOf(roster, id)
-  const approval = useApproval(useWork, entry => entry.botId === id)
-  const alert = roster.questions?.[part] !== undefined || approval
+  const fgApproval = useApproval(
+    useWork,
+    useComputer,
+    entry => entry.roomId === undefined && entry.botId === id && entry.taskId === undefined && entry.answerable !== false,
+    ask => ask.roomId === undefined && ask.botId === id,
+  )
+  const useReadBgWork = useWork ?? useFalse
+  const bgApproval = useReadBgWork(work => (work.approvals ?? []).some(entry => entry.roomId === undefined && entry.botId === id && entry.taskId !== undefined && entry.answerable !== false))
+  const pending = botPendingOf(roster, bot)
+  const blockingApproval = fgApproval || pending.cardApproval
+  const nonBlockingApproval = bgApproval || pending.learning
+  const approval = blockingApproval || nonBlockingApproval
+  const alert = approval || pending.question
   const doing = useActivity(map => map[id])
   // Work in a group runs in a Session of its own, so the Bot's chat stays idle meanwhile.
   const groups = useGroupWork(useWork, rooms => Object.entries(rooms).flatMap(([roomId, entries]) => entries.filter(entry => entry.botId === id).map(entry => ({ id: roomId, ...doingOf(entry) }))))
   const away = !running && groups.length > 0
-  const state = botState(running || away, doing, alert)
+  // Group approvals live on the group's row and header island, not on the Bot's
+  // own DM avatar (#1623). Blocking DM approvals/questions override 'working' so
+  // a running turn paused on a card still wears the alert mark; any remaining
+  // 'alert' activity comes from a group, background-task, or unanswerable approval
+  // and is stripped while the foreground turn runs.
+  const blockingAlert = blockingApproval || pending.question
+  const dmDoing = blockingAlert ? 'alert' : doing === 'alert' ? undefined : doing
+  const state = botState(running || away, dmDoing, alert)
+  const waitLine = blockingApproval ? t('Waiting for your approval') : pending.question ? t('Waiting for your answer') : null
+  const deferredWaitLine = nonBlockingApproval ? t('Waiting for your approval') : null
   // A Bot running in its own chat previews what it is doing, like a group's row.
-  const runningLine = running && doing ? doingLine(doing) : null
+  const runningLine = running && doing && doing !== 'alert' ? doingLine(doing) : null
   const awayLine = away ? workLine(roster.roomsById[groups[0].id]?.name ?? t('a group chat'), groups[0], groups.length - 1) : null
-  const waitsRaw = useWork ? useWork(work => JSON.stringify(work.waiting?.[id] ?? null)) : 'null'
+  const useReadWaits = useWork ?? useNullJson
+  const waitsRaw = useReadWaits(work => JSON.stringify(work.waiting?.[id] ?? null))
   const waits = useMemo(() => JSON.parse(waitsRaw), [waitsRaw])
   const waitsFor = state === 'waiting' ? waitingFor(roster, waits) : ''
-  if (bot.hidden && !active && !main) return null
   // A right click and a phone hold open the same menu, at the mouse or the finger.
   const menu = useRowMenu(point => actions.openMenu({ kind: 'bot', id, x: point.x, y: point.y }))
+  if (bot.hidden && !active && !main) return null
   const pinned = bot.pinned === true && !tile
-  const label = [bot.name, bot.role ?? '', main ? t('Main Bot') : '', pinned ? t('Pinned') : '', running || away ? t('Working') : '', waitsFor, approval ? t('Waiting for your approval') : alert ? t('Waiting for your answer') : '', unread ? t('Unread activity') : ''].filter(Boolean).join(', ')
+  const taskCounts = taskCountsOf({ bot })
+  const openTasks = () => { actions.openSession(id); actions.openTaskDeck?.(id) }
+  const label = [bot.name, bot.role ?? '', main ? t('Main Bot') : '', pinned ? t('Pinned') : '', running || away ? t('Working') : '', taskCounts.active > 0 ? t('{count} background tasks running', { count: taskCounts.active }) : '', waitsFor, waitLine || deferredWaitLine || '', unread ? t('Unread activity') : ''].filter(Boolean).join(', ')
   if (tile && wide) {
     return h('div', { className: 'bt-tile-wrap' }, h('button', {
       type: 'button', className: 'bt-tile', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
-      'data-bot-id': id, title: preview || bot.name, onClick: () => actions.openSession(id), ...menu,
+      'data-bot-id': id, title: waitLine || deferredWaitLine || preview || bot.name, onClick: () => actions.openSession(id), ...menu,
     },
     h(BotAvatar, { bot, size: 60, state, main: true }),
     h('span', { className: 'bt-tile-name' }, bot.name),
     bot.role ? h('span', { className: 'bt-chip' }, bot.role) : null,
+    h(SidebarTaskPill, { active: taskCounts.active, waitingApproval: taskCounts.waitingApproval, onClick: openTasks }),
     unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true }) : null))
   }
   return h('button', {
@@ -112,16 +165,19 @@ function BotRow({ bot, roster, actions, useSessions, useSessionStatus, useSessio
   h(BotAvatar, { bot, size: wide ? 36 : 44, state, main }),
   pinned && !wide ? h(PinMark) : null,
   wide ? h('span', { className: 'bt-row-body' },
-    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, bot.name), bot.engine ? h(AgentBadge, { engine: bot.engine }) : bot.role ? h('span', { className: 'bt-row-role' }, bot.role) : null, pinned ? h(PinMark) : null, time ? h('span', { className: 'bt-row-time' }, time) : null),
-    runningLine ? h('span', { className: 'bt-row-preview' }, runningLine)
-      : awayLine ? h('span', { className: 'bt-row-preview' }, awayLine)
-        : waitsFor ? h('span', { className: 'bt-row-preview' }, waitsFor)
-          : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
-  wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true })
-    : !wide && !active && (alert || unread) ? h('span', { className: `bt-dot${alert ? ' bt-dot-wait' : ''}`, 'aria-hidden': true }) : null)
+    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, bot.name), bot.engine ? h(AgentBadge, { engine: bot.engine }) : bot.role ? h('span', { className: 'bt-row-role' }, bot.role) : null, pinned ? h(PinMark) : null, h(SidebarTaskPill, { active: taskCounts.active, waitingApproval: taskCounts.waitingApproval, onClick: openTasks }), time ? h('span', { className: 'bt-row-time' }, time) : null),
+    waitLine ? h('span', { className: 'bt-row-preview bt-row-preview-wait' }, waitLine)
+      : runningLine ? h('span', { className: 'bt-row-preview' }, runningLine)
+        : awayLine ? h('span', { className: 'bt-row-preview' }, awayLine)
+          : deferredWaitLine ? h('span', { className: 'bt-row-preview bt-row-preview-wait' }, deferredWaitLine)
+            : waitsFor ? h('span', { className: 'bt-row-preview' }, waitsFor)
+              : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
+  wide && alert && !active ? h('span', { className: 'bt-unread bt-unread-wait', 'aria-hidden': true })
+    : wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true })
+      : !wide && !active && (alert || unread) ? h('span', { className: `bt-dot${alert ? ' bt-dot-wait' : ''}`, 'aria-hidden': true }) : null)
 }
 
-function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, wide, marked, time, onDragStart }) {
+function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSessionRetainInfo, useWork, useComputer, wide, marked, time, onDragStart }) {
   const id = room.id
   const menu = useRowMenu(point => actions.openMenu({ kind: 'room', id, x: point.x, y: point.y }))
   // The group's own Session is a chain of parts; the row shows the current one.
@@ -131,14 +187,16 @@ function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSess
   const active = useSessionRetainInfo(sessionId, info => (info?.retainedBy?.mainView ?? 0) > 0)
   const unread = useSessionStatus(map => map.get(sessionId)?.completionUnread === true) || (marked && !active)
   useMarkedUnread(id, active, marked, actions)
-  const approval = useApproval(useWork, entry => entry.roomId === id)
+  const approval = useApproval(useWork, useComputer, entry => entry.roomId === id && entry.answerable !== false, ask => ask.roomId === id)
   const members = useGroupWork(useWork, rooms => (rooms[id] ?? []).filter(entry => entry.botId !== undefined).map(entry => ({ id: entry.botId, ...doingOf(entry) })))
   const first = roster.byId[members[0]?.id]
   // The reader is in this group, so the line names no place: the member, the work and its clock.
   const workingLine = first ? workStateLine({ doing: members[0], lead: first.name, more: members.length - 1, className: 'bt-member-state bt-row-state' }) : null
   if (room.hidden && !active) return null
   const pinned = room.pinned === true
-  const label = [room.name, pinned ? t('Pinned') : '', members.length > 0 ? t('Working') : '', approval ? t('Waiting for your approval') : ''].filter(Boolean).join(', ')
+  const taskCounts = taskCountsOf({ room, roster })
+  const openTasks = () => { actions.openSession(id); actions.openTaskDeck?.(id) }
+  const label = [room.name, pinned ? t('Pinned') : '', members.length > 0 ? t('Working') : '', taskCounts.active > 0 ? t('{count} background tasks running', { count: taskCounts.active }) : '', approval ? t('Waiting for your approval') : ''].filter(Boolean).join(', ')
   return h('button', {
     type: 'button', className: 'bt-row', 'aria-label': label, 'aria-current': active ? 'page' : undefined,
     'data-room-id': id, title: wide ? undefined : room.name,
@@ -150,8 +208,10 @@ function RoomRow({ room, roster, actions, useSessions, useSessionStatus, useSess
   h(RoomAvatar, { room, roster, size: wide ? 36 : 44 }),
   pinned && !wide ? h(PinMark) : null,
   wide ? h('span', { className: 'bt-row-body' },
-    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, room.name), pinned ? h(PinMark) : null, time ? h('span', { className: 'bt-row-time' }, time) : null),
-    workingLine ? h('span', { className: 'bt-row-preview' }, workingLine) : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
+    h('span', { className: 'bt-row-name' }, h('span', { className: 'bt-row-title' }, room.name), pinned ? h(PinMark) : null, h(SidebarTaskPill, { active: taskCounts.active, waitingApproval: taskCounts.waitingApproval, onClick: openTasks }), time ? h('span', { className: 'bt-row-time' }, time) : null),
+    approval ? h('span', { className: 'bt-row-preview bt-row-preview-wait' }, t('Waiting for your approval'))
+      : workingLine ? h('span', { className: 'bt-row-preview' }, workingLine)
+        : preview ? h('span', { className: 'bt-row-preview' }, preview) : null) : null,
   wide && approval && !active ? h('span', { className: 'bt-unread bt-unread-wait', 'aria-hidden': true })
     : wide && unread && !active ? h('span', { className: 'bt-unread', 'aria-hidden': true })
       : !wide && !active && (approval || unread) ? h('span', { className: `bt-dot${approval ? ' bt-dot-wait' : ''}`, 'aria-hidden': true }) : null)
@@ -559,20 +619,15 @@ export function TeamSidebar(props) {
   }, [wide, frameSnap.viewport, frameSnap.collapsed, lapsed])
 
   // The drawer closes on a row pick, on Escape and on a press outside it.
+  useEscape(() => actions.setLeftDrawer?.(false), mode === 'drawer')
   useEffect(() => {
     if (mode !== 'drawer') return undefined
     const onDown = (event) => {
       if (event.target instanceof Element && event.target.closest('.bt-leftcol')) return
       actions.setLeftDrawer?.(false)
     }
-    const onKey = (event) => {
-      if (event.key !== 'Escape') return
-      event.stopPropagation()
-      actions.setLeftDrawer?.(false)
-    }
     window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey, true)
-    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true) }
+    return () => { window.removeEventListener('mousedown', onDown) }
   }, [mode])
 
   const navigate = (open, id) => {
@@ -587,7 +642,7 @@ export function TeamSidebar(props) {
     openAgentSession: id => navigate(actions.openAgentSession, id),
     newAgentSession: id => navigate(actions.newAgentSession, id),
   }
-  const rowProps = { roster, actions: rowActions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, wide: wideContent }
+  const rowProps = { roster, actions: rowActions, useSessions, useUi, useSessionStatus: props.useSessionStatus, useSessionRetainInfo: props.useSessionRetainInfo, useActivity: props.useActivity, useWork: props.useWork, useComputer: props.useComputer, wide: wideContent }
   // Typing while the sidebar has focus starts a search.
   const typeToSearch = (event) => {
     if (event.defaultPrevented || event.key.length !== 1 || event.key === ' ' || event.metaKey || event.ctrlKey || event.altKey || event.nativeEvent.isComposing) return
@@ -599,14 +654,6 @@ export function TeamSidebar(props) {
   // flight: it is the page the conversation slides over on the way in, and the one that
   // comes back underneath on the way out. At rest on the conversation it is not mounted.
   const moving = props.useNavMotion?.(value => value !== 'idle') ?? false
-  if (onPhone && (atList || moving)) {
-    return createPortal(h(MobileNavList, {
-      roster, actions, listRef, mains, order, markedUnread, typeToSearch,
-      // The page is the full-width list: its rows carry names, previews and the unread dot.
-      rowProps: { ...rowProps, wide: true }, useUpdate: props.useUpdate,
-    }), document.body)
-  }
-  if (onPhone) return null
   // The switch (top-left button, the shortcut) hides the whole column or brings
   // back the one it hid.
   const onToggle = () => actions.toggleLeftHidden?.()
@@ -616,6 +663,7 @@ export function TeamSidebar(props) {
   const toggleRef = useRef(onToggle)
   toggleRef.current = onToggle
   useEffect(() => {
+    if (onPhone) return undefined
     const onKey = (event) => {
       if (event.defaultPrevented || event.isComposing || !pressesShellShortcut(event, 'sidebar.left.toggle')) return
       if (event.target instanceof Element && event.target.closest('.xterm')) return
@@ -626,7 +674,15 @@ export function TeamSidebar(props) {
     }
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
-  }, [])
+  }, [onPhone])
+  if (onPhone && (atList || moving)) {
+    return createPortal(h(MobileNavList, {
+      roster, actions, listRef, mains, order, markedUnread, typeToSearch,
+      // The page is the full-width list: its rows carry names, previews and the unread dot.
+      rowProps: { ...rowProps, wide: true }, useUpdate: props.useUpdate,
+    }), document.body)
+  }
+  if (onPhone) return null
   const top = wideContent
     ? h('div', { className: 'bt-side-top' },
         h('span', { className: 'bt-brand' }, h(BrandMark, { size: 22 }), h(BrandName)),
@@ -920,7 +976,7 @@ function UpdateButton({ useUpdate, actions }) {
       if (event.target instanceof Element && (event.target.closest('.bt-update-pop') || button.current?.contains(event.target))) return
       setOpen(false)
     }
-    const onKey = (event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); button.current?.focus() } }
+    const onKey = (event) => { if (event.key === 'Escape' && !event.isComposing && event.keyCode !== 229) { event.stopPropagation(); setOpen(false); button.current?.focus() } }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey, true)
     return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true) }
@@ -1096,7 +1152,7 @@ export function AccountLauncher({ seat = true, settingsOpen, actions }) {
     }
     const onKey = (event) => {
       if (stepMenuFocus(menuRef.current, event, button.current)) return
-      if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); button.current?.focus() }
+      if (event.key === 'Escape' && !event.isComposing && event.keyCode !== 229) { event.stopPropagation(); setOpen(false); button.current?.focus() }
     }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey, true)
@@ -1158,7 +1214,7 @@ export function AccountLauncher({ seat = true, settingsOpen, actions }) {
       openModels ? [t('Models and API keys'), SlidersIcon, () => openModels()] : null,
       [t('Connectors'), ConnectorIcon, () => actions.openConnectors()],
       [t('Automation tasks'), ClockIcon, () => actions.selectPanel('schedules')],
-      [t('Settings'), GearIcon, () => actions.openSettings('general')],
+      [t('Settings'), GearIcon, () => actions.openSettings('overview')],
     ].filter(Boolean),
     typeof actions.setSurface === 'function' ? [[t('Classic Agent mode'), SwitchIcon, () => actions.setSurface('agent')]] : null,
   ].filter(Boolean)
@@ -1376,7 +1432,7 @@ export function BrandName() {
 // are CSS-module names, so they match on their stems.
 export const SIDEBAR_CSS = `
 ${BOT_FOLDERS_CSS}
-.bt-confirm{width:260px;max-width:72vw;padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.bt-confirm{width:100%;max-width:260px;box-sizing:border-box;padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
 .bt-confirm-text{margin:0;font-size:13px;line-height:19px;color:var(--bt-ink-2)}
 .bt-confirm-error{margin:0;font-size:12px;line-height:17px;color:var(--bt-danger);overflow-wrap:anywhere}
 .bt-confirm-row{display:flex;justify-content:flex-end;gap:8px}
@@ -1423,7 +1479,7 @@ ${BOT_FOLDERS_CSS}
 
 /* The DSH Agent row and its expanding Session list. The black whale is the
    harness's own mark, so the row reads as "plain dsh" next to the Bot marks. */
-.bt-agent-ava{flex:none;width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--bt-hover);color:var(--bt-ink)}
+.bt-agent-ava{flex:none;width:36px;height:36px;border-radius:50%;corner-shape:round;display:inline-flex;align-items:center;justify-content:center;background:var(--bt-hover);color:var(--bt-ink)}
 .bt-agent-ava.bt-run{animation:bt-agent-pulse 1.4s ease-in-out infinite}
 @keyframes bt-agent-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 .bt-agent-sub{display:grid;grid-template-rows:0fr;transition:grid-template-rows ${SPRING_SHAPE.duration}ms ${SPRING_SHAPE.easing}}
@@ -1452,4 +1508,8 @@ ${BOT_FOLDERS_CSS}
 .bt-nav-page .bt-row{min-height:60px}
 .bt-nav-page .bt-tile-wrap{padding:8px 0 12px}
 .bt-row-time{flex:none;margin-left:auto;padding-left:8px;font-size:12px;line-height:18px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums}
+.bt-menu-sub-head{padding:4px 8px 2px;font-size:11px;line-height:16px;font-weight:600;color:var(--bt-ink-3);user-select:none}
+.bt-menu-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:left}
+.bt-menu-hint{margin-left:auto;font-size:11px;line-height:16px;color:var(--bt-ink-3);flex:none}
+.bt-menu-check{margin-left:auto;color:var(--bt-accent);display:inline-flex;flex:none}
 `

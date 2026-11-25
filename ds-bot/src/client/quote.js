@@ -125,10 +125,12 @@ export function QuoteCard({ quote, roster }) {
 
 // The bar above the composer: who the reply answers, the quoted line, and a way out. It
 // spans exactly the composer's input, so the two line up at both widths.
-export function ComposerQuote({ sessionId, inputActions, useInput, useRoster, useUi, actions }) {
+const useNoInput = () => null
+
+export function ComposerQuote({ sessionId, inputActions, useInput = useNoInput, useRoster, useUi, actions }) {
   const roster = useRoster(value => value)
   const quote = useUi(state => (state.quotes?.[sessionId] ?? null))
-  const draft = useInput === undefined ? null : useInput(state => state.draft)
+  const draft = useInput(state => state.draft)
   const bot = quote === null ? undefined : (quote.botId ? roster.byId[quote.botId] : undefined)
   const bar = useRef(null)
   // The quote goes into the composer once, as the reference chip the source defines.

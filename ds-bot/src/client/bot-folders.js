@@ -26,11 +26,13 @@ export function folderStatus({ statuses, hasQuestion, hasApproval, hasRoomWork, 
   return null
 }
 
-export function BotFolderSection({ folder, roster, actions, useUi, renderRow, rowProps = {}, markedUnread = {} }) {
+const useNoUi = () => false
+
+export function BotFolderSection({ folder, roster, actions, useUi = useNoUi, renderRow, rowProps = {}, markedUnread = {} }) {
   const key = `ds-bot:folder:${roster.workspaceId ?? roster.mainBotId}:${folder.id}`
   const [closed, setClosed] = useState(folder.collapsed === true)
   const panelId = useId()
-  const menuOpen = useUi ? useUi(value => value.menu?.kind === 'bot-folder' && value.menu.id === folder.id) : false
+  const menuOpen = useUi(value => value.menu?.kind === 'bot-folder' && value.menu.id === folder.id)
   const bots = useMemo(() => folder.botIds.map(id => roster.byId?.[id] ?? roster.bots?.find(bot => bot.id === id)).filter(bot => bot && !bot.hidden), [folder.botIds, roster])
   const ids = bots.map(currentPart)
   const activeSession = rowProps.useSessions ? rowProps.useSessions(list => ids.find(id => (list.byId[id]?.retainedBy?.mainView ?? 0) > 0) ?? '') : ''
@@ -39,14 +41,27 @@ export function BotFolderSection({ folder, roster, actions, useUi, renderRow, ro
     map.get(id)?.completionUnread === true || map.get(id)?.pendingInteraction !== undefined,
   ]))) : '[]'
   const workBits = rowProps.useWork ? rowProps.useWork(work => {
-    const botIds = new Set(folder.botIds)
-    const approval = (work.approvals ?? []).some(item => botIds.has(item.botId))
+    const botIds = new Set(bots.map(bot => bot.id))
+    const approval = (work.approvals ?? []).some(item => item.answerable !== false && botIds.has(item.botId))
     const roomWork = Object.values(work.rooms ?? {}).some(list => list.some(item => botIds.has(item.botId)))
     return `${approval ? 1 : 0}|${roomWork ? 1 : 0}`
   }) : '0|0'
-  const [hasApproval, hasRoomWork] = workBits.split('|').map(value => value === '1')
-  const status = folderStatus({ statuses: JSON.parse(statusBits), hasApproval, hasRoomWork, activeSession,
-    hasQuestion: bots.some(bot => roster.questions?.[currentPart(bot)] !== undefined),
+  const hasComputerAsk = rowProps.useComputer ? rowProps.useComputer(computer => {
+    const botIds = new Set(bots.map(bot => bot.id))
+    return Object.values(computer?.asks ?? {}).some(ask => botIds.has(ask.botId))
+  }) : false
+  const [hasWorkApproval, hasRoomWork] = workBits.split('|').map(value => value === '1')
+  const hasPendingCard = bots.some(bot => {
+    const part = currentPart(bot)
+    return roster.questions?.[part] !== undefined
+      || roster.views?.[part] !== undefined
+      || (roster.secretRequests?.[bot.id] ?? []).some(entry => entry.status === 'pending')
+      || (roster.connectorRequests?.[bot.id] ?? []).some(entry => entry.status === 'pending')
+      || (roster.mailRequests?.[bot.id] ?? []).some(entry => entry.status === 'pending')
+      || (roster.learning?.[bot.id] ?? []).length > 0
+  })
+  const status = folderStatus({ statuses: JSON.parse(statusBits), hasApproval: hasWorkApproval || hasComputerAsk, hasRoomWork, activeSession,
+    hasQuestion: hasPendingCard,
     markedUnread: bots.some(bot => markedUnread[bot.id] && currentPart(bot) !== activeSession) })
   const statusLabel = status === 'alert' ? t('Waiting for you') : status === 'working' ? t('Working') : status === 'unread' ? t('Unread') : ''
   useEffect(() => {

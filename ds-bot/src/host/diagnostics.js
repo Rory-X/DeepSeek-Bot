@@ -256,5 +256,9 @@ export function install(rt) {
     await writing
   }
 
-  Object.assign(rt, { warn, noteFailure: note, diagnostics: { report, logText, clear, entries, record } })
+  const issueFacts = () => {
+    const { botVersion, dshVersion, os } = facts()
+    return [botVersion && `DS Bot: ${botVersion}`, dshVersion && `DSH: ${dshVersion}`, `OS: ${os}`].filter(Boolean).join('\n')
+  }
+  Object.assign(rt, { warn, noteFailure: note, diagnostics: { report, logText, clear, entries, record, issueFacts } })
 }

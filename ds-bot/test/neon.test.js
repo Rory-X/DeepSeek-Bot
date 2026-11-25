@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
+import { apply } from '../index.js'
 import { McpHttpClient, mcpResultText } from '../src/host/mcp.js'
 import { createOAuthFlow, OAUTH_PREFIX } from '../src/host/oauth/flow.js'
 import { OAuthError } from '../src/host/oauth/client.js'
@@ -646,11 +650,6 @@ test('a write level that is not ready never takes the instance grant away', asyn
 // --- multi-instance through the real connector host -------------------------
 // These tests drive the framework the registry loads: two state keys, two grants, two tool
 // prefixes. They are the integration half of the module-level isolation above.
-
-const { apply } = await import('../index.js')
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = await import('node:fs')
-const { tmpdir } = await import('node:os')
-const { join } = await import('node:path')
 
 const INSTANCE_TEAM = {
   version: 1,
